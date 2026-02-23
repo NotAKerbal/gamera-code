@@ -66,6 +66,7 @@ npm run package:all
 ```
 
 Artifacts are written to `/Users/isaaccochran/Github/code-app/apps/desktop/main/dist`.
+The renderer build is copied into `/Users/isaaccochran/Github/code-app/apps/desktop/main/dist/renderer` during the main build so packaged apps can load `index.html` from inside `app.asar`.
 
 Host/tooling notes:
 
@@ -89,6 +90,12 @@ If it still fails after reinstall, verify the binary executes directly:
 ```
 
 If that direct command fails, Windows Security/AV likely quarantined or blocked it. Add an exclusion for the repo folder, reinstall dependencies, and re-run packaging.
+
+After pulling packaging changes, reinstall once so the pinned `app-builder-bin` dependency is present:
+
+```bash
+npm install
+```
 
 ## Testing
 

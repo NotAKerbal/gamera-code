@@ -27,6 +27,7 @@
     "lint": "npm run lint --workspace @code-app/main && npm run lint --workspace @code-app/renderer"
   },
   "devDependencies": {
+    "app-builder-bin": "5.0.0-alpha.10",
     "concurrently": "^9.0.1",
     "node-gyp": "^11.1.0"
   },
