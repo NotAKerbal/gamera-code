@@ -1,0 +1,14 @@
+node_modules
+dist
+build
+coverage
+*.log
+*.db
+*.db-journal
+.DS_Store
+.vscode
+.env
+.env.local
+.tmp
+.electron-gyp
+.cache-home

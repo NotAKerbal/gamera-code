@@ -1,0 +1,333 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: "Space Grotesk", "Avenir Next", sans-serif;
+}
+
+.btn-primary {
+  @apply rounded-lg border border-zinc-500 bg-zinc-100 px-3 py-2 text-sm font-semibold text-black transition hover:bg-white;
+}
+
+.btn-secondary {
+  @apply rounded-lg border border-border bg-surface px-3 py-2 text-sm text-slate-100 transition hover:bg-zinc-800;
+}
+
+.btn-ghost {
+  @apply rounded-lg bg-transparent px-2.5 py-1.5 text-xs text-slate-300 transition hover:bg-zinc-900 hover:text-white;
+}
+
+.btn-danger {
+  @apply rounded-lg border border-red-400 bg-red-500/15 px-3 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-500/30;
+}
+
+.input {
+  @apply w-full rounded-lg border border-border bg-black/25 px-3 py-2 text-sm outline-none ring-0 transition placeholder:text-muted focus:border-accent/80;
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.project-section {
+  @apply space-y-1;
+}
+
+.project-head {
+  @apply flex items-center gap-1;
+}
+
+.thread-add-btn {
+  @apply h-7 w-7 shrink-0 rounded-md bg-zinc-900/80 text-sm text-slate-300 transition hover:bg-zinc-800 hover:text-white;
+}
+
+.project-row {
+  @apply flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-left text-slate-300 transition hover:bg-zinc-800/85 hover:text-white hover:ring-1 hover:ring-zinc-600/80;
+}
+
+.project-row.active {
+  @apply bg-zinc-900 text-white;
+}
+
+.thread-create-pop {
+  @apply ml-8 mt-1 flex items-center gap-2;
+}
+
+.thread-list {
+  @apply ml-8 space-y-1;
+}
+
+.thread-empty {
+  @apply px-2 py-1 text-xs text-muted;
+}
+
+.thread-row {
+  @apply flex w-full items-center justify-between rounded-md px-2 py-1.5 text-slate-400 transition hover:bg-zinc-800/75 hover:text-slate-100 hover:ring-1 hover:ring-zinc-600/70;
+}
+
+.thread-row.active {
+  @apply bg-zinc-900 text-white;
+}
+
+.timeline-item {
+  @apply max-w-full;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.activity-group {
+  @apply rounded-lg bg-zinc-900/50 p-2;
+}
+
+.activity-group-commands {
+  @apply border border-zinc-700/50;
+}
+
+.activity-group-reads {
+  @apply border border-cyan-700/40 bg-cyan-900/10;
+}
+
+.activity-group-edits {
+  @apply border border-emerald-700/40 bg-emerald-900/10;
+}
+
+.activity-summary {
+  @apply flex cursor-pointer items-center gap-2 text-sm text-slate-200;
+}
+
+.activity-body {
+  @apply mt-2 space-y-2;
+}
+
+.activity-command {
+  @apply rounded-md bg-black/30 p-2;
+}
+
+.activity-command-summary {
+  @apply flex cursor-pointer items-center gap-2;
+}
+
+.activity-command-meaning {
+  @apply text-xs text-slate-200;
+}
+
+.activity-command-code {
+  @apply block max-w-full whitespace-pre-wrap break-words rounded bg-black/50 px-1.5 py-1 text-xs text-slate-100 [overflow-wrap:anywhere];
+}
+
+.activity-command-body {
+  @apply mt-2;
+}
+
+.activity-exploration {
+  @apply mb-1 text-xs text-slate-400;
+}
+
+.activity-command-output {
+  @apply whitespace-pre-wrap break-words text-xs text-slate-400 [overflow-wrap:anywhere];
+}
+
+.status-pill {
+  @apply ml-auto rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide;
+}
+
+.status-pill.completed {
+  @apply border-emerald-400/50 bg-emerald-500/15 text-emerald-300;
+}
+
+.status-pill.failed {
+  @apply border-red-400/50 bg-red-500/15 text-red-300;
+}
+
+.status-pill.in_progress {
+  @apply border-amber-400/50 bg-amber-500/15 text-amber-300;
+}
+
+.file-row {
+  @apply flex cursor-pointer items-start gap-2 rounded-md bg-black/25 px-2 py-1.5 text-xs;
+}
+
+.file-kind {
+  @apply shrink-0 rounded bg-zinc-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-100;
+}
+
+.file-kind.add {
+  @apply bg-emerald-700/80 text-emerald-100;
+}
+
+.file-kind.update {
+  @apply bg-blue-700/80 text-blue-100;
+}
+
+.file-kind.delete {
+  @apply bg-red-700/80 text-red-100;
+}
+
+.file-path {
+  @apply min-w-0 break-words text-slate-300 [overflow-wrap:anywhere];
+}
+
+.file-item {
+  @apply rounded-md;
+}
+
+.file-source {
+  @apply ml-auto shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300;
+}
+
+.file-stats {
+  @apply shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300;
+}
+
+.file-detail {
+  @apply mt-2 rounded bg-black/35 p-2;
+}
+
+.file-diff {
+  @apply max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-slate-300 [overflow-wrap:anywhere];
+}
+
+.attachment-chip {
+  @apply flex max-w-[260px] items-center gap-2 rounded-md border border-zinc-700/70 bg-black/45 px-2 py-1;
+}
+
+.attachment-thumb {
+  @apply h-9 w-9 rounded object-cover;
+}
+
+.attachment-meta {
+  @apply min-w-0 flex-1;
+}
+
+.attachment-remove {
+  @apply h-5 w-5 rounded bg-zinc-800 text-[11px] text-slate-300 transition hover:bg-zinc-700 hover:text-white;
+}
+
+.composer-toolbar {
+  @apply flex min-w-0 flex-1 flex-wrap items-center gap-1.5;
+}
+
+.composer-toolbar-row {
+  @apply w-full overflow-x-auto;
+}
+
+.composer-plus-btn {
+  @apply h-6 w-6 rounded bg-zinc-800/70 text-sm leading-none text-slate-300 transition hover:bg-zinc-700 hover:text-white disabled:opacity-50;
+}
+
+.composer-select {
+  @apply w-auto appearance-none bg-transparent px-1.5 py-1 pr-5 text-sm text-slate-400 outline-none transition hover:text-slate-200;
+  border: none;
+  flex: 0 0 auto;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5' stroke='%2394a3b8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.2rem center;
+  background-size: 10px 10px;
+}
+
+.composer-select:disabled {
+  @apply opacity-50;
+}
+
+.composer-toggle {
+  @apply inline-flex items-center gap-1 text-xs text-slate-400;
+}
+
+.composer-toggle input {
+  accent-color: #a1a1aa;
+}
+
+.message {
+  @apply rounded-xl border p-3;
+}
+
+.message.user {
+  @apply border-zinc-500 bg-zinc-900;
+}
+
+.message.assistant {
+  @apply border-border bg-black/25;
+}
+
+.assistant-md p {
+  @apply my-1;
+  overflow-wrap: anywhere;
+}
+
+.assistant-md ul {
+  @apply my-2 list-disc pl-6;
+}
+
+.assistant-md ol {
+  @apply my-2 list-decimal pl-6;
+}
+
+.assistant-md li {
+  @apply my-0.5;
+  overflow-wrap: anywhere;
+}
+
+.assistant-md blockquote {
+  @apply my-2 border-l-2 border-zinc-600 pl-3 text-slate-300;
+  overflow-wrap: anywhere;
+}
+
+.assistant-md h1,
+.assistant-md h2,
+.assistant-md h3,
+.assistant-md h4 {
+  @apply mb-1 mt-3 font-semibold text-white;
+}
+
+.assistant-md table {
+  @apply my-2 w-full border-collapse text-sm;
+  max-width: 100%;
+}
+
+.assistant-md pre,
+.assistant-md code {
+  max-width: 100%;
+}
+
+.assistant-md th,
+.assistant-md td {
+  @apply border border-zinc-700 px-2 py-1;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-color: #4b5563;
+}
+
+*::-webkit-scrollbar-track {
+  background-color: #111111;
+}

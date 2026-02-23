@@ -1,0 +1,35 @@
+{
+  "name": "code-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform desktop wrapper for Codex SDK",
+  "workspaces": [
+    "apps/desktop/shared",
+    "apps/desktop/main",
+    "apps/desktop/renderer"
+  ],
+  "scripts": {
+    "dev": "npm run ensure:native && concurrently -k \"npm:dev:shared\" \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev:shared": "npm run dev --workspace @code-app/shared",
+    "dev:main": "npm run dev --workspace @code-app/main",
+    "dev:renderer": "npm run dev --workspace @code-app/renderer",
+    "dev:electron": "npm run dev:electron --workspace @code-app/main",
+    "ensure:native": "npm run ensure:native --workspace @code-app/main",
+    "rebuild:native": "npm run rebuild:native --workspace @code-app/main",
+    "check:native": "npm run check:native --workspace @code-app/main",
+    "build": "npm run build --workspace @code-app/shared && npm run build --workspace @code-app/renderer && npm run build --workspace @code-app/main",
+    "test": "npm run test --workspace @code-app/main && npm run test --workspace @code-app/renderer",
+    "package": "npm run package --workspace @code-app/main",
+    "lint": "npm run lint --workspace @code-app/main && npm run lint --workspace @code-app/renderer"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "node-gyp": "^11.1.0"
+  },
+  "overrides": {
+    "node-gyp": "^11.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

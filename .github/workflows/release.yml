@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm install
+      - name: Build workspaces
+        run: npm run build
+      - name: Package desktop app
+        run: npm run package --workspace @code-app/main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
