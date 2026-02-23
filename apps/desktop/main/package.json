@@ -47,9 +47,17 @@
   "build": {
     "appId": "com.codeapp.desktop",
     "productName": "Code App",
+    "npmRebuild": true,
+    "beforeBuild": "./scripts/before-build.mjs",
     "files": [
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "**/node_modules/**/*.node",
+      "**/node_modules/**/*.exe",
+      "**/node_modules/**/*.dll"
     ],
     "extraResources": [
       {
