@@ -11,6 +11,7 @@ import { ProjectTerminalManager } from "./services/projectTerminalManager";
 import { InstallerManager } from "./services/installerManager";
 import { UpdaterService } from "./services/updaterService";
 import { registerIpcHandlers } from "./ipc/registerHandlers";
+import { applyRuntimePathToProcessEnv } from "./utils/runtimeEnv";
 
 let mainWindow: BrowserWindow | null = null;
 let previewPopoutWindow: BrowserWindow | null = null;
@@ -69,8 +70,8 @@ const createWindow = () => {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     // In production, __dirname points to ".../Resources/app.asar/dist".
-    // The renderer bundle is packaged under ".../Resources/app.asar/renderer/dist".
-    const indexPath = resolve(__dirname, "../renderer/dist/index.html");
+    // Renderer assets are copied to ".../Resources/app.asar/dist/renderer" at build time.
+    const indexPath = resolve(__dirname, "./renderer/index.html");
     mainWindow.loadFile(indexPath).catch((error) => {
       log.error("Failed to load renderer build", error);
     });
@@ -319,6 +320,7 @@ const navigatePreviewPopout = async (url: string, projectName?: string) => {
 
 const bootstrap = async () => {
   await app.whenReady();
+  applyRuntimePathToProcessEnv();
 
   const paths = createAppPaths(app.getPath("userData"));
   const db = initializeDatabase(paths.dbPath);

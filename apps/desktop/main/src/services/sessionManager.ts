@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import os from "node:os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as pty from "node-pty";
 import type {
@@ -17,6 +17,8 @@ import { PermissionEngine } from "./permissionEngine";
 import { loadCodexSdk, extractCodexResponseText } from "./codexSdk";
 import { sanitizePtyOutput } from "../utils/stripAnsi";
 import { createCommandRunner } from "../utils/commandRunner";
+import { withRuntimePath } from "../utils/runtimeEnv";
+import { resolveCodexBinaryPath } from "../utils/codexBinary";
 
 type UnknownRecord = Record<string, unknown>;
 const commandRunner = createCommandRunner();
@@ -186,6 +188,33 @@ const outputTail = (text: string, maxLines = 8) => {
   }
 
   return truncate(lines.slice(-maxLines).join("\n"));
+};
+
+const describeRuntimeError = (error: unknown) => {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const details: string[] = [];
+  const record = error as Error & { code?: string; path?: string; syscall?: string; cwd?: string };
+  if (record.code) {
+    details.push(`code=${record.code}`);
+  }
+  if (record.path) {
+    details.push(`path=${record.path}`);
+  }
+  if (record.syscall) {
+    details.push(`syscall=${record.syscall}`);
+  }
+  if (record.cwd) {
+    details.push(`cwd=${record.cwd}`);
+  }
+
+  if (details.length === 0) {
+    return error.message;
+  }
+
+  return `${error.message} (${details.join(", ")})`;
 };
 
 const extractCommandText = (item: UnknownRecord): string => {
@@ -392,6 +421,7 @@ interface ChangedFile extends DiffData {
 export class SessionManager {
   private readonly sessions = new Map<string, RunningSession>();
   private readonly gitRepoCache = new Map<string, boolean>();
+  private codexCwdQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: SessionManagerDeps) {}
 
@@ -515,7 +545,7 @@ export class SessionManager {
         this.emitSessionEvent(
           threadId,
           "stderr",
-          `Codex SDK run failed: ${error instanceof Error ? error.message : String(error)}`,
+          `Codex SDK run failed: ${describeRuntimeError(error)}`,
           {
             provider: "codex",
             phase: "failed"
@@ -613,7 +643,7 @@ export class SessionManager {
   private buildThreadEnv(threadId: string, projectId: string, provider: Thread["provider"]) {
     const settings = this.deps.repository.getSettings();
     const projectSettings = this.deps.repository.getProjectSettings(projectId);
-    const env = {
+    const env = withRuntimePath({
       ...process.env,
       ...projectSettings.envVars,
       FORCE_COLOR: "0",
@@ -622,7 +652,7 @@ export class SessionManager {
       TERM: "dumb",
       CODE_APP_THREAD_ID: threadId,
       CODE_APP_PROVIDER: provider
-    } as Record<string, string>;
+    } as Record<string, string>);
 
     return { settings, env };
   }
@@ -688,7 +718,11 @@ export class SessionManager {
   ): Promise<Session> {
     const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
     const { Codex } = await loadCodexSdk();
-    const codex = new Codex({ env });
+    const codexPathOverride = resolveCodexBinaryPath();
+    const codex = new Codex({
+      env,
+      ...(codexPathOverride ? { codexPathOverride } : {})
+    });
 
     const existingProviderThreadId = this.deps.repository.getProviderThreadId(thread.id, "codex");
 
@@ -706,9 +740,11 @@ export class SessionManager {
     const threadOptions = normalizeCodexThreadOptions(projectPath, options);
     const optionsKey = codexThreadOptionsKey(threadOptions);
 
-    const sdkThread = existingProviderThreadId
-      ? await resumeThread.call(codex, existingProviderThreadId, threadOptions)
-      : await startThread.call(codex, threadOptions);
+    const sdkThread = await this.withCodexProcessCwd(projectPath, async () => {
+      return existingProviderThreadId
+        ? await resumeThread.call(codex, existingProviderThreadId, threadOptions)
+        : await startThread.call(codex, threadOptions);
+    });
 
     const sdkThreadRecord = asRecord(sdkThread);
     if (!sdkThreadRecord) {
@@ -746,39 +782,81 @@ export class SessionManager {
       | undefined;
     const runMethod = session.sdkThread.run as ((prompt: CodexInput) => Promise<unknown>) | undefined;
 
-    if (runStreamed) {
-      await this.runCodexPromptStreamed(session, input, runStreamed);
-      return;
-    }
+    await this.withCodexProcessCwd(session.cwd, async () => {
+      if (runStreamed) {
+        await this.runCodexPromptStreamed(session, input, runStreamed);
+        return;
+      }
 
-    if (!runMethod) {
-      throw new Error("Codex SDK thread does not expose run() or runStreamed().");
-    }
+      if (!runMethod) {
+        throw new Error("Codex SDK thread does not expose run() or runStreamed().");
+      }
 
-    this.emitSessionEvent(session.threadId, "progress", "Running Codex SDK...", {
-      provider: "codex",
-      phase: "running"
+      this.emitSessionEvent(session.threadId, "progress", "Running Codex SDK...", {
+        provider: "codex",
+        phase: "running"
+      });
+
+      const runResult = await runMethod.call(session.sdkThread, input);
+      const providerThreadId = this.readSdkThreadId(session.sdkThread);
+      if (providerThreadId) {
+        this.deps.repository.setProviderThreadId(session.threadId, "codex", providerThreadId);
+      }
+
+      const content = sanitizePtyOutput(extractCodexResponseText(runResult));
+      if (content) {
+        this.persistAssistantChunk(session.threadId, content, {
+          provider: "codex",
+          category: "assistant_message",
+          final: true
+        });
+      } else {
+        this.emitSessionEvent(session.threadId, "status", "Codex SDK returned no text output.", {
+          provider: "codex",
+          phase: "completed"
+        });
+      }
     });
+  }
 
-    const runResult = await runMethod.call(session.sdkThread, input);
-    const providerThreadId = this.readSdkThreadId(session.sdkThread);
-    if (providerThreadId) {
-      this.deps.repository.setProviderThreadId(session.threadId, "codex", providerThreadId);
-    }
+  private withCodexProcessCwd<T>(targetCwd: string, operation: () => Promise<T>): Promise<T> {
+    const run = async () => {
+      let previousCwd: string | null = null;
+      try {
+        previousCwd = process.cwd();
+      } catch {
+        previousCwd = null;
+      }
 
-    const content = sanitizePtyOutput(extractCodexResponseText(runResult));
-    if (content) {
-      this.persistAssistantChunk(session.threadId, content, {
-        provider: "codex",
-        category: "assistant_message",
-        final: true
-      });
-    } else {
-      this.emitSessionEvent(session.threadId, "status", "Codex SDK returned no text output.", {
-        provider: "codex",
-        phase: "completed"
-      });
-    }
+      if (!existsSync(targetCwd) || !statSync(targetCwd).isDirectory()) {
+        throw new Error(`Invalid working directory: ${targetCwd}`);
+      }
+
+      if (previousCwd !== targetCwd) {
+        process.chdir(targetCwd);
+      }
+
+      try {
+        return await operation();
+      } finally {
+        if (previousCwd && previousCwd !== targetCwd && existsSync(previousCwd)) {
+          try {
+            if (statSync(previousCwd).isDirectory()) {
+              process.chdir(previousCwd);
+            }
+          } catch {
+            // Ignore cwd restore failures.
+          }
+        }
+      }
+    };
+
+    const queued = this.codexCwdQueue.then(run, run);
+    this.codexCwdQueue = queued.then(
+      () => undefined,
+      () => undefined
+    );
+    return queued;
   }
 
   private async runCodexPromptStreamed(

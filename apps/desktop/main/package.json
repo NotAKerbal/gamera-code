@@ -16,7 +16,7 @@
     "check:native": "node scripts/check-native.mjs",
     "ensure:native": "node scripts/ensure-native.mjs",
     "check:packaging": "node scripts/check-packaging-prereqs.mjs",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-renderer-dist.mjs && node scripts/copy-codex-binary.mjs",
     "package": "npm run check:packaging && electron-builder --publish never",
     "package:mac": "npm run check:packaging && electron-builder --mac dmg --publish never",
     "package:win": "npm run check:packaging && electron-builder --win nsis --publish never",
@@ -51,7 +51,6 @@
     "beforeBuild": "./scripts/before-build.mjs",
     "files": [
       "dist/**/*",
-      "../renderer/dist/**/*",
       "package.json",
       "node_modules/**/*"
     ],
@@ -59,6 +58,15 @@
       "**/node_modules/**/*.node",
       "**/node_modules/**/*.exe",
       "**/node_modules/**/*.dll"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/codex-bin",
+        "to": "codex-bin",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "directories": {
       "buildResources": "../resources"
