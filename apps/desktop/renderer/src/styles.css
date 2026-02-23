@@ -303,6 +303,26 @@ webview {
   @apply max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-slate-300 [overflow-wrap:anywhere];
 }
 
+.file-diff > div {
+  @apply block whitespace-pre-wrap break-words;
+}
+
+.diff-line-add {
+  @apply bg-emerald-900/20 text-emerald-300;
+}
+
+.diff-line-remove {
+  @apply bg-red-900/20 text-red-300;
+}
+
+.diff-line-hunk {
+  @apply text-cyan-300;
+}
+
+.diff-line-meta {
+  @apply text-slate-500;
+}
+
 .attachment-chip {
   @apply flex max-w-[260px] items-center gap-2 rounded-md border border-zinc-700/70 bg-black/45 px-2 py-1;
 }

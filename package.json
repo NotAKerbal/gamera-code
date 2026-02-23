@@ -9,7 +9,7 @@
     "apps/desktop/renderer"
   ],
   "scripts": {
-    "dev": "npm run ensure:native && concurrently -k \"npm:dev:shared\" \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev": "node scripts/dev.mjs",
     "dev:shared": "npm run dev --workspace @code-app/shared",
     "dev:main": "npm run dev --workspace @code-app/main",
     "dev:renderer": "npm run dev --workspace @code-app/renderer",

@@ -5,11 +5,11 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const appPath = resolve(__dirname, "..");
-const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+const nodeCmd = process.execPath;
 
-const runScript = (name) =>
+const runScript = (scriptFile) =>
   new Promise((resolvePromise) => {
-    const child = spawn(npmCmd, ["run", name], {
+    const child = spawn(nodeCmd, [resolve(__dirname, scriptFile)], {
       cwd: appPath,
       stdio: "inherit",
       env: process.env
@@ -21,19 +21,19 @@ const runScript = (name) =>
   });
 
 const run = async () => {
-  const initialCheck = await runScript("check:native");
+  const initialCheck = await runScript("check-native.mjs");
   if (initialCheck === 0) {
     process.stdout.write("Native modules already match Electron ABI.\n");
     return;
   }
 
   process.stdout.write("Native check failed. Rebuilding native modules for Electron...\n");
-  const rebuild = await runScript("rebuild:native");
+  const rebuild = await runScript("rebuild-native.mjs");
   if (rebuild !== 0) {
     process.exit(rebuild);
   }
 
-  const finalCheck = await runScript("check:native");
+  const finalCheck = await runScript("check-native.mjs");
   if (finalCheck !== 0) {
     process.stderr.write("Native modules still do not match Electron ABI after rebuild.\n");
     process.exit(finalCheck);

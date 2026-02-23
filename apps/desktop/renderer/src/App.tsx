@@ -384,7 +384,9 @@ const unwrapShellCommand = (command: string) => {
     /^\/bin\/(?:bash|zsh|sh)\s+-lc\s+([\s\S]+)$/i,
     /^(?:bash|zsh|sh)\s+-lc\s+([\s\S]+)$/i,
     /^cmd(?:\.exe)?\s+\/d\s+\/s\s+\/c\s+([\s\S]+)$/i,
-    /^powershell(?:\.exe)?\s+-command\s+([\s\S]+)$/i
+    /^"[^"]*(?:powershell|pwsh)(?:\.exe)?"\s+-command\s+([\s\S]+)$/i,
+    /^(?:(?:[a-z]:)?[^"' \t\r\n]*[\\/])?powershell(?:\.exe)?\s+-command\s+([\s\S]+)$/i,
+    /^(?:(?:[a-z]:)?[^"' \t\r\n]*[\\/])?pwsh(?:\.exe)?\s+-command\s+([\s\S]+)$/i
   ];
 
   while (current !== previous) {
@@ -411,13 +413,17 @@ const isExplorationCommand = (command: string) => {
 
   const patterns = [
     /^ls(?:\s|$)/,
+    /^(?:get-childitem|gci|dir)(?:\s|$)/,
+    /^get-location(?:\s|$)/,
     /^tree(?:\s|$)/,
     /^pwd(?:\s|$)/,
     /^rg(?:\s|$)/,
+    /^(?:select-string|sls)(?:\s|$)/,
     /^grep(?:\s|$)/,
     /^find(?:\s|$)/,
     /^fd(?:\s|$)/,
     /^cat(?:\s|$)/,
+    /^(?:get-content|gc|type)(?:\s|$)/,
     /^head(?:\s|$)/,
     /^tail(?:\s|$)/,
     /^stat(?:\s|$)/,
@@ -432,16 +438,19 @@ const isExplorationCommand = (command: string) => {
 const describeExploration = (command: string) => {
   const normalized = unwrapShellCommand(command).trim().toLowerCase();
 
-  if (/^ls(?:\s|$)|^tree(?:\s|$)|^pwd(?:\s|$)/.test(normalized)) {
+  if (/^ls(?:\s|$)|^(?:get-childitem|gci|dir)(?:\s|$)|^get-location(?:\s|$)|^tree(?:\s|$)|^pwd(?:\s|$)/.test(normalized)) {
     return "exploring the project folder structure and current working directory";
   }
-  if (/^rg\s+--files(?:\s|$)|^fd(?:\s|$)|^find(?:\s|$)/.test(normalized)) {
+  if (
+    /^rg\s+--files(?:\s|$)|^fd(?:\s|$)|^find(?:\s|$)/.test(normalized) ||
+    (/^(?:get-childitem|gci|dir)(?:\s|$)/.test(normalized) && /-recurse(?:\s|$)/.test(normalized) && /-file(?:\s|$)/.test(normalized))
+  ) {
     return "exploring which files exist in the repository";
   }
-  if (/^rg(?:\s|$)|^grep(?:\s|$)/.test(normalized)) {
+  if (/^rg(?:\s|$)|^grep(?:\s|$)|^(?:select-string|sls)(?:\s|$)/.test(normalized)) {
     return "exploring source text patterns and where code appears";
   }
-  if (/^cat(?:\s|$)|^head(?:\s|$)|^tail(?:\s|$)/.test(normalized)) {
+  if (/^cat(?:\s|$)|^(?:get-content|gc|type)(?:\s|$)|^head(?:\s|$)|^tail(?:\s|$)/.test(normalized)) {
     return "exploring file contents";
   }
   if (/^git\s+status(?:\s|$)|^git\s+diff(?:\s|$)|^git\s+show(?:\s|$)/.test(normalized)) {
@@ -767,6 +776,42 @@ const clipPath = (value: string, max = 44) => {
   return `...${value.slice(-max + 3)}`;
 };
 
+const buildFileGroupLabel = (files: ActivityFileChange[]) => {
+  if (files.length === 1) {
+    return `Edited ${basename(files[0]?.path ?? "file")}`;
+  }
+  return `File edits (${files.length})`;
+};
+
+const diffLineClass = (line: string) => {
+  if (line.startsWith("+++ ") || line.startsWith("--- ")) {
+    return "diff-line-meta";
+  }
+  if (line.startsWith("+")) {
+    return "diff-line-add";
+  }
+  if (line.startsWith("-")) {
+    return "diff-line-remove";
+  }
+  if (line.startsWith("@@")) {
+    return "diff-line-hunk";
+  }
+  return "";
+};
+
+const renderDiff = (diff: string) => {
+  const lines = diff.split("\n");
+  return (
+    <pre className="file-diff">
+      {lines.map((line, idx) => (
+        <div key={`${idx}-${line.slice(0, 32)}`} className={diffLineClass(line)}>
+          {line || " "}
+        </div>
+      ))}
+    </pre>
+  );
+};
+
 const tokenizeShell = (command: string) => {
   const matches = command.match(/"[^"]*"|'[^']*'|[^\s]+/g) ?? [];
   return matches.map((token) => stripOuterQuotes(token));
@@ -786,16 +831,19 @@ const commandMeaning = (command: string) => {
     return "Inspected repository state";
   }
 
-  if (/^ls(?:\s|$)|^tree(?:\s|$)|^pwd(?:\s|$)/.test(normalized)) {
+  if (/^ls(?:\s|$)|^(?:get-childitem|gci|dir)(?:\s|$)|^get-location(?:\s|$)|^tree(?:\s|$)|^pwd(?:\s|$)/.test(normalized)) {
     return "Inspected directory structure";
   }
-  if (/^rg\s+--files(?:\s|$)|^fd(?:\s|$)|^find(?:\s|$).*-type\s+f/.test(normalized)) {
+  if (
+    /^rg\s+--files(?:\s|$)|^fd(?:\s|$)|^find(?:\s|$).*-type\s+f/.test(normalized) ||
+    (/^(?:get-childitem|gci|dir)(?:\s|$)/.test(normalized) && /-recurse(?:\s|$)/.test(normalized) && /-file(?:\s|$)/.test(normalized))
+  ) {
     return "Listed files in the project";
   }
-  if (/^rg(?:\s|$)|^grep(?:\s|$)/.test(normalized)) {
+  if (/^rg(?:\s|$)|^grep(?:\s|$)|^(?:select-string|sls)(?:\s|$)/.test(normalized)) {
     return "Searched code for matching text";
   }
-  if (/^(cat|head|tail|stat)(?:\s|$)/.test(normalized)) {
+  if (/^(cat|head|tail|stat)(?:\s|$)|^(?:get-content|gc|type)(?:\s|$)/.test(normalized)) {
     return "Read file contents";
   }
   if (/^git\s+status(?:\s|$)/.test(normalized)) {
@@ -827,6 +875,10 @@ const extractPathLikeValue = (line: string) => {
   }
 
   const parts = line.split(/\s+/);
+  if (/^[d-][a-z-]{5}\s+\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}\s+[ap]m\s+/.test(line.toLowerCase()) && parts.length >= 5) {
+    return parts[parts.length - 1] ?? null;
+  }
+
   if (/^[\-dlpscb]/.test(parts[0] ?? "") && parts.length > 1) {
     return parts.slice(8).join(" ").trim() || null;
   }
@@ -845,7 +897,7 @@ const explorationStatsFromRuns = (runs: CommandRun[]) => {
     const normalized = command.toLowerCase();
     const lines = candidateLinesFromRun(run);
 
-    if (/^pwd(?:\s|$)/.test(normalized)) {
+    if (/^pwd(?:\s|$)|^get-location(?:\s|$)/.test(normalized)) {
       directoryKeys.add(`pwd:${run.id}`);
       const pwdLine = lines[0];
       if (pwdLine) {
@@ -853,7 +905,18 @@ const explorationStatsFromRuns = (runs: CommandRun[]) => {
       }
     }
 
-    if (/^ls(?:\s|$)/.test(normalized)) {
+    if (/^ls(?:\s|$)|^(?:get-childitem|gci|dir)(?:\s|$)/.test(normalized)) {
+      if (/-recurse(?:\s|$)/.test(normalized) && /-file(?:\s|$)/.test(normalized)) {
+        lines
+          .map((line) => extractPathLikeValue(line))
+          .filter((value): value is string => Boolean(value))
+          .forEach((value) => {
+            fileKeys.add(`listed:${value}`);
+            fileNames.add(value);
+          });
+        return;
+      }
+
       const lsDirs = lines
         .map((line) => extractPathLikeValue(line))
         .filter((value): value is string => Boolean(value))
@@ -893,7 +956,7 @@ const explorationStatsFromRuns = (runs: CommandRun[]) => {
         });
     }
 
-    if (/^(cat|head|tail|stat)(?:\s|$)/.test(normalized)) {
+    if (/^(cat|head|tail|stat)(?:\s|$)|^(?:get-content|gc|type)(?:\s|$)/.test(normalized)) {
       const baseSegment = command.split(/\||&&|\|\|/)[0]?.trim() ?? command;
       const tokens = tokenizeShell(baseSegment);
       const args = tokens.slice(1).filter((token) => token && !token.startsWith("-"));
@@ -2608,7 +2671,7 @@ export const App = () => {
                         <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
                           <details className="activity-group activity-group-edits">
                             <summary className="activity-summary">
-                              File edits ({item.files.length})
+                              {buildFileGroupLabel(item.files)}
                               <span className={`status-pill ${item.status}`}>{item.status.replace("_", " ")}</span>
                             </summary>
                             <div className="activity-body">
@@ -2627,7 +2690,7 @@ export const App = () => {
                                     </summary>
                                     <div className="file-detail">
                                       {file.diff ? (
-                                        <pre className="file-diff">{file.diff}</pre>
+                                        renderDiff(file.diff)
                                       ) : (
                                         <p className="text-xs text-slate-500">{file.diffError ?? "No diff available."}</p>
                                       )}
