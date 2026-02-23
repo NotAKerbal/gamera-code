@@ -11,6 +11,7 @@ import { ProjectTerminalManager } from "./services/projectTerminalManager";
 import { InstallerManager } from "./services/installerManager";
 import { UpdaterService } from "./services/updaterService";
 import { registerIpcHandlers } from "./ipc/registerHandlers";
+import { applyRuntimePathToProcessEnv } from "./utils/runtimeEnv";
 
 let mainWindow: BrowserWindow | null = null;
 let previewPopoutWindow: BrowserWindow | null = null;
@@ -319,6 +320,7 @@ const navigatePreviewPopout = async (url: string, projectName?: string) => {
 
 const bootstrap = async () => {
   await app.whenReady();
+  applyRuntimePathToProcessEnv();
 
   const paths = createAppPaths(app.getPath("userData"));
   const db = initializeDatabase(paths.dbPath);

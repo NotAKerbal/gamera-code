@@ -4,6 +4,7 @@ import type { InstallDetail, InstallStatus, Provider } from "@code-app/shared";
 import { Repository } from "./repository";
 import { createCommandRunner, type CommandRunner } from "../utils/commandRunner";
 import { loadCodexSdk } from "./codexSdk";
+import { resolveCodexBinaryPath } from "../utils/codexBinary";
 
 const existsInPath = async (
   runner: CommandRunner,
@@ -11,11 +12,18 @@ const existsInPath = async (
   versionArgs: string[] = ["--version"]
 ): Promise<{ ok: boolean; version?: string; message: string }> => {
   const result = await runner.run(command, versionArgs);
+  if (result.code !== 0 && process.platform !== "win32") {
+    const fallbackShell = process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+    const escaped = [command, ...versionArgs].map((token) => token.replace(/"/g, "\\\"")).join(" ");
+    const loginResult = await runner.run(fallbackShell, ["-lc", escaped]);
+    if (loginResult.code === 0) {
+      const version = (loginResult.stdout || loginResult.stderr).split("\n")[0]?.trim();
+      return { ok: true, version, message: "ok" };
+    }
+  }
+
   if (result.code !== 0) {
-    return {
-      ok: false,
-      message: result.stderr || `${command} not found`
-    };
+    return { ok: false, message: result.stderr || `${command} not found` };
   }
 
   const version = (result.stdout || result.stderr).split("\n")[0]?.trim();
@@ -88,7 +96,8 @@ export class InstallerManager {
 
     try {
       const { Codex } = await loadCodexSdk();
-      const codex = new Codex();
+      const codexPathOverride = resolveCodexBinaryPath();
+      const codex = new Codex(codexPathOverride ? { codexPathOverride } : {});
       const authStatusMethod = (codex as Record<string, unknown>).authStatus as (() => Promise<unknown>) | undefined;
 
       if (!authStatusMethod) {

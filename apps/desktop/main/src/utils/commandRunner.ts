@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { withRuntimePath } from "./runtimeEnv";
 
 export interface RunCommandResult {
   code: number;
@@ -21,7 +22,7 @@ export const createCommandRunner = (): CommandRunner => ({
       const child = spawn(command, args, {
         cwd,
         shell: process.platform === "win32",
-        env: process.env
+        env: withRuntimePath(process.env)
       });
 
       let stdout = "";
@@ -50,7 +51,7 @@ export const createCommandRunner = (): CommandRunner => ({
       const child = spawn(command, args, {
         cwd: options.cwd,
         shell: process.platform === "win32",
-        env: process.env
+        env: withRuntimePath(process.env)
       });
 
       let stdout = "";

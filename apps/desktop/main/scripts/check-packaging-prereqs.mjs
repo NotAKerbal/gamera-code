@@ -10,10 +10,18 @@ const repoRoot = join(workspaceRoot, "..", "..", "..");
 
 const isWindows = process.platform === "win32";
 const rendererEntry = join(workspaceRoot, "dist", "renderer", "index.html");
+const codexBinDir = join(workspaceRoot, "dist", "codex-bin");
 
 if (!existsSync(rendererEntry)) {
   console.error("Missing packaged renderer entry:");
   console.error(`  ${rendererEntry}`);
+  console.error("Run the root build first: npm run build");
+  process.exit(1);
+}
+
+if (!existsSync(codexBinDir)) {
+  console.error("Missing packaged Codex binary directory:");
+  console.error(`  ${codexBinDir}`);
   console.error("Run the root build first: npm run build");
   process.exit(1);
 }
