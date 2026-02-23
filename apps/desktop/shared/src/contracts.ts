@@ -18,6 +18,7 @@ export interface DesktopApi {
   projects: {
     list: () => Promise<Project[]>;
     create: (input: { name: string; path: string }) => Promise<Project>;
+    createInDirectory: (input: { name: string; parentDir: string }) => Promise<Project>;
     update: (input: { id: string; name?: string; path?: string }) => Promise<Project>;
     delete: (input: { id: string }) => Promise<{ ok: boolean }>;
     pickPath: () => Promise<string | null>;

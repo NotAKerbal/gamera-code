@@ -31,6 +31,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   permissionMode: "prompt_on_risk",
   binaryOverrides: {},
   envVars: {},
+  defaultProjectDirectory: "",
+  autoRenameThreadTitles: true,
   codexDefaults: {
     sandboxMode: "workspace-write",
     modelReasoningEffort: "medium",
@@ -50,6 +52,37 @@ const QUICK_PROMPTS = [
   "Audit recent changes and call out regressions or missing tests."
 ];
 const ACTIVITY_EVENT_PREFIX = "__codeapp_activity__:";
+const GENERIC_THREAD_TITLES = new Set(["new thread", "thread", "untitled"]);
+const THREAD_TITLE_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "how",
+  "i",
+  "if",
+  "in",
+  "into",
+  "is",
+  "it",
+  "my",
+  "of",
+  "on",
+  "or",
+  "please",
+  "run",
+  "that",
+  "the",
+  "this",
+  "to",
+  "want",
+  "with"
+]);
 
 const MODEL_SUGGESTIONS = ["codex-5.3", "codex-5.3-spark", "gpt-5-codex", "gpt-5", "o4-mini"];
 const SANDBOX_OPTIONS: Array<{ value: CodexSandboxMode; label: string }> = [
@@ -639,6 +672,48 @@ const basename = (value: string) => {
   return parts[parts.length - 1] ?? value;
 };
 
+const sanitizeProjectDirName = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  return trimmed.replace(/[\\/]/g, "").replace(/\s+/g, " ");
+};
+
+const toTitleCaseWord = (word: string) => (word.length > 1 ? `${word[0]!.toUpperCase()}${word.slice(1)}` : word.toUpperCase());
+
+const suggestThreadTitle = (prompt: string) => {
+  const normalized = prompt
+    .toLowerCase()
+    .replace(/[`*_#>()[\]{}:;,.!?/\\|-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return "Image review";
+  }
+
+  const tokens = normalized
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1 && !THREAD_TITLE_STOP_WORDS.has(token));
+  const deduped = Array.from(new Set(tokens));
+  const picked = deduped.slice(0, 3);
+
+  if (picked.length === 0) {
+    const fallback = normalized.split(" ").filter((token) => token.length > 0).slice(0, 3);
+    return fallback.map(toTitleCaseWord).join(" ");
+  }
+
+  if (picked.length === 1) {
+    const second = deduped[1] ?? "Task";
+    return [picked[0] ?? "Thread", second].map(toTitleCaseWord).join(" ");
+  }
+
+  return picked.map(toTitleCaseWord).join(" ");
+};
+
 const clipPath = (value: string, max = 44) => {
   if (value.length <= max) {
     return value;
@@ -834,6 +909,9 @@ export const App = () => {
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [creatingProject, setCreatingProject] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [updateMessage, setUpdateMessage] = useState<string>("");
   const [settingsEnvText, setSettingsEnvText] = useState("{}");
@@ -1125,7 +1203,7 @@ export const App = () => {
     });
   }, [activeThreadId]);
 
-  const addProject = async () => {
+  const openProject = async () => {
     const path = await api.projects.pickPath();
     if (!path) return;
 
@@ -1133,6 +1211,47 @@ export const App = () => {
     const project = await api.projects.create({ name, path });
     await loadProjects();
     setActiveProjectId(project.id);
+  };
+
+  const createProjectInDefaultDirectory = async () => {
+    const parentDir = settings.defaultProjectDirectory?.trim() ?? "";
+    if (!parentDir) {
+      setLogs((prev) => [...prev, "Set a default project directory in Settings first."]);
+      setShowSettings(true);
+      return;
+    }
+
+    setNewProjectName("");
+    setShowNewProjectModal(true);
+  };
+
+  const submitNewProject = async () => {
+    const parentDir = settings.defaultProjectDirectory?.trim() ?? "";
+    if (!parentDir) {
+      setLogs((prev) => [...prev, "Set a default project directory in Settings first."]);
+      setShowNewProjectModal(false);
+      setShowSettings(true);
+      return;
+    }
+
+    const projectName = sanitizeProjectDirName(newProjectName);
+    if (!projectName) {
+      setLogs((prev) => [...prev, "Project name is required and cannot contain path separators."]);
+      return;
+    }
+
+    setCreatingProject(true);
+    try {
+      const project = await api.projects.createInDirectory({ name: projectName, parentDir });
+      await loadProjects();
+      setActiveProjectId(project.id);
+      setShowNewProjectModal(false);
+      setNewProjectName("");
+    } catch (error) {
+      setLogs((prev) => [...prev, `Create project failed: ${String(error)}`]);
+    } finally {
+      setCreatingProject(false);
+    }
   };
 
   const createThread = async (projectId = activeProjectId, title = "New thread") => {
@@ -1171,6 +1290,22 @@ export const App = () => {
       dataUrl: attachment.dataUrl,
       size: attachment.size
     }));
+
+    if (
+      activeThread &&
+      !hasUserPromptInThread &&
+      (settings.autoRenameThreadTitles ?? true) &&
+      GENERIC_THREAD_TITLES.has(activeThread.title.trim().toLowerCase())
+    ) {
+      const nextTitle = suggestThreadTitle(trimmed);
+      try {
+        const updated = await api.threads.update({ id: activeThread.id, title: nextTitle });
+        setThreads((prev) => prev.map((thread) => (thread.id === updated.id ? updated : thread)));
+      } catch (error) {
+        setLogs((prev) => [...prev, `Auto rename failed: ${String(error)}`]);
+      }
+    }
+
     await api.sessions.sendInput({
       threadId: activeThreadId,
       input: trimmed,
@@ -1300,6 +1435,8 @@ export const App = () => {
     const saved = await api.settings.set({
       permissionMode: mode,
       envVars,
+      defaultProjectDirectory: settings.defaultProjectDirectory?.trim() ?? "",
+      autoRenameThreadTitles: settings.autoRenameThreadTitles ?? true,
       codexDefaults: composerOptions
     });
 
@@ -1469,8 +1606,11 @@ export const App = () => {
             <div className="text-sm font-semibold tracking-tight text-slate-100">Code App</div>
             <div className="no-drag flex items-center gap-2">
               {updateMessage && <span className="hidden text-xs text-slate-400 md:inline">{updateMessage}</span>}
-              <button className="btn-ghost" onClick={addProject}>
-                + Project
+              <button className="btn-ghost" onClick={createProjectInDefaultDirectory}>
+                New Project
+              </button>
+              <button className="btn-ghost" onClick={openProject}>
+                Open Project
               </button>
               <button className="btn-ghost" onClick={checkUpdates}>
                 Updates
@@ -2108,12 +2248,118 @@ export const App = () => {
               onChange={(event) => setSettingsEnvText(event.target.value)}
             />
 
+            <label className="mb-2 block text-sm text-muted">Default project directory</label>
+            <div className="mb-4 flex gap-2">
+              <input
+                className="input text-xs"
+                value={settings.defaultProjectDirectory ?? ""}
+                placeholder="/path/to/projects"
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    defaultProjectDirectory: event.target.value
+                  }))
+                }
+              />
+              <button
+                className="btn-secondary whitespace-nowrap"
+                onClick={async () => {
+                  const picked = await api.projects.pickPath();
+                  if (!picked) {
+                    return;
+                  }
+                  setSettings((prev) => ({
+                    ...prev,
+                    defaultProjectDirectory: picked
+                  }));
+                }}
+              >
+                Choose
+              </button>
+            </div>
+
+            <label className="mb-4 inline-flex items-center gap-2 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={settings.autoRenameThreadTitles ?? true}
+                onChange={(event) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    autoRenameThreadTitles: event.target.checked
+                  }))
+                }
+              />
+              Auto-rename new threads (2-3 words)
+            </label>
+
             <div className="flex justify-end gap-2">
               <button className="btn-secondary" onClick={() => setShowSettings(false)}>
                 Cancel
               </button>
               <button className="btn-primary" onClick={saveSettings}>
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNewProjectModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-4 shadow-neon">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">New Project</h3>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  if (creatingProject) {
+                    return;
+                  }
+                  setShowNewProjectModal(false);
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="mb-2 text-xs text-slate-400">{settings.defaultProjectDirectory}</p>
+            <label className="mb-2 block text-sm text-muted">Project name</label>
+            <input
+              autoFocus
+              className="input mb-4"
+              value={newProjectName}
+              placeholder="my-project"
+              onChange={(event) => setNewProjectName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (!creatingProject) {
+                    submitNewProject().catch((error) => {
+                      setLogs((prev) => [...prev, `Create project failed: ${String(error)}`]);
+                    });
+                  }
+                }
+              }}
+            />
+
+            <div className="flex justify-end gap-2">
+              <button
+                className="btn-secondary"
+                onClick={() => setShowNewProjectModal(false)}
+                disabled={creatingProject}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  submitNewProject().catch((error) => {
+                    setLogs((prev) => [...prev, `Create project failed: ${String(error)}`]);
+                  });
+                }}
+                disabled={creatingProject || !sanitizeProjectDirName(newProjectName)}
+              >
+                {creatingProject ? "Creating..." : "Create"}
               </button>
             </div>
           </div>

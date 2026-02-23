@@ -1,4 +1,6 @@
 import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from "electron";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import {
   IPC_CHANNELS,
   type CodexThreadOptions,
@@ -35,6 +37,19 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   ipcMain.handle(IPC_CHANNELS.projectsCreate, async (_event, input: { name: string; path: string }) => {
     return deps.repository.createProject(input);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.projectsCreateInDirectory,
+    async (_event, input: { name: string; parentDir: string }) => {
+      const trimmedName = input.name.trim();
+      if (!trimmedName) {
+        throw new Error("Project name is required.");
+      }
+      const targetPath = join(input.parentDir, trimmedName);
+      mkdirSync(targetPath);
+      return deps.repository.createProject({ name: trimmedName, path: targetPath });
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.projectsUpdate, async (_event, input: { id: string; name?: string; path?: string }) => {
     return deps.repository.updateProject(input);

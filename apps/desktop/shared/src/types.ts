@@ -111,6 +111,8 @@ export interface AppSettings {
   binaryOverrides: Partial<Record<Provider, string>>;
   envVars: Record<string, string>;
   codexDefaults: CodexThreadOptions;
+  defaultProjectDirectory?: string;
+  autoRenameThreadTitles?: boolean;
 }
 
 export interface UpdateCheckResult {

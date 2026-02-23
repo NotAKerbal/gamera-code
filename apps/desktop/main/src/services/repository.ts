@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   permissionMode: "prompt_on_risk",
   binaryOverrides: {},
   envVars: {},
+  defaultProjectDirectory: "",
+  autoRenameThreadTitles: true,
   codexDefaults: {
     sandboxMode: "workspace-write",
     modelReasoningEffort: "medium",

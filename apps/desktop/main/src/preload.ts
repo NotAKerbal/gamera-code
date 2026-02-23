@@ -5,6 +5,7 @@ const api: DesktopApi = {
   projects: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.projectsList),
     create: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreate, input),
+    createInDirectory: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreateInDirectory, input),
     update: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsUpdate, input),
     delete: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsDelete, input),
     pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath)

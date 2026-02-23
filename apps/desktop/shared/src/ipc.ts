@@ -1,6 +1,7 @@
 export const IPC_CHANNELS = {
   projectsList: "projects:list",
   projectsCreate: "projects:create",
+  projectsCreateInDirectory: "projects:createInDirectory",
   projectsUpdate: "projects:update",
   projectsDelete: "projects:delete",
   projectsPickPath: "projects:pickPath",
