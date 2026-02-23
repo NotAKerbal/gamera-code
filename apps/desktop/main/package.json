@@ -2,6 +2,12 @@
   "name": "@code-app/main",
   "version": "0.1.0",
   "private": true,
+  "description": "Main process for Code App desktop client",
+  "author": "Isaac Cochran",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NotAKerbal/code-app.git"
+  },
   "main": "dist/main.js",
   "scripts": {
     "dev": "tsc -p tsconfig.json --watch",
@@ -10,7 +16,11 @@
     "check:native": "node scripts/check-native.mjs",
     "ensure:native": "node scripts/ensure-native.mjs",
     "build": "tsc -p tsconfig.json",
-    "package": "electron-builder",
+    "package": "electron-builder --publish never",
+    "package:mac": "electron-builder --mac dmg --publish never",
+    "package:win": "electron-builder --win nsis --publish never",
+    "package:linux": "electron-builder --linux AppImage --publish never",
+    "package:all": "electron-builder --mac dmg --win nsis --linux AppImage --publish never",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit"
   },

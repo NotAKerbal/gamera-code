@@ -51,6 +51,28 @@ npm run build
 npm run package
 ```
 
+Target-specific packaging commands:
+
+```bash
+npm run package:mac    # produces .dmg
+npm run package:win    # produces NSIS .exe installer
+npm run package:linux  # produces .AppImage
+```
+
+Run all targets in one command (best for CI runners with full tooling):
+
+```bash
+npm run package:all
+```
+
+Artifacts are written to `/Users/isaaccochran/Github/code-app/apps/desktop/main/dist`.
+
+Host/tooling notes:
+
+- macOS `.dmg` builds are supported on macOS.
+- Windows `.exe` cross-builds from macOS/Linux may require Wine.
+- Linux `.AppImage` cross-builds are most reliable on Linux (or Linux CI/container).
+
 ## Testing
 
 ```bash

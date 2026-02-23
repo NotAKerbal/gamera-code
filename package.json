@@ -20,6 +20,10 @@
     "build": "npm run build --workspace @code-app/shared && npm run build --workspace @code-app/renderer && npm run build --workspace @code-app/main",
     "test": "npm run test --workspace @code-app/main && npm run test --workspace @code-app/renderer",
     "package": "npm run package --workspace @code-app/main",
+    "package:mac": "npm run package:mac --workspace @code-app/main",
+    "package:win": "npm run package:win --workspace @code-app/main",
+    "package:linux": "npm run package:linux --workspace @code-app/main",
+    "package:all": "npm run package:all --workspace @code-app/main",
     "lint": "npm run lint --workspace @code-app/main && npm run lint --workspace @code-app/renderer"
   },
   "devDependencies": {
