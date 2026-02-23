@@ -14,6 +14,8 @@ import { registerIpcHandlers } from "./ipc/registerHandlers";
 
 let mainWindow: BrowserWindow | null = null;
 let previewPopoutWindow: BrowserWindow | null = null;
+const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
+const PREVIEW_LOAD_BASE_DELAY_MS = 350;
 
 const isAllowedPreviewUrl = (value: string): boolean => {
   try {
@@ -59,6 +61,34 @@ const createWindow = () => {
   }
 };
 
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const isRetryablePreviewError = (error: unknown): boolean => {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.includes("ERR_CONNECTION_REFUSED") || text.includes("ERR_CONNECTION_RESET");
+};
+
+const loadPreviewUrlWithRetry = async (window: BrowserWindow, url: string) => {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= PREVIEW_LOAD_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      await window.loadURL(url);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryablePreviewError(error) || attempt === PREVIEW_LOAD_MAX_ATTEMPTS) {
+        break;
+      }
+      await delay(PREVIEW_LOAD_BASE_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+};
+
 const ensurePreviewPopout = async (url: string) => {
   if (!isAllowedPreviewUrl(url)) {
     throw new Error("Preview URL must target localhost or 127.0.0.1 over http/https.");
@@ -81,7 +111,7 @@ const ensurePreviewPopout = async (url: string) => {
       previewPopoutWindow = null;
     });
   }
-  await previewPopoutWindow.loadURL(url);
+  await loadPreviewUrlWithRetry(previewPopoutWindow, url);
   previewPopoutWindow.show();
   previewPopoutWindow.focus();
 };

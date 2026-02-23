@@ -934,7 +934,7 @@ export const App = () => {
   const [projectSettingsById, setProjectSettingsById] = useState<Record<string, ProjectSettings>>({});
   const [projectTerminalById, setProjectTerminalById] = useState<Record<string, ProjectTerminalState>>({});
   const [projectTerminalLinesById, setProjectTerminalLinesById] = useState<Record<string, string[]>>({});
-  const [activeProjectPreviewUrl, setActiveProjectPreviewUrl] = useState<string>("");
+  const [projectPreviewUrlById, setProjectPreviewUrlById] = useState<Record<string, string>>({});
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isPreviewPoppedOut, setIsPreviewPoppedOut] = useState(false);
   const [projectSettingsEnvText, setProjectSettingsEnvText] = useState("{}");
@@ -969,6 +969,10 @@ export const App = () => {
   const activeProjectTerminalLines = useMemo(
     () => (activeProjectId ? projectTerminalLinesById[activeProjectId] ?? [] : []),
     [activeProjectId, projectTerminalLinesById]
+  );
+  const activeProjectPreviewUrl = useMemo(
+    () => (activeProjectId ? projectPreviewUrlById[activeProjectId] ?? "" : ""),
+    [activeProjectId, projectPreviewUrlById]
   );
 
   const groupedThreads = useMemo(() => {
@@ -1022,6 +1026,12 @@ export const App = () => {
       ...prev,
       [projectId]: settingsForProject
     }));
+    if (settingsForProject.lastDetectedPreviewUrl) {
+      setProjectPreviewUrlById((prev) => ({
+        ...prev,
+        [projectId]: settingsForProject.lastDetectedPreviewUrl ?? ""
+      }));
+    }
     return settingsForProject;
   };
 
@@ -1187,6 +1197,10 @@ export const App = () => {
   useEffect(() => {
     const unsubscribe = api.projectTerminal.onEvent((event: ProjectTerminalEvent) => {
       if (event.type === "preview_url_detected") {
+        setProjectPreviewUrlById((prev) => ({
+          ...prev,
+          [event.projectId]: event.payload
+        }));
         setProjectSettingsById((prev) => {
           const existing = prev[event.projectId];
           if (!existing) {
@@ -1200,9 +1214,6 @@ export const App = () => {
             }
           };
         });
-        if (event.projectId === activeProjectId) {
-          setActiveProjectPreviewUrl(event.payload);
-        }
       }
 
       if (event.type === "stdout" || event.type === "stderr" || event.type === "status" || event.type === "exit") {
@@ -1248,17 +1259,26 @@ export const App = () => {
       .setActiveProject({ projectId: activeProjectId })
       .catch((error) => setLogs((prev) => [...prev, `Terminal switch failed: ${String(error)}`]));
     if (!activeProjectId) {
-      setActiveProjectPreviewUrl("");
       return;
     }
-
-    Promise.all([loadThreads(), loadProjectSettings(activeProjectId), loadProjectTerminalState(activeProjectId)])
+    const targetProjectId = activeProjectId;
+    let cancelled = false;
+    Promise.all([loadThreads(), loadProjectSettings(targetProjectId), loadProjectTerminalState(targetProjectId)])
       .then(([, projectSettings]) => {
-        setActiveProjectPreviewUrl(projectSettings.lastDetectedPreviewUrl ?? "");
+        if (cancelled) {
+          return;
+        }
+        setProjectPreviewUrlById((prev) => ({
+          ...prev,
+          [targetProjectId]: projectSettings.lastDetectedPreviewUrl ?? prev[targetProjectId] ?? ""
+        }));
       })
       .catch((error) => {
         setLogs((prev) => [...prev, `Load project failed: ${String(error)}`]);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -1429,7 +1449,12 @@ export const App = () => {
       ...prev,
       [activeProjectId]: saved
     }));
-    setActiveProjectPreviewUrl(saved.lastDetectedPreviewUrl ?? "");
+    if (saved.lastDetectedPreviewUrl) {
+      setProjectPreviewUrlById((prev) => ({
+        ...prev,
+        [activeProjectId]: saved.lastDetectedPreviewUrl ?? ""
+      }));
+    }
     setShowProjectSettings(false);
   };
 
