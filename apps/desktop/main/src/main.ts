@@ -17,6 +17,8 @@ import { applyRuntimePathToProcessEnv } from "./utils/runtimeEnv";
 let mainWindow: BrowserWindow | null = null;
 let previewPopoutWindow: BrowserWindow | null = null;
 let gitPopoutWindow: BrowserWindow | null = null;
+let webLinkWindow: BrowserWindow | null = null;
+let webLinkCurrentUrl: string | null = null;
 const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
 const PREVIEW_LOAD_BASE_DELAY_MS = 350;
 
@@ -27,6 +29,15 @@ const isAllowedPreviewUrl = (value: string): boolean => {
       return false;
     }
     return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+};
+
+const isAllowedWebLinkUrl = (value: string): boolean => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;
   }
@@ -612,6 +623,47 @@ const formatGitWindowTitle = (projectName?: string) => {
   return name ? `Git — ${name}` : "Git";
 };
 
+const formatWebLinkWindowTitle = (name?: string, projectName?: string) => {
+  const linkName = name?.trim() || "Website";
+  const project = projectName?.trim();
+  return project ? `${linkName} — ${project}` : linkName;
+};
+
+const ensureWebLinkWindow = async (url: string, name?: string, projectName?: string, focus = true) => {
+  if (!isAllowedWebLinkUrl(url)) {
+    throw new Error("Website URL must use http/https.");
+  }
+
+  if (!webLinkWindow || webLinkWindow.isDestroyed()) {
+    webLinkWindow = new BrowserWindow({
+      width: 1200,
+      height: 840,
+      minWidth: 720,
+      minHeight: 520,
+      title: formatWebLinkWindowTitle(name, projectName),
+      backgroundColor: "#0b0d10",
+      webPreferences: {
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false
+      }
+    });
+
+    webLinkWindow.on("closed", () => {
+      webLinkWindow = null;
+      webLinkCurrentUrl = null;
+    });
+  }
+
+  webLinkWindow.setTitle(formatWebLinkWindowTitle(name, projectName));
+  await loadPreviewUrlWithRetry(webLinkWindow, url);
+  webLinkCurrentUrl = url;
+  webLinkWindow.show();
+  if (focus) {
+    webLinkWindow.focus();
+  }
+};
+
 const ensureGitPopout = async (projectId: string, projectName?: string) => {
   if (!gitPopoutWindow || gitPopoutWindow.isDestroyed()) {
     gitPopoutWindow = new BrowserWindow({
@@ -746,6 +798,16 @@ const bootstrap = async () => {
         previewPopoutWindow.webContents.openDevTools({ mode: "detach" });
         return { ok: true };
       }
+    },
+    webLink: {
+      open: async (url: string, name?: string, projectName?: string, focus = true) => {
+        await ensureWebLinkWindow(url, name, projectName, focus);
+        return { ok: true };
+      },
+      getState: async () => ({
+        open: Boolean(webLinkWindow && !webLinkWindow.isDestroyed()),
+        url: webLinkCurrentUrl ?? undefined
+      })
     }
   });
   emitSessionEvent = handlers.emitSessionEvent;

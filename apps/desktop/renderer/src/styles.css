@@ -68,10 +68,23 @@ webview {
 
 .project-action-pop {
   @apply absolute right-0 top-8 z-20 flex min-w-36 flex-col gap-1 rounded-md border border-border bg-zinc-950 p-1 shadow-lg;
+  animation: dropdown-fade 120ms ease-out;
 }
 
 .branch-dropdown-pop {
   @apply rounded-md border border-border bg-zinc-950 shadow-lg;
+  animation: dropdown-fade 120ms ease-out;
+}
+
+@keyframes dropdown-fade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .branch-dropdown-list {
@@ -153,7 +166,7 @@ webview {
 }
 
 .thread-add-btn {
-  @apply h-7 w-7 shrink-0 rounded-md bg-zinc-900/80 text-sm text-slate-300 transition hover:bg-zinc-800 hover:text-white;
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-700/70 bg-zinc-900/80 text-sm text-slate-300 transition hover:bg-zinc-800 hover:text-white;
 }
 
 .project-row {
@@ -161,7 +174,7 @@ webview {
 }
 
 .project-row.active {
-  @apply bg-zinc-900 text-white;
+  @apply border border-zinc-500/70 bg-zinc-800 text-white shadow-[0_0_0_1px_rgba(113,113,122,0.35)];
 }
 
 .thread-create-pop {
@@ -182,6 +195,28 @@ webview {
 
 .thread-row.active {
   @apply bg-zinc-900 text-white;
+}
+
+.thread-activity-indicator {
+  @apply ml-2 inline-flex h-4 w-4 items-center justify-center;
+}
+
+.loading-ring {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  border-top-color: rgb(226, 232, 240);
+  animation: spin-ring 0.75s linear infinite;
+}
+
+@keyframes spin-ring {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .timeline-item {
@@ -371,6 +406,93 @@ webview {
 
 .composer-toggle input {
   accent-color: #a1a1aa;
+}
+
+.composer-toggle-btn {
+  @apply inline-flex items-center gap-1 rounded-md bg-black/20 px-2 py-1 text-xs text-slate-400 transition hover:text-slate-200 disabled:opacity-50;
+}
+
+.composer-toggle-btn.enabled {
+  @apply bg-emerald-500/15 text-emerald-200;
+}
+
+.composer-toggle-btn.enabled .composer-option-icon {
+  @apply text-emerald-300;
+}
+
+.composer-option {
+  @apply inline-flex items-center rounded-md bg-black/20 pr-1;
+}
+
+.composer-option-icon {
+  @apply ml-1.5 mr-0.5 text-[10px] text-slate-500;
+}
+
+.composer-dropdown-trigger {
+  @apply inline-flex items-center gap-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-slate-400 transition hover:text-slate-200 disabled:opacity-50;
+}
+
+.project-settings-toggle {
+  @apply flex w-full items-center gap-2 rounded-lg border border-border/80 bg-black/20 px-3 py-2 text-sm text-slate-200;
+}
+
+.project-settings-toggle + .project-settings-toggle {
+  @apply mt-2;
+}
+
+.project-settings-toggle-inline {
+  @apply justify-center text-[11px];
+}
+
+.project-settings-toggle > input[type="checkbox"],
+.project-settings-toggle > input[type="radio"] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  background: rgba(15, 23, 42, 0.5);
+  display: inline-grid;
+  place-content: center;
+  transition: all 120ms ease;
+}
+
+.project-settings-toggle > input[type="checkbox"] {
+  border-radius: 3px;
+}
+
+.project-settings-toggle > input[type="radio"] {
+  border-radius: 9999px;
+}
+
+.project-settings-toggle > input[type="checkbox"]::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  transform: scale(0);
+  background: rgb(226, 232, 240);
+  transition: transform 120ms ease;
+}
+
+.project-settings-toggle > input[type="radio"]::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  transform: scale(0);
+  background: rgb(226, 232, 240);
+  transition: transform 120ms ease;
+}
+
+.project-settings-toggle > input[type="checkbox"]:checked,
+.project-settings-toggle > input[type="radio"]:checked {
+  border-color: rgba(226, 232, 240, 0.9);
+  background: rgba(30, 41, 59, 0.8);
+}
+
+.project-settings-toggle > input[type="checkbox"]:checked::before,
+.project-settings-toggle > input[type="radio"]:checked::before {
+  transform: scale(1);
 }
 
 .message {

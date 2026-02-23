@@ -33,6 +33,10 @@ export interface DesktopApi {
     update: (input: { id: string; name?: string; path?: string }) => Promise<Project>;
     delete: (input: { id: string }) => Promise<{ ok: boolean }>;
     pickPath: () => Promise<string | null>;
+    openTerminal: (input: { projectId: string }) => Promise<{ ok: boolean }>;
+    openFiles: (input: { projectId: string }) => Promise<{ ok: boolean }>;
+    openWebLink: (input: { url: string; name?: string; projectName?: string; focus?: boolean }) => Promise<{ ok: boolean }>;
+    getWebLinkState: () => Promise<{ open: boolean; url?: string }>;
   };
   projectSettings: {
     get: (input: { projectId: string }) => Promise<ProjectSettings>;
@@ -40,6 +44,8 @@ export interface DesktopApi {
       projectId: string;
       envVars?: Record<string, string>;
       devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; useForPreview?: boolean }>;
+      webLinks?: Array<{ id: string; name: string; url: string }>;
+      browserEnabled?: boolean;
       defaultDevCommandId?: string;
       autoStartDevTerminal?: boolean;
       switchBehaviorOverride?: "start_stop" | "start_only" | "manual";

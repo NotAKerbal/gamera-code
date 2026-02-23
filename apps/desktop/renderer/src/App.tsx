@@ -10,6 +10,24 @@ import {
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  FaChevronDown,
+  FaCodeBranch,
+  FaCog,
+  FaEye,
+  FaExternalLinkAlt,
+  FaGlobeAmericas,
+  FaNetworkWired,
+  FaFolderOpen,
+  FaPaperPlane,
+  FaPlus,
+  FaStop,
+  FaSyncAlt,
+  FaTerminal,
+  FaTimes,
+  FaTrashAlt,
+  FaUserShield
+} from "react-icons/fa";
 import type {
   AppSettings,
   CodexApprovalMode,
@@ -26,6 +44,7 @@ import type {
   PromptAttachment,
   Project,
   ProjectSettings,
+  ProjectWebLink,
   ProjectTerminalEvent,
   ProjectTerminalState,
   ProjectTerminalSwitchBehavior,
@@ -305,6 +324,7 @@ type TimelineFileGroupItem = {
 };
 
 type TimelineItem = TimelineMessageItem | TimelineEventItem | TimelineCommandGroupItem | TimelineReadGroupItem | TimelineFileGroupItem;
+type ComposerDropdownKind = "sandbox" | "approval" | "websearch";
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== "object") {
@@ -334,6 +354,24 @@ const safeHref = (href?: string) => {
   }
 
   return "#";
+};
+
+const normalizeWebLinkUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 };
 
 const fileToDataUrl = (file: File) =>
@@ -1055,18 +1093,30 @@ export const App = () => {
   const [projectSettingsCommands, setProjectSettingsCommands] = useState<
     Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>
   >([]);
-  const [projectSettingsDefaultCommandId, setProjectSettingsDefaultCommandId] = useState("");
+  const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>([]);
   const [projectSettingsAutoStart, setProjectSettingsAutoStart] = useState(true);
+  const [projectSettingsBrowserEnabled, setProjectSettingsBrowserEnabled] = useState(true);
   const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">("");
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [branchDropdownPosition, setBranchDropdownPosition] = useState<{ bottom: number; left: number; width: number } | null>(null);
+  const [composerDropdown, setComposerDropdown] = useState<{
+    kind: ComposerDropdownKind;
+    bottom: number;
+    left: number;
+    width: number;
+  } | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
   const lastStartedOptionsKeyRef = useRef<string>("");
   const attachmentsRef = useRef<ComposerAttachment[]>([]);
   const imagePickerRef = useRef<HTMLInputElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previewWebviewRef = useRef<HTMLElement | null>(null);
   const branchTriggerRef = useRef<HTMLDivElement | null>(null);
   const branchDropdownMenuRef = useRef<HTMLDivElement | null>(null);
+  const composerSandboxTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const composerApprovalTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const composerWebSearchTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const composerDropdownMenuRef = useRef<HTMLDivElement | null>(null);
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
   const selectedProject = useMemo(
@@ -1082,6 +1132,12 @@ export const App = () => {
     () => (activeProjectId ? projectSettingsById[activeProjectId] : undefined),
     [activeProjectId, projectSettingsById]
   );
+  const activeProjectBrowserEnabled = activeProjectSettings?.browserEnabled ?? true;
+  const activeProjectWebLinks = useMemo(
+    () => activeProjectSettings?.webLinks ?? [],
+    [activeProjectSettings?.webLinks]
+  );
+  const isPreviewVisible = isPreviewOpen;
   const activeProjectTerminalState = useMemo(
     () => (activeProjectId ? projectTerminalById[activeProjectId] : undefined),
     [activeProjectId, projectTerminalById]
@@ -1134,6 +1190,9 @@ export const App = () => {
     return activeGitState.branches.find((branch) => branch.name === gitBranchInput) ?? null;
   }, [activeGitState, gitBranchInput]);
   const canCreateBranchFromInput = Boolean(gitBranchInput) && !/\s/.test(gitBranchInput) && !exactBranchMatch;
+  const sandboxLabel = SANDBOX_OPTIONS.find((option) => option.value === (composerOptions.sandboxMode ?? "workspace-write"))?.label ?? "Workspace write";
+  const approvalLabel = APPROVAL_OPTIONS.find((option) => option.value === (composerOptions.approvalPolicy ?? "on-request"))?.label ?? "On request";
+  const webSearchLabel = WEB_SEARCH_OPTIONS.find((option) => option.value === (composerOptions.webSearchMode ?? "cached"))?.label ?? "Cached";
   const importQuery = importProjectQuery.trim();
   const shouldShowCloneAction = isLikelyGitRepositoryUrl(importQuery);
   const importCandidatesFiltered = useMemo(() => {
@@ -1302,6 +1361,19 @@ export const App = () => {
     attachmentsRef.current = composerAttachments;
   }, [composerAttachments]);
 
+  useEffect(() => {
+    const textarea = composerTextareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    const minHeight = 56;
+    const maxHeight = 140;
+    textarea.style.height = "0px";
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [composer, activeThreadId]);
+
   useEffect(
     () => () => {
       attachmentsRef.current.forEach((attachment) => {
@@ -1434,6 +1506,16 @@ export const App = () => {
   }, [activeProjectId]);
 
   useEffect(() => {
+    if (activeProjectBrowserEnabled || !isPreviewPoppedOut) {
+      return;
+    }
+    api.preview.closePopout().catch((error) => {
+      setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]);
+    });
+    setIsPreviewPoppedOut(false);
+  }, [activeProjectBrowserEnabled, isPreviewPoppedOut]);
+
+  useEffect(() => {
     if (!isPreviewPoppedOut || !activeProjectPreviewUrl) {
       return;
     }
@@ -1454,6 +1536,7 @@ export const App = () => {
   useEffect(() => {
     setIsBranchDropdownOpen(false);
     setGitBranchSearch("");
+    setComposerDropdown(null);
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -1500,6 +1583,40 @@ export const App = () => {
   }, [isBranchDropdownOpen]);
 
   useEffect(() => {
+    if (!composerDropdown) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      const triggerRefs = [
+        composerSandboxTriggerRef.current,
+        composerApprovalTriggerRef.current,
+        composerWebSearchTriggerRef.current
+      ];
+      if (
+        !composerDropdownMenuRef.current?.contains(target) &&
+        !triggerRefs.some((ref) => ref?.contains(target))
+      ) {
+        setComposerDropdown(null);
+      }
+    };
+
+    const handleClose = () => {
+      setComposerDropdown(null);
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("resize", handleClose);
+    window.addEventListener("scroll", handleClose, true);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("resize", handleClose);
+      window.removeEventListener("scroll", handleClose, true);
+    };
+  }, [composerDropdown]);
+
+  useEffect(() => {
     api.projectTerminal
       .setActiveProject({ projectId: activeProjectId })
       .catch((error) => setLogs((prev) => [...prev, `Terminal switch failed: ${String(error)}`]));
@@ -1522,6 +1639,34 @@ export const App = () => {
           ...prev,
           [targetProjectId]: projectSettings.lastDetectedPreviewUrl ?? prev[targetProjectId] ?? ""
         }));
+        const projectName = projects.find((project) => project.id === targetProjectId)?.name;
+        const projectWebLinks = projectSettings.webLinks ?? [];
+        if (projectWebLinks.length > 0) {
+          api.projects
+            .getWebLinkState()
+            .then((state) => {
+              if (cancelled || !state.open || !state.url) {
+                return;
+              }
+              const currentUrl = normalizeWebLinkUrl(state.url);
+              if (!currentUrl) {
+                return;
+              }
+              const match = projectWebLinks.find((link) => normalizeWebLinkUrl(link.url) === currentUrl);
+              if (!match) {
+                return;
+              }
+              return api.projects.openWebLink({
+                url: match.url,
+                name: match.name,
+                projectName,
+                focus: false
+              });
+            })
+            .catch((error) => {
+              setLogs((prev) => [...prev, `Web link auto-switch failed: ${String(error)}`]);
+            });
+        }
         loadGitDiff(targetProjectId, gitState.files[0]?.path).catch((error) => {
           setLogs((prev) => [...prev, `Git diff load failed: ${String(error)}`]);
         });
@@ -1532,7 +1677,7 @@ export const App = () => {
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId]);
+  }, [activeProjectId, projects]);
 
   useEffect(() => {
     if (!activeThreadId) {
@@ -1724,8 +1869,15 @@ export const App = () => {
         useForPreview: command.useForPreview ?? index === 0
       }))
     );
-    setProjectSettingsDefaultCommandId(current.defaultDevCommandId ?? current.devCommands[0]?.id ?? "");
+    setProjectSettingsWebLinks(
+      (current.webLinks ?? []).map((link, index) => ({
+        id: link.id?.trim() || `link-${index + 1}`,
+        name: link.name ?? "",
+        url: link.url ?? ""
+      }))
+    );
     setProjectSettingsAutoStart(current.autoStartDevTerminal);
+    setProjectSettingsBrowserEnabled(current.browserEnabled ?? true);
     setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
     if (activeProjectId !== projectId) {
       setActiveProjectId(projectId);
@@ -1765,11 +1917,35 @@ export const App = () => {
       sanitizedCommands[0] = { ...sanitizedCommands[0], useForPreview: true };
     }
 
+    const sanitizedWebLinks: ProjectWebLink[] = [];
+    for (const [index, link] of projectSettingsWebLinks.entries()) {
+      const name = link.name.trim();
+      const rawUrl = link.url.trim();
+      if (!name && !rawUrl) {
+        continue;
+      }
+      if (!name || !rawUrl) {
+        setLogs((prev) => [...prev, `Project settings save failed: web link ${index + 1} needs both name and URL.`]);
+        return;
+      }
+      const normalizedUrl = normalizeWebLinkUrl(rawUrl);
+      if (!normalizedUrl) {
+        setLogs((prev) => [...prev, `Project settings save failed: web link "${name}" has an invalid URL.`]);
+        return;
+      }
+      sanitizedWebLinks.push({
+        id: link.id.trim() || `link-${crypto.randomUUID()}`,
+        name,
+        url: normalizedUrl
+      });
+    }
+
     const saved = await api.projectSettings.set({
       projectId: activeProjectId,
       envVars,
       devCommands: sanitizedCommands,
-      defaultDevCommandId: projectSettingsDefaultCommandId || sanitizedCommands[0]?.id,
+      webLinks: sanitizedWebLinks,
+      browserEnabled: projectSettingsBrowserEnabled,
       autoStartDevTerminal: projectSettingsAutoStart,
       switchBehaviorOverride: projectSwitchBehaviorOverride || undefined
     });
@@ -1977,7 +2153,7 @@ export const App = () => {
   };
 
   const popoutPreview = async () => {
-    if (!activeProjectPreviewUrl) {
+    if (!activeProjectPreviewUrl || !activeProjectBrowserEnabled) {
       return;
     }
     await api.preview.openPopout({ url: activeProjectPreviewUrl, projectName: activeProject?.name });
@@ -2009,6 +2185,53 @@ export const App = () => {
   const closeGitPopout = async () => {
     await api.git.closePopout();
     setIsGitPoppedOut(false);
+  };
+
+  const openProjectTerminal = async () => {
+    if (!activeProjectId) {
+      return;
+    }
+    await api.projects.openTerminal({ projectId: activeProjectId });
+  };
+
+  const openProjectFiles = async () => {
+    if (!activeProjectId) {
+      return;
+    }
+    await api.projects.openFiles({ projectId: activeProjectId });
+  };
+
+  const openProjectWebLink = async (link: ProjectWebLink, focus = true) => {
+    const normalized = normalizeWebLinkUrl(link.url);
+    if (!normalized) {
+      setLogs((prev) => [...prev, `Invalid web link URL for "${link.name}".`]);
+      return;
+    }
+
+    await api.projects.openWebLink({
+      url: normalized,
+      name: link.name.trim() || undefined,
+      projectName: selectedProject?.name,
+      focus
+    });
+  };
+
+  const openComposerDropdown = (kind: ComposerDropdownKind, trigger: HTMLButtonElement | null) => {
+    if (!trigger) {
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    setComposerDropdown((prev) => {
+      if (prev?.kind === kind) {
+        return null;
+      }
+      return {
+        kind,
+        bottom: Math.max(8, window.innerHeight - rect.top + 6),
+        left: Math.max(8, rect.left),
+        width: Math.max(180, rect.width)
+      };
+    });
   };
 
   const createThread = async (projectId = activeProjectId, title = "New thread") => {
@@ -2364,11 +2587,43 @@ export const App = () => {
             <div className="text-sm font-semibold tracking-tight text-slate-100">Code App</div>
             <div className="no-drag flex items-center gap-2">
               {updateMessage && <span className="hidden text-xs text-slate-400 md:inline">{updateMessage}</span>}
-              <button className="btn-ghost" onClick={checkUpdates}>
-                Updates
+              {activeProjectWebLinks.map((link) => (
+                <button
+                  key={link.id}
+                  className="btn-ghost"
+                  title={`${link.name || link.url} (${link.url})`}
+                  onClick={() =>
+                    openProjectWebLink(link).catch((error) => setLogs((prev) => [...prev, `Open web link failed: ${String(error)}`]))
+                  }
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <FaExternalLinkAlt className="text-[10px]" />
+                    {link.name || "Link"}
+                  </span>
+                </button>
+              ))}
+              <button className="btn-ghost" onClick={checkUpdates} title="Check for updates">
+                <span className="inline-flex items-center gap-1"><FaSyncAlt className="text-[10px]" />Updates</span>
               </button>
               <button
                 className="btn-ghost"
+                title="Open native terminal in project folder"
+                onClick={() => openProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Open terminal failed: ${String(error)}`]))}
+                disabled={!activeProjectId}
+              >
+                <span className="inline-flex items-center gap-1"><FaTerminal className="text-[10px]" />Terminal</span>
+              </button>
+              <button
+                className="btn-ghost"
+                title="Open project folder in file explorer"
+                onClick={() => openProjectFiles().catch((error) => setLogs((prev) => [...prev, `Open files failed: ${String(error)}`]))}
+                disabled={!activeProjectId}
+              >
+                <span className="inline-flex items-center gap-1"><FaFolderOpen className="text-[10px]" />Files</span>
+              </button>
+              <button
+                className="btn-ghost"
+                title={isPreviewOpen ? "Hide preview panel" : "Show preview panel"}
                 onClick={() => {
                   setIsPreviewOpen((prev) => {
                     const next = !prev;
@@ -2379,10 +2634,11 @@ export const App = () => {
                   });
                 }}
               >
-                {isPreviewOpen ? "Hide Preview" : "Preview"}
+                <span className="inline-flex items-center gap-1"><FaEye className="text-[10px]" />{isPreviewOpen ? "Hide Preview" : "Preview"}</span>
               </button>
               <button
                 className="btn-ghost"
+                title={isGitPanelOpen ? "Hide git panel" : "Show git panel"}
                 onClick={() => {
                   setIsGitPanelOpen((prev) => {
                     const next = !prev;
@@ -2393,20 +2649,17 @@ export const App = () => {
                   });
                 }}
               >
-                {isGitPanelOpen ? "Hide Git" : "Git"}
+                <span className="inline-flex items-center gap-1"><FaCodeBranch className="text-[10px]" />{isGitPanelOpen ? "Hide Git" : "Git"}</span>
               </button>
-              <button className="btn-ghost" onClick={() => openActiveProjectSettings().catch((error) => setLogs((prev) => [...prev, `Project settings open failed: ${String(error)}`]))}>
-                Project Settings
-              </button>
-              <button className="btn-secondary" onClick={() => setShowSettings(true)}>
-                Settings
+              <button className="btn-secondary" onClick={() => setShowSettings(true)} title="Open app settings">
+                <span className="inline-flex items-center gap-1"><FaCog className="text-[11px]" />Settings</span>
               </button>
             </div>
           </header>
 
           <div
             className={`grid flex-1 min-h-0 overflow-hidden ${
-              isPreviewOpen || isGitPanelOpen ? "grid-cols-[300px_minmax(0,1fr)_420px]" : "grid-cols-[300px_1fr]"
+              isPreviewVisible || isGitPanelOpen ? "grid-cols-[300px_minmax(0,1fr)_420px]" : "grid-cols-[300px_1fr]"
             }`}
           >
             <aside className="relative flex h-full min-h-0 flex-col border-r border-border/90 bg-[linear-gradient(180deg,#151515_0%,#121212_100%)] px-3 py-3">
@@ -2419,7 +2672,7 @@ export const App = () => {
 	                    title="Add project"
 	                    aria-label="Add project"
 	                  >
-	                    +
+	                    <FaPlus className="mx-auto text-[12px]" />
 	                  </button>
 	                  {isProjectMenuOpen && (
 	                    <div className="project-action-pop">
@@ -2467,7 +2720,7 @@ export const App = () => {
                           }}
                           title="Project settings"
                         >
-                          *
+                          <FaCog className="text-[12px]" />
                         </button>
                         <button
                           className="thread-add-btn"
@@ -2477,7 +2730,7 @@ export const App = () => {
                           }}
                           title="New thread"
                         >
-                          +
+                          <FaPlus className="text-[12px]" />
                         </button>
                       </div>
 
@@ -2514,7 +2767,13 @@ export const App = () => {
                             }}
                           >
                             <div className="truncate text-left text-sm">{thread.title}</div>
-                            <div className="ml-2 text-[11px] text-muted">{formatRelative(thread.updatedAt)}</div>
+                            {activeThreadId === thread.id && runState === "running" ? (
+                              <div className="thread-activity-indicator" aria-label="Agent running" title="Agent running">
+                                <span className="loading-ring" />
+                              </div>
+                            ) : (
+                              <div className="ml-2 text-[11px] text-muted">{formatRelative(thread.updatedAt)}</div>
+                            )}
                           </button>
                         ))}
                       </div>
@@ -2727,9 +2986,9 @@ export const App = () => {
                 </div>
               </section>
 
-              <section className="border-t border-border bg-black/40 px-5 py-3">
+              <section className="bg-transparent px-5 py-3">
                 <div
-                  className={`rounded-xl bg-panel/90 p-3 transition ${isDraggingFiles ? "ring-1 ring-zinc-500/80" : ""}`}
+                  className={`rounded-xl border border-border/70 bg-black/25 p-3 transition ${isDraggingFiles ? "ring-1 ring-zinc-500/80" : ""}`}
                   onDragOver={onDropZoneDragOver}
                   onDragLeave={onDropZoneDragLeave}
                   onDrop={onDropZoneDrop}
@@ -2764,8 +3023,9 @@ export const App = () => {
                             className="attachment-remove"
                             onClick={() => removeAttachment(attachment.id)}
                             disabled={runState === "running"}
+                            title={`Remove ${attachment.name}`}
                           >
-                            x
+                            <FaTimes className="mx-auto text-[10px]" />
                           </button>
                         </div>
                       ))}
@@ -2773,7 +3033,8 @@ export const App = () => {
                   )}
 
                   <textarea
-                    className="h-20 w-full resize-none bg-transparent font-sans text-sm outline-none"
+                    ref={composerTextareaRef}
+                    className="min-h-[56px] w-full resize-none bg-transparent font-sans text-sm leading-relaxed outline-none"
                     value={composer}
                     onChange={(event) => setComposer(event.target.value)}
                     onKeyDown={onComposerKeyDown}
@@ -2789,7 +3050,7 @@ export const App = () => {
                         disabled={!activeThreadId || runState === "running"}
                         onClick={() => imagePickerRef.current?.click()}
                       >
-                        +
+                        <FaPlus className="mx-auto text-[11px]" />
                       </button>
                       <select
                         className="composer-select"
@@ -2851,81 +3112,71 @@ export const App = () => {
                           ? !activeThreadId
                           : !activeThreadId || (!composer.trim() && composerAttachments.length === 0)
                       }
+                      title={runState === "running" ? "Stop current run" : "Send prompt"}
                     >
-                      {runState === "running" ? "Stop" : "Send"}
+                      <span className="inline-flex items-center gap-1.5">
+                        {runState === "running" ? <FaStop className="text-[11px]" /> : <FaPaperPlane className="text-[11px]" />}
+                        {runState === "running" ? "Stop" : "Send"}
+                      </span>
                     </button>
                   </div>
                 </div>
                 <div className="mt-2 composer-toolbar-row">
                   <div className="composer-toolbar">
-                    <select
-                      className="composer-select"
-                      value={composerOptions.sandboxMode ?? "workspace-write"}
-                      style={selectWidthStyle(composerOptions.sandboxMode ?? "workspace-write", 14)}
-                      onChange={(event) =>
-                        setComposerOptions((prev) => ({
-                          ...prev,
-                          sandboxMode: event.target.value as CodexSandboxMode
-                        }))
-                      }
-                      disabled={!activeThreadId || runState === "running"}
-                    >
-                      {SANDBOX_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label.toLowerCase()}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="composer-select"
-                      value={composerOptions.approvalPolicy ?? "on-request"}
-                      style={selectWidthStyle(composerOptions.approvalPolicy ?? "on-request", 10)}
-                      onChange={(event) =>
-                        setComposerOptions((prev) => ({
-                          ...prev,
-                          approvalPolicy: event.target.value as CodexApprovalMode
-                        }))
-                      }
-                      disabled={!activeThreadId || runState === "running"}
-                    >
-                      {APPROVAL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label.toLowerCase()}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="composer-select"
-                      value={composerOptions.webSearchMode ?? "cached"}
-                      style={selectWidthStyle(composerOptions.webSearchMode ?? "cached", 8)}
-                      onChange={(event) =>
-                        setComposerOptions((prev) => ({
-                          ...prev,
-                          webSearchMode: event.target.value as CodexWebSearchMode
-                        }))
-                      }
-                      disabled={!activeThreadId || runState === "running"}
-                    >
-                      {WEB_SEARCH_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label.toLowerCase()}
-                        </option>
-                      ))}
-                    </select>
-                    <label className="composer-toggle">
-                      <input
-                        type="checkbox"
-                        checked={composerOptions.networkAccessEnabled ?? true}
-                        onChange={(event) =>
-                          setComposerOptions((prev) => ({
-                            ...prev,
-                            networkAccessEnabled: event.target.checked
-                          }))
-                        }
+                    <span className="composer-option">
+                      <FaTerminal className="composer-option-icon" />
+                      <button
+                        ref={composerSandboxTriggerRef}
+                        className="composer-dropdown-trigger"
+                        onClick={() => openComposerDropdown("sandbox", composerSandboxTriggerRef.current)}
                         disabled={!activeThreadId || runState === "running"}
-                      />
+                        title="Command behavior (sandbox mode)"
+                      >
+                        <span>{sandboxLabel.toLowerCase()}</span>
+                        <FaChevronDown className="text-[10px] text-slate-500" />
+                      </button>
+                    </span>
+                    <span className="composer-option">
+                      <FaUserShield className="composer-option-icon" />
+                      <button
+                        ref={composerApprovalTriggerRef}
+                        className="composer-dropdown-trigger"
+                        onClick={() => openComposerDropdown("approval", composerApprovalTriggerRef.current)}
+                        disabled={!activeThreadId || runState === "running"}
+                        title="Permission policy"
+                      >
+                        <span>{approvalLabel.toLowerCase()}</span>
+                        <FaChevronDown className="text-[10px] text-slate-500" />
+                      </button>
+                    </span>
+                    <span className="composer-option">
+                      <FaGlobeAmericas className="composer-option-icon" />
+                      <button
+                        ref={composerWebSearchTriggerRef}
+                        className="composer-dropdown-trigger"
+                        onClick={() => openComposerDropdown("websearch", composerWebSearchTriggerRef.current)}
+                        disabled={!activeThreadId || runState === "running"}
+                        title="Web search mode"
+                      >
+                        <span>{webSearchLabel.toLowerCase()}</span>
+                        <FaChevronDown className="text-[10px] text-slate-500" />
+                      </button>
+                    </span>
+                    <button
+                      className={`composer-toggle-btn ${(composerOptions.networkAccessEnabled ?? true) ? "enabled" : ""}`}
+                      title="Allow or block network access"
+                      aria-pressed={composerOptions.networkAccessEnabled ?? true}
+                      onClick={() =>
+                        setComposerOptions((prev) => ({
+                          ...prev,
+                          networkAccessEnabled: !(prev.networkAccessEnabled ?? true)
+                        }))
+                      }
+                      disabled={!activeThreadId || runState === "running"}
+                    >
+                      <FaNetworkWired className="composer-option-icon" />
                       network
-                    </label>
+                    </button>
                     <div className="branch-inline" ref={branchTriggerRef}>
                       <button
                         className="branch-trigger"
@@ -2937,9 +3188,13 @@ export const App = () => {
                           setGitBranchSearch("");
                         }}
                         disabled={!activeProjectId || !activeGitState?.insideRepo || Boolean(gitBusyAction)}
+                        title="Switch branches"
                       >
-                        <span className="truncate">branch: {activeGitState?.branch ?? "(detached)"}</span>
-                        <span className="text-[10px] text-slate-500">v</span>
+                        <span className="inline-flex items-center gap-1 truncate">
+                          <FaCodeBranch className="shrink-0 text-[10px] text-slate-500" />
+                          branch: {activeGitState?.branch ?? "(detached)"}
+                        </span>
+                        <FaChevronDown className="text-[10px] text-slate-500" />
                       </button>
                     </div>
                   </div>
@@ -2961,9 +3216,9 @@ export const App = () => {
               )}
             </main>
 
-            {(isPreviewOpen || isGitPanelOpen) && (
+            {(isPreviewVisible || isGitPanelOpen) && (
               <aside className="flex min-h-0 flex-col border-l border-border/90 bg-black/55">
-                {isPreviewOpen && (
+                {isPreviewVisible && (
                   <>
                     <div className="flex items-center justify-between border-b border-border/80 px-3 py-2">
                       <div className="text-xs uppercase tracking-[0.16em] text-muted">Project Dev</div>
@@ -2977,15 +3232,16 @@ export const App = () => {
                         >
                           DevTools
                         </button>
-                        {!isPreviewPoppedOut ? (
-                          <button className="btn-ghost" onClick={() => popoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview pop-out failed: ${String(error)}`]))} disabled={!activeProjectPreviewUrl}>
-                            Pop Out
-                          </button>
-                        ) : (
-                          <button className="btn-ghost" onClick={() => closePopoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]))}>
-                            Close Pop-out
-                          </button>
-                        )}
+                        {activeProjectBrowserEnabled &&
+                          (!isPreviewPoppedOut ? (
+                            <button className="btn-ghost" onClick={() => popoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview pop-out failed: ${String(error)}`]))} disabled={!activeProjectPreviewUrl}>
+                              Pop Out
+                            </button>
+                          ) : (
+                            <button className="btn-ghost" onClick={() => closePopoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]))}>
+                              Close Pop-out
+                            </button>
+                          ))}
                       </div>
                     </div>
 
@@ -3055,7 +3311,7 @@ export const App = () => {
                           {activeProjectPreviewUrl || "Start dev command to detect preview URL."}
                         </div>
                         <div className="min-h-0 flex-1">
-                          {activeProjectPreviewUrl ? (
+                          {activeProjectBrowserEnabled && activeProjectPreviewUrl ? (
                             <webview
                               ref={previewWebviewRef}
                               src={activeProjectPreviewUrl}
@@ -3063,7 +3319,7 @@ export const App = () => {
                             />
                           ) : (
                             <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted">
-                              No preview URL detected yet.
+                              {activeProjectBrowserEnabled ? "No preview URL detected yet." : "Browser preview is disabled for this project."}
                             </div>
                           )}
                         </div>
@@ -3398,6 +3654,85 @@ export const App = () => {
           document.body
         )}
 
+      {composerDropdown &&
+        createPortal(
+          <div
+            ref={composerDropdownMenuRef}
+            className="branch-dropdown-pop"
+            style={{
+              position: "fixed",
+              bottom: `${composerDropdown.bottom}px`,
+              left: `${composerDropdown.left}px`,
+              width: `${composerDropdown.width}px`,
+              zIndex: 90
+            }}
+          >
+            <div className="branch-dropdown-list">
+              {composerDropdown.kind === "sandbox" &&
+                SANDBOX_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    className={
+                      (composerOptions.sandboxMode ?? "workspace-write") === option.value
+                        ? "branch-dropdown-row branch-dropdown-row-current"
+                        : "branch-dropdown-row"
+                    }
+                    onClick={() => {
+                      setComposerOptions((prev) => ({
+                        ...prev,
+                        sandboxMode: option.value
+                      }));
+                      setComposerDropdown(null);
+                    }}
+                  >
+                    <span className="truncate">{option.label.toLowerCase()}</span>
+                  </button>
+                ))}
+              {composerDropdown.kind === "approval" &&
+                APPROVAL_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    className={
+                      (composerOptions.approvalPolicy ?? "on-request") === option.value
+                        ? "branch-dropdown-row branch-dropdown-row-current"
+                        : "branch-dropdown-row"
+                    }
+                    onClick={() => {
+                      setComposerOptions((prev) => ({
+                        ...prev,
+                        approvalPolicy: option.value
+                      }));
+                      setComposerDropdown(null);
+                    }}
+                  >
+                    <span className="truncate">{option.label.toLowerCase()}</span>
+                  </button>
+                ))}
+              {composerDropdown.kind === "websearch" &&
+                WEB_SEARCH_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    className={
+                      (composerOptions.webSearchMode ?? "cached") === option.value
+                        ? "branch-dropdown-row branch-dropdown-row-current"
+                        : "branch-dropdown-row"
+                    }
+                    onClick={() => {
+                      setComposerOptions((prev) => ({
+                        ...prev,
+                        webSearchMode: option.value
+                      }));
+                      setComposerDropdown(null);
+                    }}
+                  >
+                    <span className="truncate">{option.label.toLowerCase()}</span>
+                  </button>
+                ))}
+            </div>
+          </div>,
+          document.body
+        )}
+
       {showSettings && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
@@ -3604,7 +3939,7 @@ export const App = () => {
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold">Project Settings</h3>
               <button className="btn-secondary" onClick={() => setShowProjectSettings(false)}>
-                Close
+                <span className="inline-flex items-center gap-1"><FaTimes className="text-[11px]" />Close</span>
               </button>
             </div>
 
@@ -3639,7 +3974,7 @@ export const App = () => {
                       )
                     }
                   />
-                  <label className="inline-flex items-center justify-center gap-1 rounded-lg border border-border bg-black/25 px-2 py-2 text-[11px] text-slate-300">
+                  <label className="project-settings-toggle project-settings-toggle-inline">
                     <input
                       type="checkbox"
                       checked={command.autoStart}
@@ -3649,9 +3984,9 @@ export const App = () => {
                         )
                       }
                     />
-                    Auto
+                    <span>Auto</span>
                   </label>
-                  <label className="inline-flex items-center justify-center gap-1 rounded-lg border border-border bg-black/25 px-2 py-2 text-[11px] text-slate-300">
+                  <label className="project-settings-toggle project-settings-toggle-inline">
                     <input
                       type="radio"
                       name="preview-command"
@@ -3662,7 +3997,7 @@ export const App = () => {
                         )
                       }
                     />
-                    Browser
+                    <span>Browser</span>
                   </label>
                   <button
                     className="btn-secondary px-0"
@@ -3670,7 +4005,7 @@ export const App = () => {
                     disabled={projectSettingsCommands.length <= 1}
                     title="Remove command"
                   >
-                    x
+                    <FaTrashAlt className="mx-auto text-[12px]" />
                   </button>
                 </div>
               ))}
@@ -3698,18 +4033,56 @@ export const App = () => {
               Mark each command that should auto-start when entering this project, and choose exactly one Browser command used for preview URL detection.
             </p>
 
-            <label className="mb-2 block text-sm text-muted">Default command</label>
-            <select
-              className="input mb-4 text-xs"
-              value={projectSettingsDefaultCommandId}
-              onChange={(event) => setProjectSettingsDefaultCommandId(event.target.value)}
-            >
-              {projectSettingsCommands.map((command) => (
-                <option key={command.id} value={command.id}>
-                  {command.name || command.id}
-                </option>
+            <label className="mb-2 block text-sm text-muted">Header web links</label>
+            <div className="mb-3 space-y-2">
+              {projectSettingsWebLinks.map((link, index) => (
+                <div key={link.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_28px]">
+                  <input
+                    className="input text-xs"
+                    value={link.name}
+                    placeholder="Name"
+                    onChange={(event) =>
+                      setProjectSettingsWebLinks((prev) =>
+                        prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
+                      )
+                    }
+                  />
+                  <input
+                    className="input text-xs"
+                    value={link.url}
+                    placeholder="https://example.com"
+                    onChange={(event) =>
+                      setProjectSettingsWebLinks((prev) =>
+                        prev.map((item, idx) => (idx === index ? { ...item, url: event.target.value } : item))
+                      )
+                    }
+                  />
+                  <button
+                    className="btn-secondary px-0"
+                    onClick={() => setProjectSettingsWebLinks((prev) => prev.filter((_, idx) => idx !== index))}
+                    title="Remove web link"
+                  >
+                    <FaTrashAlt className="mx-auto text-[12px]" />
+                  </button>
+                </div>
               ))}
-            </select>
+            </div>
+
+            <button
+              className="btn-secondary mb-4"
+              onClick={() =>
+                setProjectSettingsWebLinks((prev) => [
+                  ...prev,
+                  {
+                    id: `link-${crypto.randomUUID()}`,
+                    name: "",
+                    url: ""
+                  }
+                ])
+              }
+            >
+              Add web link
+            </button>
 
             <label className="mb-2 block text-sm text-muted">Switch behavior override</label>
             <select
@@ -3725,13 +4098,22 @@ export const App = () => {
               ))}
             </select>
 
-            <label className="mb-4 inline-flex items-center gap-2 text-sm text-slate-200">
+            <label className="project-settings-toggle mb-3">
               <input
                 type="checkbox"
                 checked={projectSettingsAutoStart}
                 onChange={(event) => setProjectSettingsAutoStart(event.target.checked)}
               />
-              Auto-start dev terminal for this project
+              <span>Auto-start dev terminal for this project</span>
+            </label>
+
+            <label className="project-settings-toggle mb-4">
+              <input
+                type="checkbox"
+                checked={projectSettingsBrowserEnabled}
+                onChange={(event) => setProjectSettingsBrowserEnabled(event.target.checked)}
+              />
+              <span>Enable in-app browser/preview for this project</span>
             </label>
 
             <div className="flex justify-end gap-2">

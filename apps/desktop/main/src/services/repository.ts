@@ -8,6 +8,7 @@ import type {
   Project,
   ProjectDevCommand,
   ProjectSettings,
+  ProjectWebLink,
   ProjectTerminalSwitchBehavior,
   Provider,
   Session,
@@ -88,6 +89,8 @@ interface ProjectSettingsRow {
   project_id: string;
   env_vars_json: string;
   dev_commands_json: string;
+  web_links_json: string;
+  browser_enabled: number;
   default_dev_command_id: string | null;
   auto_start_dev_terminal: number;
   switch_behavior_override: string | null;
@@ -187,9 +190,39 @@ const parseDevCommands = (value: unknown): ProjectDevCommand[] => {
   return normalized;
 };
 
+const parseWebLinks = (value: unknown): ProjectWebLink[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const parsed: ProjectWebLink[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    const url = typeof row.url === "string" ? row.url.trim() : "";
+    if (!id || !name || !url) {
+      continue;
+    }
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        continue;
+      }
+      parsed.push({ id, name, url: parsedUrl.toString() });
+    } catch {
+      continue;
+    }
+  }
+  return parsed.slice(0, 8);
+};
+
 const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
   let envVars: Record<string, string> = {};
   let devCommands: ProjectDevCommand[] = [DEFAULT_DEV_COMMAND];
+  let webLinks: ProjectWebLink[] = [];
   try {
     envVars = parseEnvVars(JSON.parse(row.env_vars_json));
   } catch {
@@ -200,12 +233,19 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
   } catch {
     devCommands = [DEFAULT_DEV_COMMAND];
   }
+  try {
+    webLinks = parseWebLinks(JSON.parse(row.web_links_json));
+  } catch {
+    webLinks = [];
+  }
   const switchBehavior = isSwitchBehavior(row.switch_behavior_override) ? row.switch_behavior_override : undefined;
 
   return {
     projectId: row.project_id,
     envVars,
     devCommands,
+    webLinks,
+    browserEnabled: row.browser_enabled !== 0,
     defaultDevCommandId: row.default_dev_command_id ?? undefined,
     autoStartDevTerminal: row.auto_start_dev_terminal === 1,
     switchBehaviorOverride: switchBehavior,
@@ -299,6 +339,8 @@ export class Repository {
       project_id: projectId,
       env_vars_json: JSON.stringify(this.getSettings().envVars),
       dev_commands_json: JSON.stringify([DEFAULT_DEV_COMMAND]),
+      web_links_json: JSON.stringify([]),
+      browser_enabled: 1,
       default_dev_command_id: DEFAULT_DEV_COMMAND.id,
       auto_start_dev_terminal: 1,
       switch_behavior_override: null,
@@ -313,6 +355,8 @@ export class Repository {
           project_id,
           env_vars_json,
           dev_commands_json,
+          web_links_json,
+          browser_enabled,
           default_dev_command_id,
           auto_start_dev_terminal,
           switch_behavior_override,
@@ -323,6 +367,8 @@ export class Repository {
           @project_id,
           @env_vars_json,
           @dev_commands_json,
+          @web_links_json,
+          @browser_enabled,
           @default_dev_command_id,
           @auto_start_dev_terminal,
           @switch_behavior_override,
@@ -340,6 +386,8 @@ export class Repository {
     projectId: string;
     envVars?: Record<string, string>;
     devCommands?: ProjectDevCommand[];
+    webLinks?: ProjectWebLink[];
+    browserEnabled?: boolean;
     defaultDevCommandId?: string;
     autoStartDevTerminal?: boolean;
     switchBehaviorOverride?: ProjectTerminalSwitchBehavior;
@@ -350,12 +398,14 @@ export class Repository {
       ? parseDevCommands(input.devCommands)
       : current.devCommands;
     const envVars = input.envVars ? parseEnvVars(input.envVars) : current.envVars;
+    const webLinks = input.webLinks ? parseWebLinks(input.webLinks) : current.webLinks;
     const fallbackDefaultCommandId = nextDevCommands[0]?.id;
     const requestedDefaultCommandId = input.defaultDevCommandId ?? current.defaultDevCommandId ?? fallbackDefaultCommandId;
     const validDefaultCommandId = nextDevCommands.some((cmd) => cmd.id === requestedDefaultCommandId)
       ? requestedDefaultCommandId
       : fallbackDefaultCommandId;
     const autoStartDevTerminal = input.autoStartDevTerminal ?? current.autoStartDevTerminal;
+    const browserEnabled = input.browserEnabled ?? current.browserEnabled;
 
     const now = new Date().toISOString();
     this.db
@@ -363,6 +413,8 @@ export class Repository {
         `UPDATE project_settings
          SET env_vars_json = @env_vars_json,
              dev_commands_json = @dev_commands_json,
+             web_links_json = @web_links_json,
+             browser_enabled = @browser_enabled,
              default_dev_command_id = @default_dev_command_id,
              auto_start_dev_terminal = @auto_start_dev_terminal,
              switch_behavior_override = @switch_behavior_override,
@@ -374,6 +426,8 @@ export class Repository {
         project_id: input.projectId,
         env_vars_json: JSON.stringify(envVars),
         dev_commands_json: JSON.stringify(nextDevCommands.slice(0, 10)),
+        web_links_json: JSON.stringify(webLinks),
+        browser_enabled: browserEnabled ? 1 : 0,
         default_dev_command_id: validDefaultCommandId ?? null,
         auto_start_dev_terminal: autoStartDevTerminal ? 1 : 0,
         switch_behavior_override: input.switchBehaviorOverride ?? current.switchBehaviorOverride ?? null,

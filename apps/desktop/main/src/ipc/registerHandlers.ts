@@ -1,4 +1,5 @@
-import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from "electron";
+import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
+import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import {
@@ -36,6 +37,10 @@ export interface HandlerDeps {
     navigate: (url: string, projectName?: string) => Promise<{ ok: boolean }>;
     openDevTools: () => Promise<{ ok: boolean }>;
   };
+  webLink: {
+    open: (url: string, name?: string, projectName?: string, focus?: boolean) => Promise<{ ok: boolean }>;
+    getState: () => Promise<{ open: boolean; url?: string }>;
+  };
 }
 
 export const registerIpcHandlers = (deps: HandlerDeps) => {
@@ -51,6 +56,30 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
       throw new Error("Project not found");
     }
     return project.path;
+  };
+
+  const openNativeTerminal = (cwd: string) => {
+    if (process.platform === "win32") {
+      spawn("cmd.exe", ["/c", "start", "", "cmd.exe", "/k", `cd /d "${cwd}"`], {
+        cwd,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false
+      }).unref();
+      return;
+    }
+
+    if (process.platform === "darwin") {
+      spawn("open", ["-a", "Terminal", cwd], {
+        cwd,
+        detached: true,
+        stdio: "ignore"
+      }).unref();
+      return;
+    }
+
+    // Linux fallback: this will open the folder if no terminal command is available.
+    shell.openPath(cwd).catch(() => undefined);
   };
 
   const pushSessionEvent = (event: SessionEvent) => {
@@ -169,6 +198,29 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return result.filePaths[0];
   });
 
+  ipcMain.handle(IPC_CHANNELS.projectsOpenTerminal, async (_event, input: { projectId: string }) => {
+    const projectPath = getProjectPath(input.projectId);
+    openNativeTerminal(projectPath);
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.projectsOpenFiles, async (_event, input: { projectId: string }) => {
+    const projectPath = getProjectPath(input.projectId);
+    await shell.openPath(projectPath);
+    return { ok: true };
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.projectsOpenWebLink,
+    async (_event, input: { url: string; name?: string; projectName?: string; focus?: boolean }) => {
+      return deps.webLink.open(input.url, input.name, input.projectName, input.focus);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.projectsGetWebLinkState, async () => {
+    return deps.webLink.getState();
+  });
+
   ipcMain.handle(IPC_CHANNELS.projectSettingsGet, async (_event, input: { projectId: string }) => {
     return deps.repository.getProjectSettings(input.projectId);
   });
@@ -181,6 +233,8 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
         projectId: string;
         envVars?: Record<string, string>;
         devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; useForPreview?: boolean }>;
+        webLinks?: Array<{ id: string; name: string; url: string }>;
+        browserEnabled?: boolean;
         defaultDevCommandId?: string;
         autoStartDevTerminal?: boolean;
         switchBehaviorOverride?: "start_stop" | "start_only" | "manual";

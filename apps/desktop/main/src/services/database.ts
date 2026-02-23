@@ -66,6 +66,8 @@ export const initializeDatabase = (dbPath: string) => {
       project_id TEXT PRIMARY KEY,
       env_vars_json TEXT NOT NULL,
       dev_commands_json TEXT NOT NULL,
+      web_links_json TEXT NOT NULL DEFAULT '[]',
+      browser_enabled INTEGER NOT NULL DEFAULT 1,
       default_dev_command_id TEXT,
       auto_start_dev_terminal INTEGER NOT NULL DEFAULT 1,
       switch_behavior_override TEXT,
@@ -108,6 +110,18 @@ export const initializeDatabase = (dbPath: string) => {
     CREATE INDEX IF NOT EXISTS idx_project_settings_updated
       ON project_settings(updated_at DESC);
   `);
+
+  const projectSettingsColumns = db
+    .prepare("PRAGMA table_info(project_settings)")
+    .all() as Array<{ name: string }>;
+  const hasBrowserEnabledColumn = projectSettingsColumns.some((column) => column.name === "browser_enabled");
+  if (!hasBrowserEnabledColumn) {
+    db.exec("ALTER TABLE project_settings ADD COLUMN browser_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasWebLinksColumn = projectSettingsColumns.some((column) => column.name === "web_links_json");
+  if (!hasWebLinksColumn) {
+    db.exec("ALTER TABLE project_settings ADD COLUMN web_links_json TEXT NOT NULL DEFAULT '[]';");
+  }
 
   return db;
 };

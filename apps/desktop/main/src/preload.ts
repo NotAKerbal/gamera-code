@@ -11,7 +11,11 @@ const api: DesktopApi = {
     cloneFromGitUrl: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCloneFromGitUrl, input),
     update: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsUpdate, input),
     delete: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsDelete, input),
-    pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath)
+    pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath),
+    openTerminal: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenTerminal, input),
+    openFiles: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenFiles, input),
+    openWebLink: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenWebLink, input),
+    getWebLinkState: () => ipcRenderer.invoke(IPC_CHANNELS.projectsGetWebLinkState)
   },
   projectSettings: {
     get: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSettingsGet, input),

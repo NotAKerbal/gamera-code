@@ -45,12 +45,20 @@ export interface ProjectDevCommand {
   useForPreview?: boolean;
 }
 
+export interface ProjectWebLink {
+  id: string;
+  name: string;
+  url: string;
+}
+
 export type ProjectTerminalSwitchBehavior = "start_stop" | "start_only" | "manual";
 
 export interface ProjectSettings {
   projectId: string;
   envVars: Record<string, string>;
   devCommands: ProjectDevCommand[];
+  webLinks: ProjectWebLink[];
+  browserEnabled: boolean;
   defaultDevCommandId?: string;
   autoStartDevTerminal: boolean;
   switchBehaviorOverride?: ProjectTerminalSwitchBehavior;
