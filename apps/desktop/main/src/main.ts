@@ -348,19 +348,41 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         background: #0d0d0d;
         color: #e5e7eb;
         height: 100vh;
+      }
+      .shell {
+        height: 100vh;
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+      }
+      .sidebar {
         display: flex;
         flex-direction: column;
+        border-right: 1px solid #2f2f2f;
+        background: #111;
       }
-      .bar {
+      .main {
+        min-width: 0;
+        display: grid;
+        grid-template-rows: 220px minmax(0, 1fr);
+      }
+      .section {
+        padding: 10px;
+        border-bottom: 1px solid #2f2f2f;
+      }
+      .section-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #94a3b8;
+        margin-bottom: 8px;
+      }
+      .row {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 10px;
-        border-bottom: 1px solid #2f2f2f;
-        background: #111;
       }
       .btn {
-        height: 30px;
+        min-height: 30px;
         border: 1px solid #3a3a3a;
         border-radius: 8px;
         background: #191919;
@@ -376,6 +398,9 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         opacity: 0.5;
         cursor: default;
       }
+      .btn.secondary {
+        background: #151515;
+      }
       .branch-input {
         flex: 1;
         min-width: 120px;
@@ -387,20 +412,26 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         padding: 0 10px;
         font-size: 12px;
       }
-      .meta {
+      .commit-input {
+        width: 100%;
+        min-height: 64px;
+        resize: vertical;
+        border: 1px solid #3a3a3a;
+        border-radius: 8px;
+        background: #161616;
+        color: #e5e7eb;
         padding: 8px 10px;
-        border-bottom: 1px solid #2f2f2f;
+        font-size: 12px;
+        line-height: 1.35;
+        white-space: pre-wrap;
+      }
+      .meta {
         font-size: 12px;
         color: #cbd5e1;
-      }
-      .layout {
-        flex: 1;
-        min-height: 0;
-        display: grid;
-        grid-template-rows: 180px minmax(0, 1fr);
+        min-height: 36px;
       }
       .files {
-        border-bottom: 1px solid #2f2f2f;
+        flex: 1;
         overflow: auto;
         padding: 8px 10px;
       }
@@ -425,6 +456,13 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       .status {
         font-size: 11px;
         color: #94a3b8;
+      }
+      .action-status {
+        margin-top: 8px;
+        font-size: 11px;
+        color: #94a3b8;
+        min-height: 16px;
+        white-space: pre-wrap;
       }
       .diff-wrap {
         min-height: 0;
@@ -451,27 +489,60 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         white-space: pre-wrap;
         word-break: break-word;
       }
+      .spinner {
+        width: 10px;
+        height: 10px;
+        border-radius: 9999px;
+        border: 2px solid rgba(148, 163, 184, 0.35);
+        border-top-color: rgb(226, 232, 240);
+        animation: spin-ring 0.75s linear infinite;
+        display: inline-block;
+      }
+      @keyframes spin-ring {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
     </style>
   </head>
   <body>
-    <div class="bar">
-      <button id="refreshBtn" class="btn">Refresh</button>
-      <button id="fetchBtn" class="btn">Fetch</button>
-      <button id="pullBtn" class="btn">Pull</button>
-      <button id="pushBtn" class="btn">Push</button>
-      <button id="syncBtn" class="btn">Sync</button>
-    </div>
-    <div class="bar" style="padding-top: 0; border-bottom: 1px solid #2f2f2f;">
-      <input id="branchInput" class="branch-input" list="branches" placeholder="Search or type branch" />
-      <datalist id="branches"></datalist>
-      <button id="switchBtn" class="btn">Switch/Create</button>
-    </div>
-    <div id="meta" class="meta">Loading git state...</div>
-    <div class="layout">
-      <div id="files" class="files"></div>
-      <div class="diff-wrap">
-        <div id="diffTitle" class="diff-title">Diff</div>
-        <pre id="diff">Loading...</pre>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="section">
+          <div class="section-title">Repository</div>
+          <div id="meta" class="meta">Loading git state...</div>
+          <div class="row" style="margin-top: 8px;">
+            <button id="refreshBtn" class="btn secondary">Refresh</button>
+            <button id="syncBtn" class="btn">Sync</button>
+            <button id="stageBtn" class="btn secondary">Stage All</button>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Branch</div>
+          <div class="row">
+            <input id="branchInput" class="branch-input" list="branches" placeholder="Search or type branch" />
+            <datalist id="branches"></datalist>
+            <button id="switchBtn" class="btn">Switch/Create</button>
+          </div>
+        </div>
+        <div class="section" style="border-bottom: 0;">
+          <div class="section-title">Commit</div>
+          <textarea id="commitInput" class="commit-input" placeholder="Commit message (optional: auto-generate if empty)"></textarea>
+          <div class="row" style="margin-top: 8px;">
+            <button id="commitBtn" class="btn">Commit</button>
+          </div>
+          <div id="actionStatus" class="action-status"></div>
+        </div>
+      </aside>
+      <div class="main">
+        <div id="files" class="files"></div>
+        <div class="diff-wrap">
+          <div id="diffTitle" class="diff-title">Diff</div>
+          <pre id="diff">Loading...</pre>
+        </div>
       </div>
     </div>
     <script>
@@ -487,12 +558,28 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       const branchInput = document.getElementById("branchInput");
       const branchList = document.getElementById("branches");
       const syncBtn = document.getElementById("syncBtn");
+      const stageBtn = document.getElementById("stageBtn");
+      const commitBtn = document.getElementById("commitBtn");
+      const commitInput = document.getElementById("commitInput");
+      const actionStatus = document.getElementById("actionStatus");
 
       const setBusy = (busy) => {
         const buttons = Array.from(document.querySelectorAll("button"));
         buttons.forEach((button) => {
           button.disabled = busy;
         });
+      };
+
+      const setActionStatus = (message) => {
+        actionStatus.textContent = message || "";
+      };
+
+      const setSyncBusy = (busy) => {
+        if (busy) {
+          syncBtn.innerHTML = '<span class="spinner"></span> Syncing...';
+        } else {
+          syncBtn.textContent = "Sync";
+        }
       };
 
       const fileStatusText = (file) => {
@@ -540,6 +627,8 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         if (!activeState || !activeState.insideRepo) {
           meta.textContent = activeProjectName + " is not a git repository.";
           syncBtn.style.display = "none";
+          stageBtn.style.display = "none";
+          commitBtn.disabled = true;
           return;
         }
         meta.textContent =
@@ -548,6 +637,8 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
           " | Ahead " + activeState.ahead + " Behind " + activeState.behind +
           " | " + activeState.stagedCount + " staged, " + activeState.unstagedCount + " unstaged, " + activeState.untrackedCount + " untracked";
         syncBtn.style.display = activeState.ahead > 0 || activeState.behind > 0 ? "" : "none";
+        stageBtn.style.display = "";
+        commitBtn.disabled = activeState.stagedCount === 0;
       };
 
       const loadDiff = async () => {
@@ -591,16 +682,53 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         }
       };
 
+      const commitChanges = async () => {
+        if (!activeState?.insideRepo) return;
+        setBusy(true);
+        setActionStatus("");
+        try {
+          const result = await api.git.commit({
+            projectId: activeProjectId,
+            message: commitInput.value.trim() || undefined
+          });
+          if (result.ok) {
+            if (result.autoGenerated) {
+              setActionStatus("Committed with auto-generated message.");
+            } else {
+              setActionStatus("Commit created.");
+            }
+            commitInput.value = "";
+          } else {
+            setActionStatus(result.stderr || "Commit failed.");
+          }
+          await loadState();
+        } finally {
+          setBusy(false);
+        }
+      };
+
       document.getElementById("refreshBtn").addEventListener("click", () => loadState());
-      document.getElementById("fetchBtn").addEventListener("click", () => runAction(() => api.git.fetch({ projectId: activeProjectId })));
-      document.getElementById("pullBtn").addEventListener("click", () => runAction(() => api.git.pull({ projectId: activeProjectId })));
-      document.getElementById("pushBtn").addEventListener("click", () => runAction(() => api.git.push({ projectId: activeProjectId })));
-      document.getElementById("syncBtn").addEventListener("click", () => runAction(() => api.git.sync({ projectId: activeProjectId })));
+      document.getElementById("syncBtn").addEventListener("click", async () => {
+        setSyncBusy(true);
+        try {
+          await runAction(() => api.git.sync({ projectId: activeProjectId }));
+        } finally {
+          setSyncBusy(false);
+        }
+      });
+      document.getElementById("stageBtn").addEventListener("click", () => runAction(() => api.git.stage({ projectId: activeProjectId })));
+      document.getElementById("commitBtn").addEventListener("click", () => commitChanges());
       document.getElementById("switchBtn").addEventListener("click", () => switchOrCreateBranch());
       branchInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
           event.preventDefault();
           switchOrCreateBranch();
+        }
+      });
+      commitInput.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          commitChanges();
         }
       });
 
@@ -609,6 +737,8 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         activeProjectName = String(projectName || "Project");
         selectedPath = "";
         branchInput.value = "";
+        commitInput.value = "";
+        setActionStatus("");
         await loadState();
       };
 

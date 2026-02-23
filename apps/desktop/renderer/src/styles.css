@@ -197,6 +197,51 @@ webview {
   @apply bg-zinc-900 text-white;
 }
 
+.thread-row-complete-flash {
+  animation: thread-complete-flash 1.4s ease-out;
+}
+
+.thread-row.archived {
+  @apply opacity-80;
+}
+
+.thread-row-actions {
+  @apply ml-2 flex items-center gap-1;
+}
+
+.thread-row-time {
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.thread-row-action-btn {
+  @apply inline-flex h-5 w-5 items-center justify-center rounded bg-zinc-800/80 text-slate-400 transition hover:bg-zinc-700 hover:text-white;
+  opacity: 0;
+  transform: translateX(5px);
+  pointer-events: none;
+}
+
+.thread-row:hover .thread-row-action-btn,
+.thread-row:focus-visible .thread-row-action-btn,
+.thread-row:focus-within .thread-row-action-btn {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.thread-row:hover .thread-row-time,
+.thread-row:focus-visible .thread-row-time,
+.thread-row:focus-within .thread-row-time {
+  transform: translateX(-8px);
+}
+
+.thread-archived-toggle {
+  @apply mt-1 w-full rounded-md bg-black/25 px-2 py-1 text-left text-[11px] text-slate-400 transition hover:bg-zinc-800/70 hover:text-slate-200;
+}
+
+.thread-archived-toggle:disabled {
+  @apply cursor-not-allowed opacity-45 hover:bg-black/25 hover:text-slate-400;
+}
+
 .thread-activity-indicator {
   @apply ml-2 inline-flex h-4 w-4 items-center justify-center;
 }
@@ -216,6 +261,67 @@ webview {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes thread-complete-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+    background-color: rgba(6, 78, 59, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    background-color: transparent;
+  }
+}
+
+.thinking-indicator {
+  @apply inline-flex items-center gap-2 text-sm text-slate-300;
+}
+
+.thinking-indicator-text {
+  background: linear-gradient(110deg, rgba(148, 163, 184, 0.5) 0%, rgba(255, 255, 255, 0.95) 45%, rgba(148, 163, 184, 0.5) 90%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinking-shimmer 1.2s linear infinite;
+}
+
+.thinking-indicator-ring {
+  width: 10px;
+  height: 10px;
+  border-width: 2px;
+  border-color: rgba(148, 163, 184, 0.35);
+  border-top-color: rgb(241, 245, 249);
+  animation:
+    spin-ring 0.75s linear infinite,
+    thinking-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes thinking-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -20% 0;
+  }
+}
+
+@keyframes thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-indicator-text,
+  .thinking-indicator-ring {
+    animation: none;
   }
 }
 

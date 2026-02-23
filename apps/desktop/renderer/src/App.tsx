@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  FaArchive,
   FaChevronDown,
   FaCodeBranch,
   FaCog,
@@ -26,6 +27,7 @@ import {
   FaTerminal,
   FaTimes,
   FaTrashAlt,
+  FaBoxOpen,
   FaUserShield
 } from "react-icons/fa";
 import type {
@@ -125,6 +127,7 @@ const REASONING_OPTIONS: Array<{ value: CodexModelReasoningEffort; label: string
   { value: "high", label: "High" },
   { value: "xhigh", label: "XHigh" }
 ];
+const HIDDEN_ACTIVITY_CATEGORIES = new Set(["reasoning", "assistant_draft", "turn", "thread"]);
 const APPROVAL_OPTIONS: Array<{ value: CodexApprovalMode; label: string }> = [
   { value: "on-request", label: "On request" },
   { value: "on-failure", label: "On failure" },
@@ -261,6 +264,15 @@ interface ComposerAttachment extends PromptAttachment {
   id: string;
   previewUrl: string;
 }
+
+interface QueuedPrompt {
+  id: string;
+  input: string;
+  attachments: PromptAttachment[];
+  options: CodexThreadOptions;
+}
+
+type ThreadRunState = "idle" | "running" | "completed" | "failed";
 
 interface GitActivityEntry {
   id: string;
@@ -1052,6 +1064,7 @@ export const App = () => {
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
   const [composer, setComposer] = useState("");
   const [threadMenuProjectId, setThreadMenuProjectId] = useState<string | null>(null);
+  const [showArchivedByProjectId, setShowArchivedByProjectId] = useState<Record<string, boolean>>({});
   const [threadDraftTitle, setThreadDraftTitle] = useState("New thread");
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
@@ -1071,7 +1084,10 @@ export const App = () => {
   const [updateMessage, setUpdateMessage] = useState<string>("");
   const [settingsEnvText, setSettingsEnvText] = useState("{}");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
-  const [runState, setRunState] = useState<"idle" | "running" | "completed" | "failed">("idle");
+  const [runStateByThreadId, setRunStateByThreadId] = useState<Record<string, ThreadRunState>>({});
+  const [composerDraftByThreadId, setComposerDraftByThreadId] = useState<Record<string, string>>({});
+  const [queuedPromptsByThreadId, setQueuedPromptsByThreadId] = useState<Record<string, QueuedPrompt[]>>({});
+  const [threadCompletionFlashById, setThreadCompletionFlashById] = useState<Record<string, boolean>>({});
   const [composerOptions, setComposerOptions] = useState<CodexThreadOptions>(DEFAULT_SETTINGS.codexDefaults);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -1117,6 +1133,12 @@ export const App = () => {
   const composerApprovalTriggerRef = useRef<HTMLButtonElement | null>(null);
   const composerWebSearchTriggerRef = useRef<HTMLButtonElement | null>(null);
   const composerDropdownMenuRef = useRef<HTMLDivElement | null>(null);
+  const timelineViewportRef = useRef<HTMLElement | null>(null);
+  const runStateByThreadIdRef = useRef<Record<string, ThreadRunState>>({});
+  const queuedPromptsByThreadIdRef = useRef<Record<string, QueuedPrompt[]>>({});
+  const queueProcessingThreadIdsRef = useRef<Set<string>>(new Set());
+  const completionFlashTimeoutsRef = useRef<Record<string, number>>({});
+  const completionAudioContextRef = useRef<AudioContext | null>(null);
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
   const selectedProject = useMemo(
@@ -1190,6 +1212,8 @@ export const App = () => {
     return activeGitState.branches.find((branch) => branch.name === gitBranchInput) ?? null;
   }, [activeGitState, gitBranchInput]);
   const canCreateBranchFromInput = Boolean(gitBranchInput) && !/\s/.test(gitBranchInput) && !exactBranchMatch;
+  const activeRunState: ThreadRunState = activeThreadId ? runStateByThreadId[activeThreadId] ?? "idle" : "idle";
+  const activeQueuedPromptCount = activeThreadId ? queuedPromptsByThreadId[activeThreadId]?.length ?? 0 : 0;
   const sandboxLabel = SANDBOX_OPTIONS.find((option) => option.value === (composerOptions.sandboxMode ?? "workspace-write"))?.label ?? "Workspace write";
   const approvalLabel = APPROVAL_OPTIONS.find((option) => option.value === (composerOptions.approvalPolicy ?? "on-request"))?.label ?? "On request";
   const webSearchLabel = WEB_SEARCH_OPTIONS.find((option) => option.value === (composerOptions.webSearchMode ?? "cached"))?.label ?? "Cached";
@@ -1217,6 +1241,61 @@ export const App = () => {
     }, {});
   }, [threads]);
   const hasUserPromptInThread = useMemo(() => messages.some((message) => message.role === "user"), [messages]);
+  const playThreadCompletedSound = () => {
+    const AudioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) {
+      return;
+    }
+    try {
+      if (!completionAudioContextRef.current || completionAudioContextRef.current.state === "closed") {
+        completionAudioContextRef.current = new AudioContextCtor();
+      }
+      const context = completionAudioContextRef.current;
+      if (context.state === "suspended") {
+        context.resume().catch(() => {});
+      }
+      const now = context.currentTime;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.08, now + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+      gain.connect(context.destination);
+
+      const low = context.createOscillator();
+      low.type = "triangle";
+      low.frequency.setValueAtTime(660, now);
+      low.connect(gain);
+      low.start(now);
+      low.stop(now + 0.16);
+
+      const high = context.createOscillator();
+      high.type = "triangle";
+      high.frequency.setValueAtTime(880, now + 0.12);
+      high.connect(gain);
+      high.start(now + 0.12);
+      high.stop(now + 0.32);
+    } catch {
+      // Ignore audio failures so run completion never breaks the UI.
+    }
+  };
+  const flashCompletedThread = (threadId: string) => {
+    setThreadCompletionFlashById((prev) => ({ ...prev, [threadId]: true }));
+    const existingTimeout = completionFlashTimeoutsRef.current[threadId];
+    if (existingTimeout) {
+      window.clearTimeout(existingTimeout);
+    }
+    completionFlashTimeoutsRef.current[threadId] = window.setTimeout(() => {
+      setThreadCompletionFlashById((prev) => {
+        if (!prev[threadId]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[threadId];
+        return next;
+      });
+      delete completionFlashTimeoutsRef.current[threadId];
+    }, 1600);
+  };
 
   const loadProjects = async () => {
     const allProjects = await api.projects.list();
@@ -1228,7 +1307,7 @@ export const App = () => {
   };
 
   const loadThreads = async () => {
-    const data = await api.threads.list();
+    const data = await api.threads.list({ includeArchived: true });
     const codexThreads = data.filter((thread) => thread.provider === "codex");
     setThreads(codexThreads);
 
@@ -1358,8 +1437,41 @@ export const App = () => {
   }, [activeThreadId]);
 
   useEffect(() => {
+    runStateByThreadIdRef.current = runStateByThreadId;
+  }, [runStateByThreadId]);
+
+  useEffect(() => {
+    queuedPromptsByThreadIdRef.current = queuedPromptsByThreadId;
+  }, [queuedPromptsByThreadId]);
+
+  useEffect(() => {
     attachmentsRef.current = composerAttachments;
   }, [composerAttachments]);
+
+  useEffect(() => {
+    if (!activeThreadId) {
+      if (composer !== "") {
+        setComposer("");
+      }
+      return;
+    }
+    setComposer(composerDraftByThreadId[activeThreadId] ?? "");
+  }, [activeThreadId]);
+
+  useEffect(() => {
+    if (!activeThreadId) {
+      return;
+    }
+    setComposerDraftByThreadId((prev) => {
+      if (prev[activeThreadId] === composer) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [activeThreadId]: composer
+      };
+    });
+  }, [activeThreadId, composer]);
 
   useEffect(() => {
     const textarea = composerTextareaRef.current;
@@ -1379,9 +1491,107 @@ export const App = () => {
       attachmentsRef.current.forEach((attachment) => {
         URL.revokeObjectURL(attachment.previewUrl);
       });
+      Object.values(completionFlashTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
+      completionFlashTimeoutsRef.current = {};
+      completionAudioContextRef.current?.close().catch(() => {});
     },
     []
   );
+
+  const buildUserPromptContent = (input: string, attachments: PromptAttachment[]) => {
+    if (attachments.length === 0) {
+      return input;
+    }
+    return `${input ? `${input}\n\n` : ""}Attached images:\n${attachments.map((attachment) => `- [image] ${attachment.name}`).join("\n")}`;
+  };
+
+  const dispatchPromptToThread = async (threadId: string, prompt: QueuedPrompt) => {
+    const optionKey = codexOptionsKey(prompt.options);
+    if (optionKey !== lastStartedOptionsKeyRef.current) {
+      await api.sessions.start({ threadId, options: prompt.options });
+      lastStartedOptionsKeyRef.current = optionKey;
+    }
+
+    await api.sessions.sendInput({
+      threadId,
+      input: prompt.input,
+      options: prompt.options,
+      attachments: prompt.attachments
+    });
+
+    const sentAt = new Date().toISOString();
+    setThreads((prev) =>
+      prev
+        .map((thread) => (thread.id === threadId ? { ...thread, updatedAt: sentAt } : thread))
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    );
+    if (activeThreadIdRef.current === threadId) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          threadId,
+          role: "user",
+          content: buildUserPromptContent(prompt.input, prompt.attachments),
+          ts: sentAt,
+          streamSeq: prev.length + 1
+        }
+      ]);
+    }
+    setRunStateByThreadId((prev) => {
+      const next = {
+        ...prev,
+        [threadId]: "running" as ThreadRunState
+      };
+      runStateByThreadIdRef.current = next;
+      return next;
+    });
+  };
+
+  const drainPromptQueueForThread = (threadId: string) => {
+    if (queueProcessingThreadIdsRef.current.has(threadId)) {
+      return;
+    }
+    if ((runStateByThreadIdRef.current[threadId] ?? "idle") === "running") {
+      return;
+    }
+    const queued = queuedPromptsByThreadIdRef.current[threadId] ?? [];
+    const nextPrompt = queued[0];
+    if (!nextPrompt) {
+      return;
+    }
+    queueProcessingThreadIdsRef.current.add(threadId);
+    setQueuedPromptsByThreadId((prev) => {
+      const items = prev[threadId] ?? [];
+      if (items.length === 0) {
+        return prev;
+      }
+      const nextItems = items.slice(1);
+      const next = { ...prev };
+      if (nextItems.length === 0) {
+        delete next[threadId];
+      } else {
+        next[threadId] = nextItems;
+      }
+      queuedPromptsByThreadIdRef.current = next;
+      return next;
+    });
+    dispatchPromptToThread(threadId, nextPrompt)
+      .catch((error) => {
+        setLogs((prev) => [...prev, `Queued send failed: ${String(error)}`]);
+        setRunStateByThreadId((prev) => {
+          const next = {
+            ...prev,
+            [threadId]: "idle" as ThreadRunState
+          };
+          runStateByThreadIdRef.current = next;
+          return next;
+        });
+      })
+      .finally(() => {
+        queueProcessingThreadIdsRef.current.delete(threadId);
+      });
+  };
 
   useEffect(() => {
     const initialize = async () => {
@@ -1398,6 +1608,42 @@ export const App = () => {
 
   useEffect(() => {
     const unsubscribe = api.sessions.onEvent((event: SessionEvent) => {
+      const data = asRecord(event.data);
+      const phase = asString(data?.phase);
+      let nextThreadRunState: ThreadRunState | null = null;
+      if (phase === "running") {
+        nextThreadRunState = "running";
+      } else if (phase === "completed") {
+        nextThreadRunState = "completed";
+      } else if (phase === "failed") {
+        nextThreadRunState = "failed";
+      } else if (phase === "ready" || phase === "stopped") {
+        nextThreadRunState = "idle";
+      }
+
+      const previousThreadRunState = runStateByThreadIdRef.current[event.threadId] ?? "idle";
+      if (nextThreadRunState && previousThreadRunState !== nextThreadRunState) {
+        setRunStateByThreadId((prev) => {
+          const current = prev[event.threadId] ?? "idle";
+          if (current === nextThreadRunState) {
+            return prev;
+          }
+          const next = {
+            ...prev,
+            [event.threadId]: nextThreadRunState
+          };
+          runStateByThreadIdRef.current = next;
+          return next;
+        });
+        if (previousThreadRunState === "running" && nextThreadRunState === "completed") {
+          flashCompletedThread(event.threadId);
+          playThreadCompletedSound();
+        }
+        if (previousThreadRunState === "running" && nextThreadRunState !== "running") {
+          drainPromptQueueForThread(event.threadId);
+        }
+      }
+
       if (event.threadId !== activeThreadIdRef.current) {
         return;
       }
@@ -1405,18 +1651,6 @@ export const App = () => {
       const entry = eventToActivityEntry(event);
       if (entry) {
         setActivity((prev) => [...prev.slice(-199), entry]);
-      }
-
-      const data = asRecord(event.data);
-      const phase = asString(data?.phase);
-      if (phase === "running") {
-        setRunState("running");
-      } else if (phase === "completed") {
-        setRunState("completed");
-      } else if (phase === "failed") {
-        setRunState("failed");
-      } else if (phase === "ready" || phase === "stopped") {
-        setRunState("idle");
       }
 
       const category = asString(data?.category);
@@ -1463,6 +1697,53 @@ export const App = () => {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const threadIds = new Set(threads.map((thread) => thread.id));
+    Object.keys(completionFlashTimeoutsRef.current).forEach((threadId) => {
+      if (!threadIds.has(threadId)) {
+        window.clearTimeout(completionFlashTimeoutsRef.current[threadId]);
+        delete completionFlashTimeoutsRef.current[threadId];
+      }
+    });
+    setRunStateByThreadId((prev) => {
+      const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      const next = Object.fromEntries(nextEntries) as Record<string, ThreadRunState>;
+      runStateByThreadIdRef.current = next;
+      return next;
+    });
+    setComposerDraftByThreadId((prev) => {
+      const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      return Object.fromEntries(nextEntries) as Record<string, string>;
+    });
+    setQueuedPromptsByThreadId((prev) => {
+      const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      const next = Object.fromEntries(nextEntries) as Record<string, QueuedPrompt[]>;
+      queuedPromptsByThreadIdRef.current = next;
+      return next;
+    });
+    queueProcessingThreadIdsRef.current.forEach((threadId) => {
+      if (!threadIds.has(threadId)) {
+        queueProcessingThreadIdsRef.current.delete(threadId);
+      }
+    });
+    setThreadCompletionFlashById((prev) => {
+      const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      return Object.fromEntries(nextEntries) as Record<string, boolean>;
+    });
+  }, [threads]);
 
   useEffect(() => {
     const unsubscribe = api.projectTerminal.onEvent((event: ProjectTerminalEvent) => {
@@ -1684,7 +1965,6 @@ export const App = () => {
       setMessages([]);
       setTerminalLines([]);
       setActivity([]);
-      setRunState("idle");
       lastStartedOptionsKeyRef.current = "";
       setComposerAttachments((prev) => {
         prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
@@ -1731,7 +2011,6 @@ export const App = () => {
       setMessages(restoredMessages);
       setTerminalLines([]);
       setActivity(restoredActivity.slice(-200));
-      setRunState("idle");
       await api.sessions.start({ threadId: activeThreadId, options: composerOptions });
       lastStartedOptionsKeyRef.current = codexOptionsKey(composerOptions);
     };
@@ -2118,7 +2397,7 @@ export const App = () => {
         const existing = prev[activeProjectId ?? ""] ?? [];
         return {
           ...prev,
-          [activeProjectId ?? ""]: [...existing, { id: crypto.randomUUID(), ts: new Date().toISOString(), message: "Branch name is required.", tone: "info" }].slice(-80)
+          [activeProjectId ?? ""]: [...existing, { id: crypto.randomUUID(), ts: new Date().toISOString(), message: "Branch name is required.", tone: "info" as const }].slice(-80)
         };
       });
       return;
@@ -2128,7 +2407,7 @@ export const App = () => {
         const existing = prev[activeProjectId ?? ""] ?? [];
         return {
           ...prev,
-          [activeProjectId ?? ""]: [...existing, { id: crypto.randomUUID(), ts: new Date().toISOString(), message: "Branch name cannot contain spaces.", tone: "info" }].slice(-80)
+          [activeProjectId ?? ""]: [...existing, { id: crypto.randomUUID(), ts: new Date().toISOString(), message: "Branch name cannot contain spaces.", tone: "info" as const }].slice(-80)
         };
       });
       return;
@@ -2253,16 +2532,29 @@ export const App = () => {
     setThreadDraftTitle("New thread");
   };
 
+  const setThreadArchived = async (thread: Thread, archived: boolean) => {
+    const updated = await api.threads.archive({ id: thread.id, archived });
+    setThreads((prev) => {
+      const next = prev.map((item) => (item.id === updated.id ? updated : item));
+      if (archived && activeThreadId === thread.id) {
+        const fallback = next.find((item) => item.projectId === thread.projectId && !item.archivedAt && item.id !== thread.id);
+        setActiveThreadId(fallback?.id ?? null);
+      }
+      return next;
+    });
+  };
+
   const sendPrompt = async () => {
     if (!activeThreadId) return;
+    const targetThreadId = activeThreadId;
     const trimmed = composer.trim();
     if (!trimmed && composerAttachments.length === 0) return;
-
-    const optionKey = codexOptionsKey(composerOptions);
-    if (optionKey !== lastStartedOptionsKeyRef.current) {
-      await api.sessions.start({ threadId: activeThreadId, options: composerOptions });
-      lastStartedOptionsKeyRef.current = optionKey;
-    }
+    const targetThread = activeThread;
+    const shouldRenameThread =
+      targetThread &&
+      !hasUserPromptInThread &&
+      (settings.autoRenameThreadTitles ?? true) &&
+      GENERIC_THREAD_TITLES.has(targetThread.title.trim().toLowerCase());
 
     const sendAttachments: PromptAttachment[] = composerAttachments.map((attachment) => ({
       name: attachment.name,
@@ -2270,48 +2562,51 @@ export const App = () => {
       dataUrl: attachment.dataUrl,
       size: attachment.size
     }));
+    const prompt: QueuedPrompt = {
+      id: crypto.randomUUID(),
+      input: trimmed,
+      attachments: sendAttachments,
+      options: { ...composerOptions }
+    };
 
-    if (
-      activeThread &&
-      !hasUserPromptInThread &&
-      (settings.autoRenameThreadTitles ?? true) &&
-      GENERIC_THREAD_TITLES.has(activeThread.title.trim().toLowerCase())
-    ) {
+    const clearComposerAfterSubmit = () => {
+      setComposer("");
+      setComposerDraftByThreadId((prev) => ({
+        ...prev,
+        [targetThreadId]: ""
+      }));
+      setComposerAttachments((prev) => {
+        prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+        return [];
+      });
+    };
+
+    if ((runStateByThreadIdRef.current[targetThreadId] ?? "idle") === "running") {
+      setQueuedPromptsByThreadId((prev) => {
+        const nextQueue = [...(prev[targetThreadId] ?? []), prompt];
+        const next = {
+          ...prev,
+          [targetThreadId]: nextQueue
+        };
+        queuedPromptsByThreadIdRef.current = next;
+        return next;
+      });
+      clearComposerAfterSubmit();
+      return;
+    }
+
+    if (shouldRenameThread && targetThread) {
       const nextTitle = suggestThreadTitle(trimmed);
       try {
-        const updated = await api.threads.update({ id: activeThread.id, title: nextTitle });
+        const updated = await api.threads.update({ id: targetThread.id, title: nextTitle });
         setThreads((prev) => prev.map((thread) => (thread.id === updated.id ? updated : thread)));
       } catch (error) {
         setLogs((prev) => [...prev, `Auto rename failed: ${String(error)}`]);
       }
     }
 
-    await api.sessions.sendInput({
-      threadId: activeThreadId,
-      input: trimmed,
-      options: composerOptions,
-      attachments: sendAttachments
-    });
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        threadId: activeThreadId,
-        role: "user",
-        content:
-          sendAttachments.length > 0
-            ? `${trimmed ? `${trimmed}\n\n` : ""}Attached images:\n${sendAttachments.map((attachment) => `- [image] ${attachment.name}`).join("\n")}`
-            : trimmed,
-        ts: new Date().toISOString(),
-        streamSeq: prev.length + 1
-      }
-    ]);
-    setRunState("running");
-    setComposer("");
-    setComposerAttachments((prev) => {
-      prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
-      return [];
-    });
+    await dispatchPromptToThread(targetThreadId, prompt);
+    clearComposerAfterSubmit();
   };
 
   const stopActiveRun = async () => {
@@ -2325,14 +2620,18 @@ export const App = () => {
       return;
     }
 
-    setRunState("idle");
+    setRunStateByThreadId((prev) => {
+      const next = {
+        ...prev,
+        [activeThreadId]: "idle" as ThreadRunState
+      };
+      runStateByThreadIdRef.current = next;
+      return next;
+    });
+    drainPromptQueueForThread(activeThreadId);
   };
 
   const onComposerKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
-    if (runState === "running") {
-      return;
-    }
-
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       sendPrompt().catch((error) => {
@@ -2364,7 +2663,7 @@ export const App = () => {
   };
 
   const onDropZoneDragOver: DragEventHandler<HTMLDivElement> = (event) => {
-    if (!activeThreadId || runState === "running") {
+    if (!activeThreadId) {
       return;
     }
     event.preventDefault();
@@ -2380,7 +2679,7 @@ export const App = () => {
   };
 
   const onDropZoneDrop: DragEventHandler<HTMLDivElement> = (event) => {
-    if (!activeThreadId || runState === "running") {
+    if (!activeThreadId) {
       return;
     }
     event.preventDefault();
@@ -2452,16 +2751,23 @@ export const App = () => {
       };
     });
 
-    const eventItems: TimelineEventItem[] = activity.map((entry, idx) => {
-      const tsMs = new Date(entry.ts).getTime();
-      return {
-        id: `event-${entry.id}`,
-        tsMs: Number.isFinite(tsMs) ? tsMs : idx,
-        order: idx * 2 + 1,
-        kind: "event",
-        entry
-      };
-    });
+    const eventItems: TimelineEventItem[] = activity
+      .filter((entry) => {
+        if (HIDDEN_ACTIVITY_CATEGORIES.has(entry.category ?? "")) {
+          return false;
+        }
+        return !/^thinking\.{0,3}$/i.test(entry.title.trim());
+      })
+      .map((entry, idx) => {
+        const tsMs = new Date(entry.ts).getTime();
+        return {
+          id: `event-${entry.id}`,
+          tsMs: Number.isFinite(tsMs) ? tsMs : idx,
+          order: idx * 2 + 1,
+          kind: "event",
+          entry
+        };
+      });
 
     const sortedItems = [...messageItems, ...eventItems]
       .sort((a, b) => (a.tsMs === b.tsMs ? a.order - b.order : a.tsMs - b.tsMs))
@@ -2578,6 +2884,22 @@ export const App = () => {
 
     return grouped;
   }, [messages, activity]);
+
+  useEffect(() => {
+    if (activeRunState !== "running") {
+      return;
+    }
+    const viewport = timelineViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const frameId = window.requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [activeRunState, activeThreadId, timelineItems.length]);
 
   return (
     <div className="h-screen overflow-hidden bg-bg text-white">
@@ -2701,6 +3023,9 @@ export const App = () => {
 
                 {projects.map((project) => {
                   const projectThreads = groupedThreads[project.id] || [];
+                  const archivedThreads = projectThreads.filter((thread) => Boolean(thread.archivedAt));
+                  const visibleThreads = projectThreads.filter((thread) => !thread.archivedAt);
+                  const showArchived = Boolean(showArchivedByProjectId[project.id]);
                   const active = activeProjectId === project.id;
                   const menuOpen = threadMenuProjectId === project.id;
 
@@ -2756,26 +3081,113 @@ export const App = () => {
                       )}
 
                       <div className="thread-list">
-                        {projectThreads.length === 0 && <div className="thread-empty">No threads</div>}
-                        {projectThreads.map((thread) => (
+                        {visibleThreads.length === 0 && <div className="thread-empty">No active threads</div>}
+                        {visibleThreads.map((thread) => (
                           <button
                             key={thread.id}
-                            className={activeThreadId === thread.id ? "thread-row active" : "thread-row"}
+                            className={`${activeThreadId === thread.id ? "thread-row active" : "thread-row"} ${
+                              threadCompletionFlashById[thread.id] ? "thread-row-complete-flash" : ""
+                            }`}
                             onClick={() => {
                               setActiveProjectId(project.id);
                               setActiveThreadId(thread.id);
                             }}
                           >
                             <div className="truncate text-left text-sm">{thread.title}</div>
-                            {activeThreadId === thread.id && runState === "running" ? (
-                              <div className="thread-activity-indicator" aria-label="Agent running" title="Agent running">
-                                <span className="loading-ring" />
-                              </div>
-                            ) : (
-                              <div className="ml-2 text-[11px] text-muted">{formatRelative(thread.updatedAt)}</div>
-                            )}
+                            <div className="thread-row-actions">
+                              {(runStateByThreadId[thread.id] ?? "idle") === "running" ? (
+                                <div className="thread-activity-indicator" aria-label="Agent running" title="Agent running">
+                                  <span className="loading-ring" />
+                                </div>
+                              ) : (
+                                <div className="thread-row-time text-[11px] text-muted">{formatRelative(thread.updatedAt)}</div>
+                              )}
+                              <span
+                                className="thread-row-action-btn"
+                                title="Archive thread"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setThreadArchived(thread, true).catch((error) => {
+                                    setLogs((prev) => [...prev, `Archive thread failed: ${String(error)}`]);
+                                  });
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setThreadArchived(thread, true).catch((error) => {
+                                      setLogs((prev) => [...prev, `Archive thread failed: ${String(error)}`]);
+                                    });
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
+                              >
+                                <FaArchive className="text-[10px]" />
+                              </span>
+                            </div>
                           </button>
                         ))}
+                        <button
+                          className="thread-archived-toggle"
+                          onClick={() =>
+                            setShowArchivedByProjectId((prev) => ({
+                              ...prev,
+                              [project.id]: !showArchived
+                            }))
+                          }
+                          disabled={archivedThreads.length === 0}
+                          title={archivedThreads.length === 0 ? "No archived threads" : "View archived threads"}
+                        >
+                          {showArchived ? "Hide archived" : `View archived (${archivedThreads.length})`}
+                        </button>
+                        {showArchived &&
+                          archivedThreads.map((thread) => (
+                            <button
+                              key={`archived-${thread.id}`}
+                              className={`${activeThreadId === thread.id ? "thread-row active archived" : "thread-row archived"} ${
+                                threadCompletionFlashById[thread.id] ? "thread-row-complete-flash" : ""
+                              }`}
+                              onClick={() => {
+                                setActiveProjectId(project.id);
+                                setActiveThreadId(thread.id);
+                              }}
+                            >
+                              <div className="truncate text-left text-sm">{thread.title}</div>
+                              <div className="thread-row-actions">
+                                {(runStateByThreadId[thread.id] ?? "idle") === "running" ? (
+                                  <div className="thread-activity-indicator" aria-label="Agent running" title="Agent running">
+                                    <span className="loading-ring" />
+                                  </div>
+                                ) : (
+                                  <div className="thread-row-time text-[11px] text-muted">{formatRelative(thread.updatedAt)}</div>
+                                )}
+                                <span
+                                  className="thread-row-action-btn"
+                                  title="Restore thread"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setThreadArchived(thread, false).catch((error) => {
+                                      setLogs((prev) => [...prev, `Restore thread failed: ${String(error)}`]);
+                                    });
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      setThreadArchived(thread, false).catch((error) => {
+                                        setLogs((prev) => [...prev, `Restore thread failed: ${String(error)}`]);
+                                      });
+                                    }
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                >
+                                  <FaBoxOpen className="text-[10px]" />
+                                </span>
+                              </div>
+                            </button>
+                          ))}
                       </div>
                     </section>
                   );
@@ -2810,7 +3222,7 @@ export const App = () => {
                 </section>
               )}
 
-              <section className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-5 py-4">
+              <section ref={timelineViewportRef} className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-5 py-4">
                 {!hasProjects && (
                   <div className="mx-auto mt-20 max-w-lg text-center">
                     <p className="text-sm text-muted">Open a local folder to begin.</p>
@@ -2982,7 +3394,12 @@ export const App = () => {
                     );
                   })}
 
-                  {runState === "running" && <div className="text-sm text-slate-400">Thinking...</div>}
+                  {activeRunState === "running" && (
+                    <div className="thinking-indicator" role="status" aria-live="polite" aria-label="Assistant is thinking">
+                      <span className="loading-ring thinking-indicator-ring" aria-hidden="true" />
+                      <span className="thinking-indicator-text">Thinking...</span>
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -3022,7 +3439,6 @@ export const App = () => {
                           <button
                             className="attachment-remove"
                             onClick={() => removeAttachment(attachment.id)}
-                            disabled={runState === "running"}
                             title={`Remove ${attachment.name}`}
                           >
                             <FaTimes className="mx-auto text-[10px]" />
@@ -3047,7 +3463,7 @@ export const App = () => {
                       <button
                         className="composer-plus-btn"
                         title="Attach images"
-                        disabled={!activeThreadId || runState === "running"}
+                        disabled={!activeThreadId}
                         onClick={() => imagePickerRef.current?.click()}
                       >
                         <FaPlus className="mx-auto text-[11px]" />
@@ -3062,7 +3478,7 @@ export const App = () => {
                             model: event.target.value === "auto" ? undefined : event.target.value
                           }))
                         }
-                        disabled={!activeThreadId || runState === "running"}
+                        disabled={!activeThreadId}
                       >
                         <option value="auto">Auto</option>
                         {MODEL_SUGGESTIONS.map((model) => (
@@ -3081,7 +3497,7 @@ export const App = () => {
                             modelReasoningEffort: event.target.value as CodexModelReasoningEffort
                           }))
                         }
-                        disabled={!activeThreadId || runState === "running"}
+                        disabled={!activeThreadId}
                       >
                         {REASONING_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
@@ -3093,34 +3509,62 @@ export const App = () => {
                         <span className="text-xs text-muted">{composerAttachments.length} image(s)</span>
                       )}
                     </div>
-                    <button
-                      className={runState === "running" ? "btn-danger" : "btn-primary"}
-                      onClick={() => {
-                        if (runState === "running") {
-                          stopActiveRun().catch((error) => {
-                            setLogs((prev) => [...prev, `Stop failed: ${String(error)}`]);
+                    {activeRunState === "running" ? (
+                      composer.trim() ? (
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            sendPrompt().catch((error) => {
+                              setLogs((prev) => [...prev, `Send failed: ${String(error)}`]);
+                            });
+                          }}
+                          disabled={!activeThreadId}
+                          title="Queue prompt"
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <FaPaperPlane className="text-[11px]" />
+                            Queue
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          className="btn-danger"
+                          onClick={() => {
+                            stopActiveRun().catch((error) => {
+                              setLogs((prev) => [...prev, `Stop failed: ${String(error)}`]);
+                            });
+                          }}
+                          disabled={!activeThreadId}
+                          title="Stop current run"
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <FaStop className="text-[11px]" />
+                            Stop
+                          </span>
+                        </button>
+                      )
+                    ) : (
+                      <button
+                        className="btn-primary"
+                        onClick={() => {
+                          sendPrompt().catch((error) => {
+                            setLogs((prev) => [...prev, `Send failed: ${String(error)}`]);
                           });
-                          return;
-                        }
-
-                        sendPrompt().catch((error) => {
-                          setLogs((prev) => [...prev, `Send failed: ${String(error)}`]);
-                        });
-                      }}
-                      disabled={
-                        runState === "running"
-                          ? !activeThreadId
-                          : !activeThreadId || (!composer.trim() && composerAttachments.length === 0)
-                      }
-                      title={runState === "running" ? "Stop current run" : "Send prompt"}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        {runState === "running" ? <FaStop className="text-[11px]" /> : <FaPaperPlane className="text-[11px]" />}
-                        {runState === "running" ? "Stop" : "Send"}
-                      </span>
-                    </button>
+                        }}
+                        disabled={!activeThreadId || (!composer.trim() && composerAttachments.length === 0)}
+                        title="Send prompt"
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <FaPaperPlane className="text-[11px]" />
+                          Send
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </div>
+                {activeQueuedPromptCount > 0 && (
+                  <div className="mt-1 text-[11px] text-slate-400">Queued prompts: {activeQueuedPromptCount}</div>
+                )}
                 <div className="mt-2 composer-toolbar-row">
                   <div className="composer-toolbar">
                     <span className="composer-option">
@@ -3129,7 +3573,7 @@ export const App = () => {
                         ref={composerSandboxTriggerRef}
                         className="composer-dropdown-trigger"
                         onClick={() => openComposerDropdown("sandbox", composerSandboxTriggerRef.current)}
-                        disabled={!activeThreadId || runState === "running"}
+                        disabled={!activeThreadId}
                         title="Command behavior (sandbox mode)"
                       >
                         <span>{sandboxLabel.toLowerCase()}</span>
@@ -3142,7 +3586,7 @@ export const App = () => {
                         ref={composerApprovalTriggerRef}
                         className="composer-dropdown-trigger"
                         onClick={() => openComposerDropdown("approval", composerApprovalTriggerRef.current)}
-                        disabled={!activeThreadId || runState === "running"}
+                        disabled={!activeThreadId}
                         title="Permission policy"
                       >
                         <span>{approvalLabel.toLowerCase()}</span>
@@ -3155,7 +3599,7 @@ export const App = () => {
                         ref={composerWebSearchTriggerRef}
                         className="composer-dropdown-trigger"
                         onClick={() => openComposerDropdown("websearch", composerWebSearchTriggerRef.current)}
-                        disabled={!activeThreadId || runState === "running"}
+                        disabled={!activeThreadId}
                         title="Web search mode"
                       >
                         <span>{webSearchLabel.toLowerCase()}</span>
@@ -3172,7 +3616,7 @@ export const App = () => {
                           networkAccessEnabled: !(prev.networkAccessEnabled ?? true)
                         }))
                       }
-                      disabled={!activeThreadId || runState === "running"}
+                      disabled={!activeThreadId}
                     >
                       <FaNetworkWired className="composer-option-icon" />
                       network
@@ -3381,28 +3825,22 @@ export const App = () => {
                             Ahead {activeGitState.ahead} / Behind {activeGitState.behind} - {activeGitState.stagedCount} staged,{" "}
                             {activeGitState.unstagedCount} unstaged, {activeGitState.untrackedCount} untracked
                           </div>
-                          <div className="grid grid-cols-4 gap-1">
-                            <button className="btn-ghost" onClick={() => runGitAction("fetch", (projectId) => api.git.fetch({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git fetch failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
-                              Fetch
-                            </button>
-                            <button className="btn-ghost" onClick={() => runGitAction("pull", (projectId) => api.git.pull({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git pull failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
-                              Pull
-                            </button>
-                            <button className="btn-ghost" onClick={() => runGitAction("push", (projectId) => api.git.push({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git push failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
-                              Push
-                            </button>
+                          <div className="grid grid-cols-1 gap-1">
                             <button className="btn-ghost" onClick={() => stageGitPath().catch((error) => setLogs((prev) => [...prev, `Git stage failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction) || activeGitState.files.length === 0}>
                               Stage All
                             </button>
                             {(activeGitState.ahead > 0 || activeGitState.behind > 0) && (
-                              <button className="btn-secondary col-span-4" onClick={() => runGitAction("sync", (projectId) => api.git.sync({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git sync failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
-                                Sync (fetch + pull + push)
+                              <button className="btn-secondary" onClick={() => runGitAction("sync", (projectId) => api.git.sync({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git sync failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
+                                <span className="inline-flex items-center gap-1">
+                                  {gitBusyAction === "sync" && <span className="loading-ring" />}
+                                  Sync
+                                </span>
                               </button>
                             )}
                           </div>
-                          <div className="mt-2 flex items-center gap-1">
-                            <input
-                              className="input h-8 text-xs"
+                          <div className="mt-2 flex items-start gap-1">
+                            <textarea
+                              className="input min-h-[56px] text-xs leading-relaxed"
                               value={gitCommitMessage}
                               onChange={(event) => setGitCommitMessage(event.target.value)}
                               placeholder="Commit message (optional: auto-generate if empty)"
@@ -4317,3 +4755,5 @@ export const App = () => {
     </div>
   );
 };
+
+

@@ -58,6 +58,7 @@ interface ThreadRow {
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  last_message_ts?: string | null;
 }
 
 interface SessionRow {
@@ -114,7 +115,7 @@ const mapThread = (row: ThreadRow): Thread => ({
   provider: row.provider,
   status: row.status,
   createdAt: row.created_at,
-  updatedAt: row.updated_at,
+  updatedAt: row.last_message_ts ?? row.updated_at,
   archivedAt: row.archived_at ?? undefined
 });
 
@@ -452,10 +453,15 @@ export class Repository {
     if (input?.projectId) {
       const rows = this.db
         .prepare(
-          `SELECT * FROM threads
-            WHERE project_id = @projectId
-              AND (@includeArchived = 1 OR archived_at IS NULL)
-            ORDER BY updated_at DESC`
+          `SELECT
+              t.*,
+              MAX(m.ts) AS last_message_ts
+            FROM threads t
+            LEFT JOIN message_events m ON m.thread_id = t.id AND m.role IN ('user', 'assistant')
+            WHERE t.project_id = @projectId
+              AND (@includeArchived = 1 OR t.archived_at IS NULL)
+            GROUP BY t.id
+            ORDER BY COALESCE(MAX(m.ts), t.updated_at) DESC`
         )
         .all({ projectId: input.projectId, includeArchived: includeArchived ? 1 : 0 }) as ThreadRow[];
 
@@ -464,9 +470,14 @@ export class Repository {
 
     const rows = this.db
       .prepare(
-        `SELECT * FROM threads
-          WHERE (@includeArchived = 1 OR archived_at IS NULL)
-          ORDER BY updated_at DESC`
+        `SELECT
+            t.*,
+            MAX(m.ts) AS last_message_ts
+          FROM threads t
+          LEFT JOIN message_events m ON m.thread_id = t.id AND m.role IN ('user', 'assistant')
+          WHERE (@includeArchived = 1 OR t.archived_at IS NULL)
+          GROUP BY t.id
+          ORDER BY COALESCE(MAX(m.ts), t.updated_at) DESC`
       )
       .all({ includeArchived: includeArchived ? 1 : 0 }) as ThreadRow[];
 

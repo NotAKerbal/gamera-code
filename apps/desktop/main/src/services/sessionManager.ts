@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import os from "node:os";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as pty from "node-pty";
 import type {
@@ -421,7 +421,6 @@ interface ChangedFile extends DiffData {
 export class SessionManager {
   private readonly sessions = new Map<string, RunningSession>();
   private readonly gitRepoCache = new Map<string, boolean>();
-  private codexCwdQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: SessionManagerDeps) {}
 
@@ -740,11 +739,9 @@ export class SessionManager {
     const threadOptions = normalizeCodexThreadOptions(projectPath, options);
     const optionsKey = codexThreadOptionsKey(threadOptions);
 
-    const sdkThread = await this.withCodexProcessCwd(projectPath, async () => {
-      return existingProviderThreadId
-        ? await resumeThread.call(codex, existingProviderThreadId, threadOptions)
-        : await startThread.call(codex, threadOptions);
-    });
+    const sdkThread = existingProviderThreadId
+      ? await resumeThread.call(codex, existingProviderThreadId, threadOptions)
+      : await startThread.call(codex, threadOptions);
 
     const sdkThreadRecord = asRecord(sdkThread);
     if (!sdkThreadRecord) {
@@ -782,81 +779,39 @@ export class SessionManager {
       | undefined;
     const runMethod = session.sdkThread.run as ((prompt: CodexInput) => Promise<unknown>) | undefined;
 
-    await this.withCodexProcessCwd(session.cwd, async () => {
-      if (runStreamed) {
-        await this.runCodexPromptStreamed(session, input, runStreamed);
-        return;
-      }
+    if (runStreamed) {
+      await this.runCodexPromptStreamed(session, input, runStreamed);
+      return;
+    }
 
-      if (!runMethod) {
-        throw new Error("Codex SDK thread does not expose run() or runStreamed().");
-      }
+    if (!runMethod) {
+      throw new Error("Codex SDK thread does not expose run() or runStreamed().");
+    }
 
-      this.emitSessionEvent(session.threadId, "progress", "Running Codex SDK...", {
-        provider: "codex",
-        phase: "running"
-      });
-
-      const runResult = await runMethod.call(session.sdkThread, input);
-      const providerThreadId = this.readSdkThreadId(session.sdkThread);
-      if (providerThreadId) {
-        this.deps.repository.setProviderThreadId(session.threadId, "codex", providerThreadId);
-      }
-
-      const content = sanitizePtyOutput(extractCodexResponseText(runResult));
-      if (content) {
-        this.persistAssistantChunk(session.threadId, content, {
-          provider: "codex",
-          category: "assistant_message",
-          final: true
-        });
-      } else {
-        this.emitSessionEvent(session.threadId, "status", "Codex SDK returned no text output.", {
-          provider: "codex",
-          phase: "completed"
-        });
-      }
+    this.emitSessionEvent(session.threadId, "progress", "Running Codex SDK...", {
+      provider: "codex",
+      phase: "running"
     });
-  }
 
-  private withCodexProcessCwd<T>(targetCwd: string, operation: () => Promise<T>): Promise<T> {
-    const run = async () => {
-      let previousCwd: string | null = null;
-      try {
-        previousCwd = process.cwd();
-      } catch {
-        previousCwd = null;
-      }
+    const runResult = await runMethod.call(session.sdkThread, input);
+    const providerThreadId = this.readSdkThreadId(session.sdkThread);
+    if (providerThreadId) {
+      this.deps.repository.setProviderThreadId(session.threadId, "codex", providerThreadId);
+    }
 
-      if (!existsSync(targetCwd) || !statSync(targetCwd).isDirectory()) {
-        throw new Error(`Invalid working directory: ${targetCwd}`);
-      }
-
-      if (previousCwd !== targetCwd) {
-        process.chdir(targetCwd);
-      }
-
-      try {
-        return await operation();
-      } finally {
-        if (previousCwd && previousCwd !== targetCwd && existsSync(previousCwd)) {
-          try {
-            if (statSync(previousCwd).isDirectory()) {
-              process.chdir(previousCwd);
-            }
-          } catch {
-            // Ignore cwd restore failures.
-          }
-        }
-      }
-    };
-
-    const queued = this.codexCwdQueue.then(run, run);
-    this.codexCwdQueue = queued.then(
-      () => undefined,
-      () => undefined
-    );
-    return queued;
+    const content = sanitizePtyOutput(extractCodexResponseText(runResult));
+    if (content) {
+      this.persistAssistantChunk(session.threadId, content, {
+        provider: "codex",
+        category: "assistant_message",
+        final: true
+      });
+    } else {
+      this.emitSessionEvent(session.threadId, "status", "Codex SDK returned no text output.", {
+        provider: "codex",
+        phase: "completed"
+      });
+    }
   }
 
   private async runCodexPromptStreamed(
