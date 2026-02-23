@@ -610,11 +610,12 @@ export class SessionManager {
       .filter((attachment): attachment is StoredAttachment => Boolean(attachment));
   }
 
-  private buildThreadEnv(threadId: string, provider: Thread["provider"]) {
+  private buildThreadEnv(threadId: string, projectId: string, provider: Thread["provider"]) {
     const settings = this.deps.repository.getSettings();
+    const projectSettings = this.deps.repository.getProjectSettings(projectId);
     const env = {
       ...process.env,
-      ...settings.envVars,
+      ...projectSettings.envVars,
       FORCE_COLOR: "0",
       NO_COLOR: "1",
       CLICOLOR: "0",
@@ -627,7 +628,7 @@ export class SessionManager {
   }
 
   private startPtySession(thread: Thread, projectPath: string): Session {
-    const { settings, env } = this.buildThreadEnv(thread.id, thread.provider);
+    const { settings, env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
     const adapter = PROVIDER_ADAPTERS[thread.provider];
     const binaryOverride = settings.binaryOverrides[thread.provider];
     const run = adapter.getRunCommand({ cwd: projectPath, binaryOverride });
@@ -685,7 +686,7 @@ export class SessionManager {
     projectPath: string,
     options?: CodexThreadOptions
   ): Promise<Session> {
-    const { env } = this.buildThreadEnv(thread.id, thread.provider);
+    const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
     const { Codex } = await loadCodexSdk();
     const codex = new Codex({ env });
 

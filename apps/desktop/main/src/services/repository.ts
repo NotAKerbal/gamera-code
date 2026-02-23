@@ -1,8 +1,26 @@
 import { appendFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { AppSettings, InstallStatus, MessageEvent, Project, Provider, Session, Thread, ThreadStatus } from "@code-app/shared";
+import type {
+  AppSettings,
+  InstallStatus,
+  MessageEvent,
+  Project,
+  ProjectDevCommand,
+  ProjectSettings,
+  ProjectTerminalSwitchBehavior,
+  Provider,
+  Session,
+  Thread,
+  ThreadStatus
+} from "@code-app/shared";
 import { getThreadDataPath, type AppPaths } from "./paths";
+
+const DEFAULT_DEV_COMMAND: ProjectDevCommand = {
+  id: "default",
+  name: "Dev Server",
+  command: "npm run dev"
+};
 
 const DEFAULT_SETTINGS: AppSettings = {
   permissionMode: "prompt_on_risk",
@@ -10,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   envVars: {},
   defaultProjectDirectory: "",
   autoRenameThreadTitles: true,
+  projectTerminalSwitchBehaviorDefault: "start_stop",
   codexDefaults: {
     sandboxMode: "workspace-write",
     modelReasoningEffort: "medium",
@@ -63,6 +82,18 @@ interface ThreadProviderStateRow {
   updated_at: string;
 }
 
+interface ProjectSettingsRow {
+  project_id: string;
+  env_vars_json: string;
+  dev_commands_json: string;
+  default_dev_command_id: string | null;
+  auto_start_dev_terminal: number;
+  switch_behavior_override: string | null;
+  last_detected_preview_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 const mapProject = (row: ProjectRow): Project => ({
   id: row.id,
   name: row.name,
@@ -99,6 +130,80 @@ const mapMessage = (row: MessageRow): MessageEvent => ({
   ts: row.ts,
   streamSeq: row.stream_seq
 });
+
+const isSwitchBehavior = (value: unknown): value is ProjectTerminalSwitchBehavior =>
+  value === "start_stop" || value === "start_only" || value === "manual";
+
+const parseEnvVars = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, string> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([key, raw]) => {
+    const envKey = key.trim();
+    if (!envKey || typeof raw !== "string") {
+      return;
+    }
+    normalized[envKey] = raw;
+  });
+  return normalized;
+};
+
+const parseDevCommands = (value: unknown): ProjectDevCommand[] => {
+  if (!Array.isArray(value)) {
+    return [DEFAULT_DEV_COMMAND];
+  }
+
+  const parsed: ProjectDevCommand[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    const command = typeof row.command === "string" ? row.command.trim() : "";
+    if (!id || !name || !command) {
+      continue;
+    }
+    parsed.push({ id, name, command });
+  }
+
+  if (parsed.length === 0) {
+    return [DEFAULT_DEV_COMMAND];
+  }
+
+  return parsed.slice(0, 10);
+};
+
+const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
+  let envVars: Record<string, string> = {};
+  let devCommands: ProjectDevCommand[] = [DEFAULT_DEV_COMMAND];
+  try {
+    envVars = parseEnvVars(JSON.parse(row.env_vars_json));
+  } catch {
+    envVars = {};
+  }
+  try {
+    devCommands = parseDevCommands(JSON.parse(row.dev_commands_json));
+  } catch {
+    devCommands = [DEFAULT_DEV_COMMAND];
+  }
+  const switchBehavior = isSwitchBehavior(row.switch_behavior_override) ? row.switch_behavior_override : undefined;
+
+  return {
+    projectId: row.project_id,
+    envVars,
+    devCommands,
+    defaultDevCommandId: row.default_dev_command_id ?? undefined,
+    autoStartDevTerminal: row.auto_start_dev_terminal === 1,
+    switchBehaviorOverride: switchBehavior,
+    lastDetectedPreviewUrl: row.last_detected_preview_url ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+};
 
 export class Repository {
   constructor(
@@ -157,6 +262,124 @@ export class Repository {
 
   deleteProject(id: string): void {
     this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+  }
+
+  listProjectSettings(): ProjectSettings[] {
+    const rows = this.db
+      .prepare("SELECT * FROM project_settings ORDER BY updated_at DESC")
+      .all() as ProjectSettingsRow[];
+    return rows.map(mapProjectSettings);
+  }
+
+  getProjectSettings(projectId: string): ProjectSettings {
+    const project = this.getProject(projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const existing = this.db
+      .prepare("SELECT * FROM project_settings WHERE project_id = ?")
+      .get(projectId) as ProjectSettingsRow | undefined;
+    if (existing) {
+      return mapProjectSettings(existing);
+    }
+
+    const now = new Date().toISOString();
+    const seeded: ProjectSettingsRow = {
+      project_id: projectId,
+      env_vars_json: JSON.stringify(this.getSettings().envVars),
+      dev_commands_json: JSON.stringify([DEFAULT_DEV_COMMAND]),
+      default_dev_command_id: DEFAULT_DEV_COMMAND.id,
+      auto_start_dev_terminal: 1,
+      switch_behavior_override: null,
+      last_detected_preview_url: null,
+      created_at: now,
+      updated_at: now
+    };
+
+    this.db
+      .prepare(
+        `INSERT INTO project_settings (
+          project_id,
+          env_vars_json,
+          dev_commands_json,
+          default_dev_command_id,
+          auto_start_dev_terminal,
+          switch_behavior_override,
+          last_detected_preview_url,
+          created_at,
+          updated_at
+        ) VALUES (
+          @project_id,
+          @env_vars_json,
+          @dev_commands_json,
+          @default_dev_command_id,
+          @auto_start_dev_terminal,
+          @switch_behavior_override,
+          @last_detected_preview_url,
+          @created_at,
+          @updated_at
+        )`
+      )
+      .run(seeded);
+
+    return mapProjectSettings(seeded);
+  }
+
+  setProjectSettings(input: {
+    projectId: string;
+    envVars?: Record<string, string>;
+    devCommands?: ProjectDevCommand[];
+    defaultDevCommandId?: string;
+    autoStartDevTerminal?: boolean;
+    switchBehaviorOverride?: ProjectTerminalSwitchBehavior;
+    lastDetectedPreviewUrl?: string;
+  }): ProjectSettings {
+    const current = this.getProjectSettings(input.projectId);
+    const nextDevCommands = input.devCommands
+      ? parseDevCommands(input.devCommands)
+      : current.devCommands;
+    const envVars = input.envVars ? parseEnvVars(input.envVars) : current.envVars;
+    const fallbackDefaultCommandId = nextDevCommands[0]?.id;
+    const requestedDefaultCommandId = input.defaultDevCommandId ?? current.defaultDevCommandId ?? fallbackDefaultCommandId;
+    const validDefaultCommandId = nextDevCommands.some((cmd) => cmd.id === requestedDefaultCommandId)
+      ? requestedDefaultCommandId
+      : fallbackDefaultCommandId;
+    const autoStartDevTerminal = input.autoStartDevTerminal ?? current.autoStartDevTerminal;
+
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE project_settings
+         SET env_vars_json = @env_vars_json,
+             dev_commands_json = @dev_commands_json,
+             default_dev_command_id = @default_dev_command_id,
+             auto_start_dev_terminal = @auto_start_dev_terminal,
+             switch_behavior_override = @switch_behavior_override,
+             last_detected_preview_url = @last_detected_preview_url,
+             updated_at = @updated_at
+         WHERE project_id = @project_id`
+      )
+      .run({
+        project_id: input.projectId,
+        env_vars_json: JSON.stringify(envVars),
+        dev_commands_json: JSON.stringify(nextDevCommands.slice(0, 10)),
+        default_dev_command_id: validDefaultCommandId ?? null,
+        auto_start_dev_terminal: autoStartDevTerminal ? 1 : 0,
+        switch_behavior_override: input.switchBehaviorOverride ?? current.switchBehaviorOverride ?? null,
+        last_detected_preview_url: input.lastDetectedPreviewUrl ?? current.lastDetectedPreviewUrl ?? null,
+        updated_at: now
+      });
+
+    return this.getProjectSettings(input.projectId);
+  }
+
+  setLastDetectedPreviewUrl(projectId: string, url: string): ProjectSettings {
+    const normalized = url.trim();
+    return this.setProjectSettings({
+      projectId,
+      lastDetectedPreviewUrl: normalized
+    });
   }
 
   listThreads(input?: { projectId?: string; includeArchived?: boolean }): Thread[] {

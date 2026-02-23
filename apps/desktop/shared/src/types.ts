@@ -32,8 +32,55 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  settings?: ProjectSettings;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProjectDevCommand {
+  id: string;
+  name: string;
+  command: string;
+}
+
+export type ProjectTerminalSwitchBehavior = "start_stop" | "start_only" | "manual";
+
+export interface ProjectSettings {
+  projectId: string;
+  envVars: Record<string, string>;
+  devCommands: ProjectDevCommand[];
+  defaultDevCommandId?: string;
+  autoStartDevTerminal: boolean;
+  switchBehaviorOverride?: ProjectTerminalSwitchBehavior;
+  lastDetectedPreviewUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ProjectTerminalEventType = "status" | "stdout" | "stderr" | "exit" | "preview_url_detected";
+
+export interface ProjectTerminalEvent {
+  projectId: string;
+  type: ProjectTerminalEventType;
+  payload: string;
+  ts: string;
+  data?: Record<string, unknown>;
+}
+
+export interface ProjectTerminalState {
+  projectId: string;
+  running: boolean;
+  commandId?: string;
+  command?: string;
+  outputTail: string;
+  pid?: number;
+  lastExitCode?: number;
+  updatedAt: string;
+}
+
+export interface ProjectPreviewState {
+  projectId: string;
+  url?: string;
 }
 
 export interface Thread {
@@ -113,6 +160,7 @@ export interface AppSettings {
   codexDefaults: CodexThreadOptions;
   defaultProjectDirectory?: string;
   autoRenameThreadTitles?: boolean;
+  projectTerminalSwitchBehaviorDefault?: ProjectTerminalSwitchBehavior;
 }
 
 export interface UpdateCheckResult {

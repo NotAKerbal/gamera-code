@@ -5,6 +5,9 @@ import type {
   MessageEvent,
   PermissionMode,
   Project,
+  ProjectSettings,
+  ProjectTerminalEvent,
+  ProjectTerminalState,
   PromptAttachment,
   Provider,
   RiskCheck,
@@ -22,6 +25,30 @@ export interface DesktopApi {
     update: (input: { id: string; name?: string; path?: string }) => Promise<Project>;
     delete: (input: { id: string }) => Promise<{ ok: boolean }>;
     pickPath: () => Promise<string | null>;
+  };
+  projectSettings: {
+    get: (input: { projectId: string }) => Promise<ProjectSettings>;
+    set: (input: {
+      projectId: string;
+      envVars?: Record<string, string>;
+      devCommands?: Array<{ id: string; name: string; command: string }>;
+      defaultDevCommandId?: string;
+      autoStartDevTerminal?: boolean;
+      switchBehaviorOverride?: "start_stop" | "start_only" | "manual";
+      lastDetectedPreviewUrl?: string;
+    }) => Promise<ProjectSettings>;
+  };
+  projectTerminal: {
+    setActiveProject: (input: { projectId: string | null }) => Promise<{ ok: boolean }>;
+    start: (input: { projectId: string; commandId?: string }) => Promise<ProjectTerminalState>;
+    stop: (input: { projectId: string }) => Promise<{ ok: boolean }>;
+    getState: (input: { projectId: string }) => Promise<ProjectTerminalState>;
+    onEvent: (listener: (event: ProjectTerminalEvent) => void) => () => void;
+  };
+  preview: {
+    openPopout: (input: { url: string }) => Promise<{ ok: boolean }>;
+    closePopout: () => Promise<{ ok: boolean }>;
+    navigate: (input: { url: string }) => Promise<{ ok: boolean }>;
   };
   threads: {
     list: (input?: { projectId?: string; includeArchived?: boolean }) => Promise<Thread[]>;

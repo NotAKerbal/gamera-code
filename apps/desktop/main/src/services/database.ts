@@ -62,6 +62,19 @@ export const initializeDatabase = (dbPath: string) => {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS project_settings (
+      project_id TEXT PRIMARY KEY,
+      env_vars_json TEXT NOT NULL,
+      dev_commands_json TEXT NOT NULL,
+      default_dev_command_id TEXT,
+      auto_start_dev_terminal INTEGER NOT NULL DEFAULT 1,
+      switch_behavior_override TEXT,
+      last_detected_preview_url TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS permission_decisions (
       id TEXT PRIMARY KEY,
       thread_id TEXT,
@@ -91,6 +104,9 @@ export const initializeDatabase = (dbPath: string) => {
 
     CREATE INDEX IF NOT EXISTS idx_thread_provider_state_lookup
       ON thread_provider_state(thread_id, provider);
+
+    CREATE INDEX IF NOT EXISTS idx_project_settings_updated
+      ON project_settings(updated_at DESC);
   `);
 
   return db;

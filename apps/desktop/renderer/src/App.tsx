@@ -21,6 +21,10 @@ import type {
   PermissionMode,
   PromptAttachment,
   Project,
+  ProjectSettings,
+  ProjectTerminalEvent,
+  ProjectTerminalState,
+  ProjectTerminalSwitchBehavior,
   SessionEvent,
   Thread
 } from "@code-app/shared";
@@ -33,6 +37,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   envVars: {},
   defaultProjectDirectory: "",
   autoRenameThreadTitles: true,
+  projectTerminalSwitchBehaviorDefault: "start_stop",
   codexDefaults: {
     sandboxMode: "workspace-write",
     modelReasoningEffort: "medium",
@@ -107,6 +112,11 @@ const WEB_SEARCH_OPTIONS: Array<{ value: CodexWebSearchMode; label: string }> = 
   { value: "cached", label: "Cached" },
   { value: "live", label: "Live" },
   { value: "disabled", label: "Disabled" }
+];
+const PROJECT_SWITCH_BEHAVIOR_OPTIONS: Array<{ value: ProjectTerminalSwitchBehavior; label: string }> = [
+  { value: "start_stop", label: "Start on enter, stop on leave" },
+  { value: "start_only", label: "Start on enter, keep running" },
+  { value: "manual", label: "Manual only" }
 ];
 
 const selectWidthStyle = (label: string, min = 12) => ({
@@ -909,6 +919,7 @@ export const App = () => {
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
+  const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
@@ -920,10 +931,22 @@ export const App = () => {
   const [composerOptions, setComposerOptions] = useState<CodexThreadOptions>(DEFAULT_SETTINGS.codexDefaults);
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [projectSettingsById, setProjectSettingsById] = useState<Record<string, ProjectSettings>>({});
+  const [projectTerminalById, setProjectTerminalById] = useState<Record<string, ProjectTerminalState>>({});
+  const [projectTerminalLinesById, setProjectTerminalLinesById] = useState<Record<string, string[]>>({});
+  const [activeProjectPreviewUrl, setActiveProjectPreviewUrl] = useState<string>("");
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isPreviewPoppedOut, setIsPreviewPoppedOut] = useState(false);
+  const [projectSettingsEnvText, setProjectSettingsEnvText] = useState("{}");
+  const [projectSettingsCommands, setProjectSettingsCommands] = useState<Array<{ id: string; name: string; command: string }>>([]);
+  const [projectSettingsDefaultCommandId, setProjectSettingsDefaultCommandId] = useState("");
+  const [projectSettingsAutoStart, setProjectSettingsAutoStart] = useState(true);
+  const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">("");
   const activeThreadIdRef = useRef<string | null>(null);
   const lastStartedOptionsKeyRef = useRef<string>("");
   const attachmentsRef = useRef<ComposerAttachment[]>([]);
   const imagePickerRef = useRef<HTMLInputElement | null>(null);
+  const previewWebviewRef = useRef<HTMLElement | null>(null);
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
   const selectedProject = useMemo(
@@ -935,6 +958,18 @@ export const App = () => {
     [projects, activeThread, selectedProject]
   );
   const hasProjects = projects.length > 0;
+  const activeProjectSettings = useMemo(
+    () => (activeProjectId ? projectSettingsById[activeProjectId] : undefined),
+    [activeProjectId, projectSettingsById]
+  );
+  const activeProjectTerminalState = useMemo(
+    () => (activeProjectId ? projectTerminalById[activeProjectId] : undefined),
+    [activeProjectId, projectTerminalById]
+  );
+  const activeProjectTerminalLines = useMemo(
+    () => (activeProjectId ? projectTerminalLinesById[activeProjectId] ?? [] : []),
+    [activeProjectId, projectTerminalLinesById]
+  );
 
   const groupedThreads = useMemo(() => {
     return threads.reduce<Record<string, Thread[]>>((acc, thread) => {
@@ -979,6 +1014,24 @@ export const App = () => {
   const loadInstallerStatus = async () => {
     const status = await api.installer.doctor();
     setInstallStatus(status);
+  };
+
+  const loadProjectSettings = async (projectId: string) => {
+    const settingsForProject = await api.projectSettings.get({ projectId });
+    setProjectSettingsById((prev) => ({
+      ...prev,
+      [projectId]: settingsForProject
+    }));
+    return settingsForProject;
+  };
+
+  const loadProjectTerminalState = async (projectId: string) => {
+    const state = await api.projectTerminal.getState({ projectId });
+    setProjectTerminalById((prev) => ({
+      ...prev,
+      [projectId]: state
+    }));
+    return state;
   };
 
   const addImageFiles = async (files: File[]) => {
@@ -1132,13 +1185,80 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = api.projectTerminal.onEvent((event: ProjectTerminalEvent) => {
+      if (event.type === "preview_url_detected") {
+        setProjectSettingsById((prev) => {
+          const existing = prev[event.projectId];
+          if (!existing) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [event.projectId]: {
+              ...existing,
+              lastDetectedPreviewUrl: event.payload
+            }
+          };
+        });
+        if (event.projectId === activeProjectId) {
+          setActiveProjectPreviewUrl(event.payload);
+        }
+      }
+
+      if (event.type === "stdout" || event.type === "stderr" || event.type === "status" || event.type === "exit") {
+        setProjectTerminalLinesById((prev) => {
+          const current = prev[event.projectId] ?? [];
+          return {
+            ...prev,
+            [event.projectId]: [...current.slice(-500), event.payload]
+          };
+        });
+      }
+
+      if (activeProjectId && event.projectId === activeProjectId) {
+        api.projectTerminal
+          .getState({ projectId: activeProjectId })
+          .then((state) => {
+            setProjectTerminalById((prev) => ({
+              ...prev,
+              [activeProjectId]: state
+            }));
+          })
+          .catch((error) => {
+            setLogs((prev) => [...prev, `Terminal state refresh failed: ${String(error)}`]);
+          });
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!isPreviewPoppedOut || !activeProjectPreviewUrl) {
+      return;
+    }
+    api.preview.navigate({ url: activeProjectPreviewUrl }).catch((error) => {
+      setLogs((prev) => [...prev, `Preview pop-out navigate failed: ${String(error)}`]);
+    });
+  }, [isPreviewPoppedOut, activeProjectPreviewUrl, activeProjectId]);
+
+  useEffect(() => {
+    api.projectTerminal
+      .setActiveProject({ projectId: activeProjectId })
+      .catch((error) => setLogs((prev) => [...prev, `Terminal switch failed: ${String(error)}`]));
     if (!activeProjectId) {
+      setActiveProjectPreviewUrl("");
       return;
     }
 
-    loadThreads().catch((error) => {
-      setLogs((prev) => [...prev, `Load threads failed: ${String(error)}`]);
-    });
+    Promise.all([loadThreads(), loadProjectSettings(activeProjectId), loadProjectTerminalState(activeProjectId)])
+      .then(([, projectSettings]) => {
+        setActiveProjectPreviewUrl(projectSettings.lastDetectedPreviewUrl ?? "");
+      })
+      .catch((error) => {
+        setLogs((prev) => [...prev, `Load project failed: ${String(error)}`]);
+      });
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -1252,6 +1372,106 @@ export const App = () => {
     } finally {
       setCreatingProject(false);
     }
+  };
+
+  const openActiveProjectSettings = async (projectId = activeProjectId) => {
+    if (!projectId) {
+      return;
+    }
+    const current = projectSettingsById[projectId] ?? (await loadProjectSettings(projectId));
+    setProjectSettingsEnvText(JSON.stringify(current.envVars, null, 2));
+    setProjectSettingsCommands(current.devCommands);
+    setProjectSettingsDefaultCommandId(current.defaultDevCommandId ?? current.devCommands[0]?.id ?? "");
+    setProjectSettingsAutoStart(current.autoStartDevTerminal);
+    setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
+    if (activeProjectId !== projectId) {
+      setActiveProjectId(projectId);
+    }
+    setShowProjectSettings(true);
+  };
+
+  const saveProjectSettings = async () => {
+    if (!activeProjectId) {
+      return;
+    }
+
+    let envVars: Record<string, string> = {};
+    try {
+      envVars = JSON.parse(projectSettingsEnvText) as Record<string, string>;
+    } catch {
+      setLogs((prev) => [...prev, "Project settings save failed: env vars must be valid JSON object."]);
+      return;
+    }
+
+    const sanitizedCommands = projectSettingsCommands
+      .map((command) => ({
+        id: command.id.trim(),
+        name: command.name.trim(),
+        command: command.command.trim()
+      }))
+      .filter((command) => command.id && command.name && command.command);
+
+    if (sanitizedCommands.length === 0) {
+      setLogs((prev) => [...prev, "Project settings save failed: at least one dev command is required."]);
+      return;
+    }
+
+    const saved = await api.projectSettings.set({
+      projectId: activeProjectId,
+      envVars,
+      devCommands: sanitizedCommands,
+      defaultDevCommandId: projectSettingsDefaultCommandId || sanitizedCommands[0]?.id,
+      autoStartDevTerminal: projectSettingsAutoStart,
+      switchBehaviorOverride: projectSwitchBehaviorOverride || undefined
+    });
+
+    setProjectSettingsById((prev) => ({
+      ...prev,
+      [activeProjectId]: saved
+    }));
+    setActiveProjectPreviewUrl(saved.lastDetectedPreviewUrl ?? "");
+    setShowProjectSettings(false);
+  };
+
+  const startActiveProjectTerminal = async () => {
+    if (!activeProjectId) {
+      return;
+    }
+    const state = await api.projectTerminal.start({ projectId: activeProjectId });
+    setProjectTerminalById((prev) => ({
+      ...prev,
+      [activeProjectId]: state
+    }));
+  };
+
+  const stopActiveProjectTerminal = async () => {
+    if (!activeProjectId) {
+      return;
+    }
+    await api.projectTerminal.stop({ projectId: activeProjectId });
+    const state = await api.projectTerminal.getState({ projectId: activeProjectId });
+    setProjectTerminalById((prev) => ({
+      ...prev,
+      [activeProjectId]: state
+    }));
+  };
+
+  const reloadPreviewPane = () => {
+    const webview = previewWebviewRef.current as { reload?: () => void } | null;
+    webview?.reload?.();
+  };
+
+  const popoutPreview = async () => {
+    if (!activeProjectPreviewUrl) {
+      return;
+    }
+    await api.preview.openPopout({ url: activeProjectPreviewUrl });
+    setIsPreviewPoppedOut(true);
+  };
+
+  const closePopoutPreview = async () => {
+    await api.preview.closePopout();
+    setIsPreviewPoppedOut(false);
   };
 
   const createThread = async (projectId = activeProjectId, title = "New thread") => {
@@ -1437,6 +1657,7 @@ export const App = () => {
       envVars,
       defaultProjectDirectory: settings.defaultProjectDirectory?.trim() ?? "",
       autoRenameThreadTitles: settings.autoRenameThreadTitles ?? true,
+      projectTerminalSwitchBehaviorDefault: settings.projectTerminalSwitchBehaviorDefault ?? "start_stop",
       codexDefaults: composerOptions
     });
 
@@ -1615,13 +1836,23 @@ export const App = () => {
               <button className="btn-ghost" onClick={checkUpdates}>
                 Updates
               </button>
+              <button className="btn-ghost" onClick={() => setIsPreviewOpen((prev) => !prev)}>
+                {isPreviewOpen ? "Hide Preview" : "Preview"}
+              </button>
+              <button className="btn-ghost" onClick={() => openActiveProjectSettings().catch((error) => setLogs((prev) => [...prev, `Project settings open failed: ${String(error)}`]))}>
+                Project Settings
+              </button>
               <button className="btn-secondary" onClick={() => setShowSettings(true)}>
                 Settings
               </button>
             </div>
           </header>
 
-          <div className="grid flex-1 min-h-0 grid-cols-[300px_1fr] overflow-hidden">
+          <div
+            className={`grid flex-1 min-h-0 overflow-hidden ${
+              isPreviewOpen ? "grid-cols-[300px_minmax(0,1fr)_420px]" : "grid-cols-[300px_1fr]"
+            }`}
+          >
             <aside className="relative flex h-full min-h-0 flex-col border-r border-border/90 bg-[linear-gradient(180deg,#151515_0%,#121212_100%)] px-3 py-3">
               {!hasProjects && (
                 <div className="px-2 pb-3">
@@ -1642,6 +1873,18 @@ export const App = () => {
                       <div className="project-head">
                         <button className={active ? "project-row active" : "project-row"} onClick={() => setActiveProjectId(project.id)}>
                           <span className="truncate">{project.name}</span>
+                        </button>
+                        <button
+                          className="thread-add-btn"
+                          onClick={() => {
+                            setActiveProjectId(project.id);
+                            openActiveProjectSettings(project.id).catch((error) => {
+                              setLogs((prev) => [...prev, `Project settings open failed: ${String(error)}`]);
+                            });
+                          }}
+                          title="Project settings"
+                        >
+                          *
                         </button>
                         <button
                           className="thread-add-btn"
@@ -2118,6 +2361,69 @@ export const App = () => {
                 </section>
               )}
             </main>
+
+            {isPreviewOpen && (
+              <aside className="flex min-h-0 flex-col border-l border-border/90 bg-black/55">
+                <div className="flex items-center justify-between border-b border-border/80 px-3 py-2">
+                  <div className="text-xs uppercase tracking-[0.16em] text-muted">Project Dev</div>
+                  <div className="flex items-center gap-1">
+                    <button className="btn-ghost" onClick={reloadPreviewPane} disabled={!activeProjectPreviewUrl}>
+                      Reload
+                    </button>
+                    {!isPreviewPoppedOut ? (
+                      <button className="btn-ghost" onClick={() => popoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview pop-out failed: ${String(error)}`]))} disabled={!activeProjectPreviewUrl}>
+                        Pop Out
+                      </button>
+                    ) : (
+                      <button className="btn-ghost" onClick={() => closePopoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]))}>
+                        Close Pop-out
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <section className="border-b border-border/80 px-3 py-2">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="text-xs text-slate-300">
+                      {activeProjectTerminalState?.running ? "Server running" : "Server stopped"}
+                    </div>
+                    <div className="flex gap-1">
+                      <button className="btn-ghost" onClick={() => startActiveProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Terminal start failed: ${String(error)}`]))}>
+                        {activeProjectTerminalState?.running ? "Restart" : "Start"}
+                      </button>
+                      <button className="btn-ghost" onClick={() => stopActiveProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Terminal stop failed: ${String(error)}`]))} disabled={!activeProjectTerminalState?.running}>
+                        Stop
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mb-2 rounded border border-border/70 bg-black/35 px-2 py-1 text-[11px] text-slate-300">
+                    {activeProjectTerminalState?.command ?? "No command selected"}
+                  </div>
+                  <pre className="h-28 overflow-y-auto rounded border border-border bg-black/35 p-2 font-mono text-[11px] text-slate-300">
+                    {activeProjectTerminalLines.join("\n") || "No terminal output yet."}
+                  </pre>
+                </section>
+
+                <section className="flex min-h-0 flex-1 flex-col">
+                  <div className="truncate border-b border-border/80 px-3 py-2 text-xs text-slate-300">
+                    {activeProjectPreviewUrl || "Start dev command to detect preview URL."}
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    {activeProjectPreviewUrl ? (
+                      <webview
+                        ref={previewWebviewRef}
+                        src={activeProjectPreviewUrl}
+                        className="h-full w-full"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted">
+                        No preview URL detected yet.
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </aside>
+            )}
           </div>
         </div>
       </div>
@@ -2248,6 +2554,24 @@ export const App = () => {
               onChange={(event) => setSettingsEnvText(event.target.value)}
             />
 
+            <label className="mb-2 block text-sm text-muted">Project switch terminal behavior (default)</label>
+            <select
+              className="input mb-4 text-xs"
+              value={settings.projectTerminalSwitchBehaviorDefault ?? "start_stop"}
+              onChange={(event) =>
+                setSettings((prev) => ({
+                  ...prev,
+                  projectTerminalSwitchBehaviorDefault: event.target.value as ProjectTerminalSwitchBehavior
+                }))
+              }
+            >
+              {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
             <label className="mb-2 block text-sm text-muted">Default project directory</label>
             <div className="mb-4 flex gap-2">
               <input
@@ -2297,6 +2621,130 @@ export const App = () => {
                 Cancel
               </button>
               <button className="btn-primary" onClick={saveSettings}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showProjectSettings && activeProjectId && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Project Settings</h3>
+              <button className="btn-secondary" onClick={() => setShowProjectSettings(false)}>
+                Close
+              </button>
+            </div>
+
+            <label className="mb-2 block text-sm text-muted">Environment variables (JSON object)</label>
+            <textarea
+              className="input mb-4 h-28 font-mono text-xs"
+              value={projectSettingsEnvText}
+              onChange={(event) => setProjectSettingsEnvText(event.target.value)}
+            />
+
+            <label className="mb-2 block text-sm text-muted">Dev commands</label>
+            <div className="mb-3 space-y-2">
+              {projectSettingsCommands.map((command, index) => (
+                <div key={command.id || index} className="grid gap-2 md:grid-cols-[160px_1fr_28px]">
+                  <input
+                    className="input text-xs"
+                    value={command.name}
+                    placeholder="Name"
+                    onChange={(event) =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
+                      )
+                    }
+                  />
+                  <input
+                    className="input text-xs"
+                    value={command.command}
+                    placeholder="Command"
+                    onChange={(event) =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item, idx) => (idx === index ? { ...item, command: event.target.value } : item))
+                      )
+                    }
+                  />
+                  <button
+                    className="btn-secondary px-0"
+                    onClick={() => setProjectSettingsCommands((prev) => prev.filter((_, idx) => idx !== index))}
+                    disabled={projectSettingsCommands.length <= 1}
+                    title="Remove command"
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <button
+              className="btn-secondary mb-4"
+              onClick={() =>
+                setProjectSettingsCommands((prev) => [
+                  ...prev,
+                  {
+                    id: `cmd-${crypto.randomUUID()}`,
+                    name: `Command ${prev.length + 1}`,
+                    command: ""
+                  }
+                ])
+              }
+            >
+              Add command
+            </button>
+
+            <label className="mb-2 block text-sm text-muted">Default command</label>
+            <select
+              className="input mb-4 text-xs"
+              value={projectSettingsDefaultCommandId}
+              onChange={(event) => setProjectSettingsDefaultCommandId(event.target.value)}
+            >
+              {projectSettingsCommands.map((command) => (
+                <option key={command.id} value={command.id}>
+                  {command.name || command.id}
+                </option>
+              ))}
+            </select>
+
+            <label className="mb-2 block text-sm text-muted">Switch behavior override</label>
+            <select
+              className="input mb-4 text-xs"
+              value={projectSwitchBehaviorOverride}
+              onChange={(event) => setProjectSwitchBehaviorOverride(event.target.value as ProjectTerminalSwitchBehavior | "")}
+            >
+              <option value="">Use app default</option>
+              {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
+            <label className="mb-4 inline-flex items-center gap-2 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={projectSettingsAutoStart}
+                onChange={(event) => setProjectSettingsAutoStart(event.target.checked)}
+              />
+              Auto-start dev terminal for this project
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => setShowProjectSettings(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  saveProjectSettings().catch((error) => {
+                    setLogs((prev) => [...prev, `Project settings save failed: ${String(error)}`]);
+                  });
+                }}
+              >
                 Save
               </button>
             </div>

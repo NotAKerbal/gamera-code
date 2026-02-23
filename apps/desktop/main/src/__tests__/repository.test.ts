@@ -72,4 +72,31 @@ describeRepository("Repository", () => {
     repo.clearProviderThreadId(thread.id, "codex");
     expect(repo.getProviderThreadId(thread.id, "codex")).toBeNull();
   });
+
+  it("seeds and updates project settings", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-project-settings-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+    repo.setSettings({
+      envVars: { GLOBAL_TOKEN: "seed" }
+    });
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-project-settings" });
+    const seeded = repo.getProjectSettings(project.id);
+    expect(seeded.envVars.GLOBAL_TOKEN).toBe("seed");
+    expect(seeded.devCommands[0]?.command).toBe("npm run dev");
+
+    const updated = repo.setProjectSettings({
+      projectId: project.id,
+      envVars: { NODE_ENV: "development" },
+      devCommands: [{ id: "vite", name: "Vite", command: "npm run dev -- --host" }],
+      defaultDevCommandId: "vite",
+      lastDetectedPreviewUrl: "http://127.0.0.1:5173"
+    });
+
+    expect(updated.envVars.NODE_ENV).toBe("development");
+    expect(updated.defaultDevCommandId).toBe("vite");
+    expect(updated.lastDetectedPreviewUrl).toBe("http://127.0.0.1:5173");
+  });
 });

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC_CHANNELS, type DesktopApi, type SessionEvent } from "@code-app/shared";
+import { IPC_CHANNELS, type DesktopApi, type ProjectTerminalEvent, type SessionEvent } from "@code-app/shared";
 
 const api: DesktopApi = {
   projects: {
@@ -9,6 +9,26 @@ const api: DesktopApi = {
     update: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsUpdate, input),
     delete: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsDelete, input),
     pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath)
+  },
+  projectSettings: {
+    get: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSettingsGet, input),
+    set: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSettingsSet, input)
+  },
+  projectTerminal: {
+    setActiveProject: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalSetActiveProject, input),
+    start: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalStart, input),
+    stop: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalStop, input),
+    getState: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalGetState, input),
+    onEvent: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: ProjectTerminalEvent) => listener(payload);
+      ipcRenderer.on(IPC_CHANNELS.projectTerminalEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.projectTerminalEvent, wrapped);
+    }
+  },
+  preview: {
+    openPopout: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewOpenPopout, input),
+    closePopout: () => ipcRenderer.invoke(IPC_CHANNELS.previewClosePopout),
+    navigate: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewNavigate, input)
   },
   threads: {
     list: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsList, input),

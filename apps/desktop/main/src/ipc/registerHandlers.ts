@@ -5,12 +5,14 @@ import {
   IPC_CHANNELS,
   type CodexThreadOptions,
   type PermissionMode,
+  type ProjectTerminalEvent,
   type PromptAttachment,
   type SessionEvent,
   type ThreadStatus
 } from "@code-app/shared";
 import { Repository } from "../services/repository";
 import { SessionManager } from "../services/sessionManager";
+import { ProjectTerminalManager } from "../services/projectTerminalManager";
 import { InstallerManager } from "../services/installerManager";
 import { PermissionEngine } from "../services/permissionEngine";
 import { UpdaterService } from "../services/updaterService";
@@ -18,9 +20,15 @@ import { UpdaterService } from "../services/updaterService";
 export interface HandlerDeps {
   repository: Repository;
   sessionManager: SessionManager;
+  projectTerminalManager: ProjectTerminalManager;
   installerManager: InstallerManager;
   permissionEngine: PermissionEngine;
   updaterService: UpdaterService;
+  preview: {
+    openPopout: (url: string) => Promise<{ ok: boolean }>;
+    closePopout: () => Promise<{ ok: boolean }>;
+    navigate: (url: string) => Promise<{ ok: boolean }>;
+  };
 }
 
 export const registerIpcHandlers = (deps: HandlerDeps) => {
@@ -28,6 +36,13 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     BrowserWindow.getAllWindows().forEach((window) => {
       if (!window.isDestroyed()) {
         window.webContents.send(IPC_CHANNELS.sessionsEvent, event);
+      }
+    });
+  };
+  const pushProjectTerminalEvent = (event: ProjectTerminalEvent) => {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.projectTerminalEvent, event);
       }
     });
   };
@@ -77,6 +92,57 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     }
 
     return result.filePaths[0];
+  });
+
+  ipcMain.handle(IPC_CHANNELS.projectSettingsGet, async (_event, input: { projectId: string }) => {
+    return deps.repository.getProjectSettings(input.projectId);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.projectSettingsSet,
+    async (
+      _event,
+      input: {
+        projectId: string;
+        envVars?: Record<string, string>;
+        devCommands?: Array<{ id: string; name: string; command: string }>;
+        defaultDevCommandId?: string;
+        autoStartDevTerminal?: boolean;
+        switchBehaviorOverride?: "start_stop" | "start_only" | "manual";
+        lastDetectedPreviewUrl?: string;
+      }
+    ) => deps.repository.setProjectSettings(input)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.projectTerminalSetActiveProject, async (_event, input: { projectId: string | null }) => {
+    return deps.projectTerminalManager.setActiveProject(input.projectId);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.projectTerminalStart,
+    async (_event, input: { projectId: string; commandId?: string }) => {
+      return deps.projectTerminalManager.start(input.projectId, input.commandId);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.projectTerminalStop, async (_event, input: { projectId: string }) => {
+    return deps.projectTerminalManager.stop(input.projectId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.projectTerminalGetState, async (_event, input: { projectId: string }) => {
+    return deps.projectTerminalManager.getState(input.projectId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.previewOpenPopout, async (_event, input: { url: string }) => {
+    return deps.preview.openPopout(input.url);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.previewClosePopout, async () => {
+    return deps.preview.closePopout();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.previewNavigate, async (_event, input: { url: string }) => {
+    return deps.preview.navigate(input.url);
   });
 
   ipcMain.handle(IPC_CHANNELS.threadsList, async (_event, input?: { projectId?: string; includeArchived?: boolean }) => {
@@ -177,6 +243,7 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   ipcMain.handle(IPC_CHANNELS.updatesApply, async () => deps.updaterService.applyUpdate());
 
   return {
-    emitSessionEvent: pushSessionEvent
+    emitSessionEvent: pushSessionEvent,
+    emitProjectTerminalEvent: pushProjectTerminalEvent
   };
 };
