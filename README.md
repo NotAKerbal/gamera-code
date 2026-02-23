@@ -73,6 +73,15 @@ Host/tooling notes:
 - Windows `.exe` cross-builds from macOS/Linux may require Wine.
 - Linux `.AppImage` cross-builds are most reliable on Linux (or Linux CI/container).
 
+If Windows packaging fails with `app-builder.exe ENOENT`, reinstall dependencies from scratch:
+
+```powershell
+Remove-Item -Recurse -Force node_modules
+Remove-Item -Force package-lock.json
+npm install
+npm run package:win
+```
+
 ## Testing
 
 ```bash

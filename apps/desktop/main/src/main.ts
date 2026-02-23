@@ -68,7 +68,9 @@ const createWindow = () => {
     });
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    const indexPath = resolve(__dirname, "../../renderer/dist/index.html");
+    // In production, __dirname points to ".../Resources/app.asar/dist".
+    // The renderer bundle is packaged under ".../Resources/app.asar/renderer/dist".
+    const indexPath = resolve(__dirname, "../renderer/dist/index.html");
     mainWindow.loadFile(indexPath).catch((error) => {
       log.error("Failed to load renderer build", error);
     });
