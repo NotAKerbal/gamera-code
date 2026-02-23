@@ -19,7 +19,9 @@ import { getThreadDataPath, type AppPaths } from "./paths";
 const DEFAULT_DEV_COMMAND: ProjectDevCommand = {
   id: "default",
   name: "Dev Server",
-  command: "npm run dev"
+  command: "npm run dev",
+  autoStart: true,
+  useForPreview: true
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -156,7 +158,7 @@ const parseDevCommands = (value: unknown): ProjectDevCommand[] => {
   }
 
   const parsed: ProjectDevCommand[] = [];
-  for (const item of value) {
+  for (const [index, item] of value.entries()) {
     if (!item || typeof item !== "object") {
       continue;
     }
@@ -167,14 +169,22 @@ const parseDevCommands = (value: unknown): ProjectDevCommand[] => {
     if (!id || !name || !command) {
       continue;
     }
-    parsed.push({ id, name, command });
+    const autoStart = typeof row.autoStart === "boolean" ? row.autoStart : index === 0;
+    const useForPreview = typeof row.useForPreview === "boolean" ? row.useForPreview : index === 0;
+    parsed.push({ id, name, command, autoStart, useForPreview });
   }
 
   if (parsed.length === 0) {
     return [DEFAULT_DEV_COMMAND];
   }
 
-  return parsed.slice(0, 10);
+  const normalized = parsed.slice(0, 10);
+  const hasPreviewTarget = normalized.some((command) => command.useForPreview);
+  if (!hasPreviewTarget && normalized[0]) {
+    normalized[0] = { ...normalized[0], useForPreview: true };
+  }
+
+  return normalized;
 };
 
 const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {

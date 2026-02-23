@@ -1,6 +1,11 @@
 import type {
   AppSettings,
   CodexThreadOptions,
+  GitCommitResult,
+  GitCommandResult,
+  GitDiffResult,
+  GitRepositoryCandidate,
+  GitState,
   InstallStatus,
   MessageEvent,
   PermissionMode,
@@ -22,6 +27,9 @@ export interface DesktopApi {
     list: () => Promise<Project[]>;
     create: (input: { name: string; path: string }) => Promise<Project>;
     createInDirectory: (input: { name: string; parentDir: string }) => Promise<Project>;
+    listGitRepositories: () => Promise<GitRepositoryCandidate[]>;
+    importFromPath: (input: { path: string; name?: string }) => Promise<Project>;
+    cloneFromGitUrl: (input: { url: string; name?: string }) => Promise<Project>;
     update: (input: { id: string; name?: string; path?: string }) => Promise<Project>;
     delete: (input: { id: string }) => Promise<{ ok: boolean }>;
     pickPath: () => Promise<string | null>;
@@ -31,7 +39,7 @@ export interface DesktopApi {
     set: (input: {
       projectId: string;
       envVars?: Record<string, string>;
-      devCommands?: Array<{ id: string; name: string; command: string }>;
+      devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; useForPreview?: boolean }>;
       defaultDevCommandId?: string;
       autoStartDevTerminal?: boolean;
       switchBehaviorOverride?: "start_stop" | "start_only" | "manual";
@@ -41,7 +49,7 @@ export interface DesktopApi {
   projectTerminal: {
     setActiveProject: (input: { projectId: string | null }) => Promise<{ ok: boolean }>;
     start: (input: { projectId: string; commandId?: string }) => Promise<ProjectTerminalState>;
-    stop: (input: { projectId: string }) => Promise<{ ok: boolean }>;
+    stop: (input: { projectId: string; commandId?: string }) => Promise<{ ok: boolean }>;
     getState: (input: { projectId: string }) => Promise<ProjectTerminalState>;
     onEvent: (listener: (event: ProjectTerminalEvent) => void) => () => void;
   };
@@ -87,5 +95,20 @@ export interface DesktopApi {
   updates: {
     check: () => Promise<UpdateCheckResult>;
     apply: () => Promise<{ ok: boolean }>;
+  };
+  git: {
+    getState: (input: { projectId: string }) => Promise<GitState>;
+    getDiff: (input: { projectId: string; path?: string }) => Promise<GitDiffResult>;
+    fetch: (input: { projectId: string }) => Promise<GitCommandResult>;
+    pull: (input: { projectId: string }) => Promise<GitCommandResult>;
+    push: (input: { projectId: string }) => Promise<GitCommandResult>;
+    sync: (input: { projectId: string }) => Promise<GitCommandResult>;
+    stage: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
+    unstage: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
+    commit: (input: { projectId: string; message?: string }) => Promise<GitCommitResult>;
+    checkoutBranch: (input: { projectId: string; branch: string }) => Promise<GitCommandResult>;
+    createBranch: (input: { projectId: string; branch: string; checkout?: boolean }) => Promise<GitCommandResult>;
+    openPopout: (input: { projectId: string; projectName?: string }) => Promise<{ ok: boolean }>;
+    closePopout: () => Promise<{ ok: boolean }>;
   };
 }

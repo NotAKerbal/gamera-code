@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from "electron";
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
   IPC_CHANNELS,
   type CodexThreadOptions,
@@ -16,6 +16,7 @@ import { ProjectTerminalManager } from "../services/projectTerminalManager";
 import { InstallerManager } from "../services/installerManager";
 import { PermissionEngine } from "../services/permissionEngine";
 import { UpdaterService } from "../services/updaterService";
+import { GitService } from "../services/gitService";
 
 export interface HandlerDeps {
   repository: Repository;
@@ -24,6 +25,11 @@ export interface HandlerDeps {
   installerManager: InstallerManager;
   permissionEngine: PermissionEngine;
   updaterService: UpdaterService;
+  gitService: GitService;
+  gitPopout: {
+    open: (projectId: string, projectName?: string) => Promise<{ ok: boolean }>;
+    close: () => Promise<{ ok: boolean }>;
+  };
   preview: {
     openPopout: (url: string, projectName?: string) => Promise<{ ok: boolean }>;
     closePopout: () => Promise<{ ok: boolean }>;
@@ -33,6 +39,20 @@ export interface HandlerDeps {
 }
 
 export const registerIpcHandlers = (deps: HandlerDeps) => {
+  const normalizePath = (path: string) => resolve(path);
+  const findProjectByPath = (path: string) => {
+    const normalized = normalizePath(path);
+    return deps.repository.listProjects().find((project) => normalizePath(project.path) === normalized) ?? null;
+  };
+
+  const getProjectPath = (projectId: string) => {
+    const project = deps.repository.getProject(projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+    return project.path;
+  };
+
   const pushSessionEvent = (event: SessionEvent) => {
     BrowserWindow.getAllWindows().forEach((window) => {
       if (!window.isDestroyed()) {
@@ -66,6 +86,60 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
       return deps.repository.createProject({ name: trimmedName, path: targetPath });
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.projectsListGitRepositories, async () => {
+    const rootDir = deps.repository.getSettings().defaultProjectDirectory?.trim() ?? "";
+    if (!rootDir) {
+      return [];
+    }
+    return deps.gitService.discoverRepositories(rootDir);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.projectsImportFromPath, async (_event, input: { path: string; name?: string }) => {
+    const path = input.path.trim();
+    if (!path) {
+      throw new Error("Project path is required.");
+    }
+
+    const existing = findProjectByPath(path);
+    if (existing) {
+      return existing;
+    }
+
+    const gitState = await deps.gitService.getState(path);
+    if (!gitState.insideRepo) {
+      throw new Error("Selected folder is not a git repository.");
+    }
+
+    const name = input.name?.trim() || basename(path);
+    return deps.repository.createProject({ name, path });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.projectsCloneFromGitUrl, async (_event, input: { url: string; name?: string }) => {
+    const url = input.url.trim();
+    if (!url) {
+      throw new Error("Repository URL is required.");
+    }
+
+    const rootDir = deps.repository.getSettings().defaultProjectDirectory?.trim() ?? "";
+    if (!rootDir) {
+      throw new Error("Set a default project directory in Settings first.");
+    }
+
+    mkdirSync(rootDir, { recursive: true });
+    const clone = await deps.gitService.cloneRepository(url, rootDir, input.name);
+    if (!clone.ok) {
+      throw new Error(clone.stderr || "Failed to clone repository.");
+    }
+
+    const existing = findProjectByPath(clone.path);
+    if (existing) {
+      return existing;
+    }
+
+    const name = input.name?.trim() || basename(clone.path);
+    return deps.repository.createProject({ name, path: clone.path });
+  });
 
   ipcMain.handle(IPC_CHANNELS.projectsUpdate, async (_event, input: { id: string; name?: string; path?: string }) => {
     return deps.repository.updateProject(input);
@@ -106,7 +180,7 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
       input: {
         projectId: string;
         envVars?: Record<string, string>;
-        devCommands?: Array<{ id: string; name: string; command: string }>;
+        devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; useForPreview?: boolean }>;
         defaultDevCommandId?: string;
         autoStartDevTerminal?: boolean;
         switchBehaviorOverride?: "start_stop" | "start_only" | "manual";
@@ -126,8 +200,8 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.projectTerminalStop, async (_event, input: { projectId: string }) => {
-    return deps.projectTerminalManager.stop(input.projectId);
+  ipcMain.handle(IPC_CHANNELS.projectTerminalStop, async (_event, input: { projectId: string; commandId?: string }) => {
+    return deps.projectTerminalManager.stop(input.projectId, input.commandId);
   });
 
   ipcMain.handle(IPC_CHANNELS.projectTerminalGetState, async (_event, input: { projectId: string }) => {
@@ -246,6 +320,61 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   ipcMain.handle(IPC_CHANNELS.updatesCheck, async () => deps.updaterService.checkForUpdates());
 
   ipcMain.handle(IPC_CHANNELS.updatesApply, async () => deps.updaterService.applyUpdate());
+
+  ipcMain.handle(IPC_CHANNELS.gitGetState, async (_event, input: { projectId: string }) => {
+    return deps.gitService.getState(getProjectPath(input.projectId));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitGetDiff, async (_event, input: { projectId: string; path?: string }) => {
+    return deps.gitService.getDiff(getProjectPath(input.projectId), input.path);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitFetch, async (_event, input: { projectId: string }) => {
+    return deps.gitService.fetch(getProjectPath(input.projectId));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitPull, async (_event, input: { projectId: string }) => {
+    return deps.gitService.pull(getProjectPath(input.projectId));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitPush, async (_event, input: { projectId: string }) => {
+    return deps.gitService.push(getProjectPath(input.projectId));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitSync, async (_event, input: { projectId: string }) => {
+    return deps.gitService.sync(getProjectPath(input.projectId));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitStage, async (_event, input: { projectId: string; path?: string }) => {
+    return deps.gitService.stage(getProjectPath(input.projectId), input.path);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitUnstage, async (_event, input: { projectId: string; path?: string }) => {
+    return deps.gitService.unstage(getProjectPath(input.projectId), input.path);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitCommit, async (_event, input: { projectId: string; message?: string }) => {
+    return deps.gitService.commit(getProjectPath(input.projectId), input.message);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitCheckoutBranch, async (_event, input: { projectId: string; branch: string }) => {
+    return deps.gitService.checkoutBranch(getProjectPath(input.projectId), input.branch);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.gitCreateBranch,
+    async (_event, input: { projectId: string; branch: string; checkout?: boolean }) => {
+      return deps.gitService.createBranch(getProjectPath(input.projectId), input.branch, input.checkout ?? true);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.gitOpenPopout, async (_event, input: { projectId: string; projectName?: string }) => {
+    return deps.gitPopout.open(input.projectId, input.projectName);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gitClosePopout, async () => {
+    return deps.gitPopout.close();
+  });
 
   return {
     emitSessionEvent: pushSessionEvent,

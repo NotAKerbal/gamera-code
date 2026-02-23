@@ -6,6 +6,9 @@ const api: DesktopApi = {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.projectsList),
     create: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreate, input),
     createInDirectory: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreateInDirectory, input),
+    listGitRepositories: () => ipcRenderer.invoke(IPC_CHANNELS.projectsListGitRepositories),
+    importFromPath: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsImportFromPath, input),
+    cloneFromGitUrl: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCloneFromGitUrl, input),
     update: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsUpdate, input),
     delete: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsDelete, input),
     pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath)
@@ -66,6 +69,21 @@ const api: DesktopApi = {
   updates: {
     check: () => ipcRenderer.invoke(IPC_CHANNELS.updatesCheck),
     apply: () => ipcRenderer.invoke(IPC_CHANNELS.updatesApply)
+  },
+  git: {
+    getState: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetState, input),
+    getDiff: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetDiff, input),
+    fetch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitFetch, input),
+    pull: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitPull, input),
+    push: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitPush, input),
+    sync: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitSync, input),
+    stage: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitStage, input),
+    unstage: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitUnstage, input),
+    commit: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCommit, input),
+    checkoutBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCheckoutBranch, input),
+    createBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCreateBranch, input),
+    openPopout: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitOpenPopout, input),
+    closePopout: () => ipcRenderer.invoke(IPC_CHANNELS.gitClosePopout)
   }
 };
 

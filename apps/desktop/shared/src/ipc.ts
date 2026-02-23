@@ -2,6 +2,9 @@ export const IPC_CHANNELS = {
   projectsList: "projects:list",
   projectsCreate: "projects:create",
   projectsCreateInDirectory: "projects:createInDirectory",
+  projectsListGitRepositories: "projects:listGitRepositories",
+  projectsImportFromPath: "projects:importFromPath",
+  projectsCloneFromGitUrl: "projects:cloneFromGitUrl",
   projectsUpdate: "projects:update",
   projectsDelete: "projects:delete",
   projectsPickPath: "projects:pickPath",
@@ -35,7 +38,20 @@ export const IPC_CHANNELS = {
   settingsGet: "settings:get",
   settingsSet: "settings:set",
   updatesCheck: "updates:check",
-  updatesApply: "updates:apply"
+  updatesApply: "updates:apply",
+  gitGetState: "git:getState",
+  gitGetDiff: "git:getDiff",
+  gitFetch: "git:fetch",
+  gitPull: "git:pull",
+  gitPush: "git:push",
+  gitSync: "git:sync",
+  gitStage: "git:stage",
+  gitUnstage: "git:unstage",
+  gitCommit: "git:commit",
+  gitCheckoutBranch: "git:checkoutBranch",
+  gitCreateBranch: "git:createBranch",
+  gitOpenPopout: "git:openPopout",
+  gitClosePopout: "git:closePopout"
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

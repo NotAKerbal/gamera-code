@@ -10,7 +10,7 @@ import {
 const baseSettings: ProjectSettings = {
   projectId: "p1",
   envVars: {},
-  devCommands: [{ id: "default", name: "Dev Server", command: "npm run dev" }],
+  devCommands: [{ id: "default", name: "Dev Server", command: "npm run dev", autoStart: true, useForPreview: true }],
   defaultDevCommandId: "default",
   autoStartDevTerminal: true,
   createdAt: new Date().toISOString(),
@@ -54,6 +54,7 @@ describe("projectTerminalManager switching", () => {
     const startSpy = vi.spyOn(manager, "start").mockImplementation((projectId: string) => ({
       projectId,
       running: true,
+      terminals: [],
       outputTail: "",
       updatedAt: new Date().toISOString()
     }));
@@ -61,8 +62,8 @@ describe("projectTerminalManager switching", () => {
     manager.setActiveProject("p1");
     manager.setActiveProject("p2");
 
-    expect(startSpy).toHaveBeenCalledWith("p1");
+    expect(startSpy).toHaveBeenCalledWith("p1", undefined, true);
     expect(stopSpy).toHaveBeenCalledWith("p1");
-    expect(startSpy).toHaveBeenCalledWith("p2");
+    expect(startSpy).toHaveBeenCalledWith("p2", undefined, true);
   });
 });

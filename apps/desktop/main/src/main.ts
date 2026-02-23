@@ -10,11 +10,13 @@ import { SessionManager } from "./services/sessionManager";
 import { ProjectTerminalManager } from "./services/projectTerminalManager";
 import { InstallerManager } from "./services/installerManager";
 import { UpdaterService } from "./services/updaterService";
+import { GitService } from "./services/gitService";
 import { registerIpcHandlers } from "./ipc/registerHandlers";
 import { applyRuntimePathToProcessEnv } from "./utils/runtimeEnv";
 
 let mainWindow: BrowserWindow | null = null;
 let previewPopoutWindow: BrowserWindow | null = null;
+let gitPopoutWindow: BrowserWindow | null = null;
 const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
 const PREVIEW_LOAD_BASE_DELAY_MS = 350;
 
@@ -230,7 +232,15 @@ const buildPreviewPopoutHtml = (initialUrl: string) => {
         tryNavigate(nextUrl);
       };
       frame.addEventListener("load", () => {
-        const href = frame.contentWindow ? String(frame.contentWindow.location.href || "") : "";
+        let href = "";
+        try {
+          href = frame.contentWindow ? String(frame.contentWindow.location.href || "") : "";
+        } catch {
+          // Cross-origin iframe access throws in data: origin; treat as successful load.
+          setStatus("Loaded");
+          return;
+        }
+
         if (href.startsWith("chrome-error://")) {
           setStatus("Server not ready, retrying...");
           const target = urlInput ? urlInput.value : "";
@@ -288,9 +298,7 @@ const ensurePreviewPopout = async (url: string, projectName?: string) => {
     });
   }
   previewPopoutWindow.setTitle(formatPreviewWindowTitle(projectName));
-  const html = buildPreviewPopoutHtml(url);
-  const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
-  await loadPreviewUrlWithRetry(previewPopoutWindow, dataUrl);
+  await loadPreviewUrlWithRetry(previewPopoutWindow, url);
   previewPopoutWindow.show();
   previewPopoutWindow.focus();
 };
@@ -305,17 +313,350 @@ const navigatePreviewPopout = async (url: string, projectName?: string) => {
   }
   previewPopoutWindow.setTitle(formatPreviewWindowTitle(projectName));
 
+  await loadPreviewUrlWithRetry(previewPopoutWindow, url);
+  previewPopoutWindow.show();
+  previewPopoutWindow.focus();
+};
+
+const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
+  const safeProjectId = escapeJsString(projectId);
+  const safeProjectName = escapeJsString(projectName?.trim() || "Project");
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Git</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #0d0d0d;
+        color: #e5e7eb;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px;
+        border-bottom: 1px solid #2f2f2f;
+        background: #111;
+      }
+      .btn {
+        height: 30px;
+        border: 1px solid #3a3a3a;
+        border-radius: 8px;
+        background: #191919;
+        color: #e5e7eb;
+        padding: 0 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .btn:hover {
+        background: #222;
+      }
+      .btn[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .branch-input {
+        flex: 1;
+        min-width: 120px;
+        height: 30px;
+        border: 1px solid #3a3a3a;
+        border-radius: 8px;
+        background: #161616;
+        color: #e5e7eb;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      .meta {
+        padding: 8px 10px;
+        border-bottom: 1px solid #2f2f2f;
+        font-size: 12px;
+        color: #cbd5e1;
+      }
+      .layout {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: 180px minmax(0, 1fr);
+      }
+      .files {
+        border-bottom: 1px solid #2f2f2f;
+        overflow: auto;
+        padding: 8px 10px;
+      }
+      .file {
+        width: 100%;
+        text-align: left;
+        border: 0;
+        background: transparent;
+        color: #d1d5db;
+        border-radius: 6px;
+        padding: 6px 8px;
+        margin-bottom: 4px;
+        cursor: pointer;
+      }
+      .file:hover {
+        background: #1f1f1f;
+      }
+      .file.active {
+        background: #27272a;
+        color: #fff;
+      }
+      .status {
+        font-size: 11px;
+        color: #94a3b8;
+      }
+      .diff-wrap {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 8px 10px;
+      }
+      .diff-title {
+        font-size: 11px;
+        color: #94a3b8;
+        margin-bottom: 6px;
+      }
+      pre {
+        margin: 0;
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        background: #111217;
+        border: 1px solid #2f2f2f;
+        border-radius: 8px;
+        padding: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <button id="refreshBtn" class="btn">Refresh</button>
+      <button id="fetchBtn" class="btn">Fetch</button>
+      <button id="pullBtn" class="btn">Pull</button>
+      <button id="pushBtn" class="btn">Push</button>
+      <button id="syncBtn" class="btn">Sync</button>
+    </div>
+    <div class="bar" style="padding-top: 0; border-bottom: 1px solid #2f2f2f;">
+      <input id="branchInput" class="branch-input" list="branches" placeholder="Search or type branch" />
+      <datalist id="branches"></datalist>
+      <button id="switchBtn" class="btn">Switch/Create</button>
+    </div>
+    <div id="meta" class="meta">Loading git state...</div>
+    <div class="layout">
+      <div id="files" class="files"></div>
+      <div class="diff-wrap">
+        <div id="diffTitle" class="diff-title">Diff</div>
+        <pre id="diff">Loading...</pre>
+      </div>
+    </div>
+    <script>
+      const api = window.desktopAPI;
+      let activeProjectId = "${safeProjectId}";
+      let activeProjectName = "${safeProjectName}";
+      let activeState = null;
+      let selectedPath = "";
+      const meta = document.getElementById("meta");
+      const files = document.getElementById("files");
+      const diff = document.getElementById("diff");
+      const diffTitle = document.getElementById("diffTitle");
+      const branchInput = document.getElementById("branchInput");
+      const branchList = document.getElementById("branches");
+      const syncBtn = document.getElementById("syncBtn");
+
+      const setBusy = (busy) => {
+        const buttons = Array.from(document.querySelectorAll("button"));
+        buttons.forEach((button) => {
+          button.disabled = busy;
+        });
+      };
+
+      const fileStatusText = (file) => {
+        if (file.untracked) return "untracked";
+        if (file.staged && file.unstaged) return "staged + unstaged";
+        if (file.staged) return "staged";
+        if (file.unstaged) return "unstaged";
+        return "unknown";
+      };
+
+      const renderFiles = () => {
+        const changed = activeState?.files || [];
+        if (changed.length === 0) {
+          files.innerHTML = '<div class="status">Working tree clean.</div>';
+          return;
+        }
+        files.innerHTML = "";
+        changed.forEach((file) => {
+          const btn = document.createElement("button");
+          btn.className = "file" + (selectedPath === file.path ? " active" : "");
+          btn.innerHTML = '<div>' + file.path + '</div><div class="status">' + fileStatusText(file) + '</div>';
+          btn.addEventListener("click", async () => {
+            selectedPath = file.path;
+            renderFiles();
+            await loadDiff();
+          });
+          files.appendChild(btn);
+        });
+      };
+
+      const renderBranches = () => {
+        const branches = activeState?.branches || [];
+        branchList.innerHTML = "";
+        branches.forEach((branch) => {
+          const option = document.createElement("option");
+          option.value = branch.name;
+          branchList.appendChild(option);
+        });
+        if (!branchInput.value && activeState?.branch) {
+          branchInput.value = activeState.branch;
+        }
+      };
+
+      const renderMeta = () => {
+        if (!activeState || !activeState.insideRepo) {
+          meta.textContent = activeProjectName + " is not a git repository.";
+          syncBtn.style.display = "none";
+          return;
+        }
+        meta.textContent =
+          (activeState.branch || "(detached)") +
+          (activeState.upstream ? " -> " + activeState.upstream : "") +
+          " | Ahead " + activeState.ahead + " Behind " + activeState.behind +
+          " | " + activeState.stagedCount + " staged, " + activeState.unstagedCount + " unstaged, " + activeState.untrackedCount + " untracked";
+        syncBtn.style.display = activeState.ahead > 0 || activeState.behind > 0 ? "" : "none";
+      };
+
+      const loadDiff = async () => {
+        diffTitle.textContent = selectedPath ? "Diff - " + selectedPath : "Diff (working tree)";
+        const result = await api.git.getDiff({ projectId: activeProjectId, path: selectedPath || undefined });
+        diff.textContent = result.ok ? (result.diff || "No diff available.") : (result.stderr || "No diff available.");
+      };
+
+      const loadState = async () => {
+        activeState = await api.git.getState({ projectId: activeProjectId });
+        if (!activeState.insideRepo) {
+          selectedPath = "";
+        } else if (!selectedPath || !activeState.files.some((file) => file.path === selectedPath)) {
+          selectedPath = activeState.files[0]?.path || "";
+        }
+        renderMeta();
+        renderBranches();
+        renderFiles();
+        await loadDiff();
+      };
+
+      const runAction = async (action) => {
+        setBusy(true);
+        try {
+          await action();
+          await loadState();
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const switchOrCreateBranch = async () => {
+        if (!activeState?.insideRepo) return;
+        const branch = branchInput.value.trim();
+        if (!branch) return;
+        const exists = (activeState.branches || []).some((item) => item.name === branch);
+        if (exists) {
+          await runAction(() => api.git.checkoutBranch({ projectId: activeProjectId, branch }));
+        } else {
+          await runAction(() => api.git.createBranch({ projectId: activeProjectId, branch, checkout: true }));
+        }
+      };
+
+      document.getElementById("refreshBtn").addEventListener("click", () => loadState());
+      document.getElementById("fetchBtn").addEventListener("click", () => runAction(() => api.git.fetch({ projectId: activeProjectId })));
+      document.getElementById("pullBtn").addEventListener("click", () => runAction(() => api.git.pull({ projectId: activeProjectId })));
+      document.getElementById("pushBtn").addEventListener("click", () => runAction(() => api.git.push({ projectId: activeProjectId })));
+      document.getElementById("syncBtn").addEventListener("click", () => runAction(() => api.git.sync({ projectId: activeProjectId })));
+      document.getElementById("switchBtn").addEventListener("click", () => switchOrCreateBranch());
+      branchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          switchOrCreateBranch();
+        }
+      });
+
+      window.__codeappSetGitProject = async (projectId, projectName) => {
+        activeProjectId = String(projectId || "");
+        activeProjectName = String(projectName || "Project");
+        selectedPath = "";
+        branchInput.value = "";
+        await loadState();
+      };
+
+      loadState();
+    </script>
+  </body>
+</html>`;
+};
+
+const formatGitWindowTitle = (projectName?: string) => {
+  const name = projectName?.trim();
+  return name ? `Git — ${name}` : "Git";
+};
+
+const ensureGitPopout = async (projectId: string, projectName?: string) => {
+  if (!gitPopoutWindow || gitPopoutWindow.isDestroyed()) {
+    gitPopoutWindow = new BrowserWindow({
+      width: 520,
+      height: 860,
+      minWidth: 420,
+      minHeight: 520,
+      title: formatGitWindowTitle(projectName),
+      backgroundColor: "#0b0d10",
+      webPreferences: {
+        preload: join(__dirname, "preload.js"),
+        contextIsolation: true,
+        sandbox: false,
+        nodeIntegration: false
+      }
+    });
+    gitPopoutWindow.on("closed", () => {
+      gitPopoutWindow = null;
+    });
+  }
+  gitPopoutWindow.setTitle(formatGitWindowTitle(projectName));
+  const html = buildGitPopoutHtml(projectId, projectName);
+  const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  await loadPreviewUrlWithRetry(gitPopoutWindow, dataUrl);
+  gitPopoutWindow.show();
+  gitPopoutWindow.focus();
+};
+
+const navigateGitPopout = async (projectId: string, projectName?: string) => {
+  if (!gitPopoutWindow || gitPopoutWindow.isDestroyed()) {
+    await ensureGitPopout(projectId, projectName);
+    return;
+  }
+  gitPopoutWindow.setTitle(formatGitWindowTitle(projectName));
   try {
-    await previewPopoutWindow.webContents.executeJavaScript(
-      `window.__codeappNavigate && window.__codeappNavigate("${escapeJsString(url)}");`,
+    await gitPopoutWindow.webContents.executeJavaScript(
+      `window.__codeappSetGitProject && window.__codeappSetGitProject("${escapeJsString(projectId)}", "${escapeJsString(projectName?.trim() || "Project")}");`,
       true
     );
   } catch {
-    await ensurePreviewPopout(url, projectName);
+    await ensureGitPopout(projectId, projectName);
     return;
   }
-  previewPopoutWindow.show();
-  previewPopoutWindow.focus();
+  gitPopoutWindow.show();
+  gitPopoutWindow.focus();
 };
 
 const bootstrap = async () => {
@@ -327,6 +668,7 @@ const bootstrap = async () => {
   const repository = new Repository(db, paths);
   const permissionEngine = new PermissionEngine(repository, repository.getSettings().permissionMode);
   const installerManager = new InstallerManager(repository);
+  const gitService = new GitService();
 
   createWindow();
 
@@ -365,6 +707,20 @@ const bootstrap = async () => {
     permissionEngine,
     installerManager,
     updaterService,
+    gitService,
+    gitPopout: {
+      open: async (projectId: string, projectName?: string) => {
+        await navigateGitPopout(projectId, projectName);
+        return { ok: true };
+      },
+      close: async () => {
+        if (gitPopoutWindow && !gitPopoutWindow.isDestroyed()) {
+          gitPopoutWindow.close();
+        }
+        gitPopoutWindow = null;
+        return { ok: true };
+      }
+    },
     sessionManager,
     projectTerminalManager,
     preview: {

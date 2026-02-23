@@ -58,6 +58,96 @@ webview {
   @apply space-y-1;
 }
 
+.projects-header {
+  @apply mb-1 flex items-center justify-between px-2;
+}
+
+.projects-title {
+  @apply text-xs font-semibold uppercase tracking-[0.16em] text-slate-400;
+}
+
+.project-action-pop {
+  @apply absolute right-0 top-8 z-20 flex min-w-36 flex-col gap-1 rounded-md border border-border bg-zinc-950 p-1 shadow-lg;
+}
+
+.branch-dropdown-pop {
+  @apply rounded-md border border-border bg-zinc-950 shadow-lg;
+}
+
+.branch-dropdown-list {
+  @apply max-h-52 overflow-y-auto p-1;
+}
+
+.branch-dropdown-row {
+  @apply flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs text-slate-200 transition hover:bg-zinc-800 hover:text-white;
+}
+
+.branch-dropdown-row-current {
+  @apply border border-emerald-500/60 bg-emerald-900/25 text-emerald-100 hover:bg-emerald-900/35;
+}
+
+.branch-dropdown-chip {
+  @apply ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400;
+}
+
+.branch-dropdown-actions {
+  @apply border-t border-border p-1;
+}
+
+.branch-dropdown-empty {
+  @apply px-2 py-1.5 text-xs text-slate-500;
+}
+
+.branch-inline {
+  @apply relative ml-auto;
+}
+
+.branch-trigger {
+  @apply inline-flex h-7 min-w-[13rem] items-center justify-between gap-2 rounded-md border border-border bg-black/25 px-2.5 text-xs text-slate-300 transition hover:bg-zinc-900 hover:text-white;
+}
+
+.branch-trigger:disabled {
+  @apply opacity-50;
+}
+
+.branch-search-input {
+  @apply border-transparent;
+}
+
+.branch-search-input:focus {
+  border-color: transparent !important;
+  box-shadow: none;
+  outline: none;
+}
+
+.git-activity {
+  @apply rounded border border-border/70 bg-black/35;
+}
+
+.git-activity-head {
+  @apply flex items-center justify-between border-b border-border/70 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-slate-500;
+}
+
+.git-activity-list {
+  @apply max-h-24 space-y-1 overflow-y-auto p-2;
+}
+
+.git-activity-item {
+  @apply rounded px-2 py-1 text-[11px];
+}
+
+.git-activity-item.info {
+  @apply bg-zinc-900/70 text-slate-300;
+}
+
+.git-activity-item.success {
+  @apply bg-emerald-900/30 text-emerald-200;
+}
+
+.git-activity-item.error {
+  @apply bg-red-900/30 text-red-200;
+}
+
 .project-head {
   @apply flex items-center gap-1;
 }

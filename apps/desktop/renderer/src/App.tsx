@@ -7,6 +7,7 @@ import {
   type DragEventHandler,
   type KeyboardEventHandler
 } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -16,6 +17,9 @@ import type {
   CodexSandboxMode,
   CodexThreadOptions,
   CodexWebSearchMode,
+  GitFileStatus,
+  GitRepositoryCandidate,
+  GitState,
   InstallStatus,
   MessageEvent,
   PermissionMode,
@@ -184,6 +188,22 @@ const getProjectNameFromPath = (path: string) => {
   return segments[segments.length - 1] || path;
 };
 
+const gitFileStatusText = (file: GitFileStatus) => {
+  if (file.untracked) {
+    return "untracked";
+  }
+  if (file.staged && file.unstaged) {
+    return "staged + unstaged";
+  }
+  if (file.staged) {
+    return "staged";
+  }
+  if (file.unstaged) {
+    return "unstaged";
+  }
+  return "unknown";
+};
+
 type ActivityTone = "info" | "success" | "warn" | "error";
 
 interface ActivityFileChange {
@@ -221,6 +241,13 @@ interface ActivityEntry {
 interface ComposerAttachment extends PromptAttachment {
   id: string;
   previewUrl: string;
+}
+
+interface GitActivityEntry {
+  id: string;
+  ts: string;
+  message: string;
+  tone: "info" | "success" | "error";
 }
 
 interface CommandRun {
@@ -691,6 +718,15 @@ const sanitizeProjectDirName = (value: string) => {
   return trimmed.replace(/[\\/]/g, "").replace(/\s+/g, " ");
 };
 
+const isLikelyGitRepositoryUrl = (value: string) => {
+  const input = value.trim();
+  if (!input) {
+    return false;
+  }
+
+  return /^(https?:\/\/|ssh:\/\/|git@|git:\/\/)/i.test(input) || /^[^/\s]+@[^:\s]+:.+/.test(input);
+};
+
 const toTitleCaseWord = (word: string) => (word.length > 1 ? `${word[0]!.toUpperCase()}${word.slice(1)}` : word.toUpperCase());
 
 const suggestThreadTitle = (prompt: string) => {
@@ -916,12 +952,19 @@ export const App = () => {
   const [composer, setComposer] = useState("");
   const [threadMenuProjectId, setThreadMenuProjectId] = useState<string | null>(null);
   const [threadDraftTitle, setThreadDraftTitle] = useState("New thread");
+  const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [showImportProjectModal, setShowImportProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [importProjectQuery, setImportProjectQuery] = useState("");
+  const [importCandidates, setImportCandidates] = useState<GitRepositoryCandidate[]>([]);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importBusyPath, setImportBusyPath] = useState<string | null>(null);
+  const [cloneBusy, setCloneBusy] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [updateMessage, setUpdateMessage] = useState<string>("");
@@ -933,20 +976,34 @@ export const App = () => {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [projectSettingsById, setProjectSettingsById] = useState<Record<string, ProjectSettings>>({});
   const [projectTerminalById, setProjectTerminalById] = useState<Record<string, ProjectTerminalState>>({});
-  const [projectTerminalLinesById, setProjectTerminalLinesById] = useState<Record<string, string[]>>({});
   const [projectPreviewUrlById, setProjectPreviewUrlById] = useState<Record<string, string>>({});
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isGitPanelOpen, setIsGitPanelOpen] = useState(false);
   const [isPreviewPoppedOut, setIsPreviewPoppedOut] = useState(false);
+  const [gitStateByProjectId, setGitStateByProjectId] = useState<Record<string, GitState>>({});
+  const [gitDiffByProjectId, setGitDiffByProjectId] = useState<Record<string, string>>({});
+  const [gitSelectedPathByProjectId, setGitSelectedPathByProjectId] = useState<Record<string, string | null>>({});
+  const [gitBusyAction, setGitBusyAction] = useState<string | null>(null);
+  const [gitCommitMessage, setGitCommitMessage] = useState("");
+  const [gitBranchSearch, setGitBranchSearch] = useState("");
+  const [gitActivityByProjectId, setGitActivityByProjectId] = useState<Record<string, GitActivityEntry[]>>({});
+  const [isGitPoppedOut, setIsGitPoppedOut] = useState(false);
   const [projectSettingsEnvText, setProjectSettingsEnvText] = useState("{}");
-  const [projectSettingsCommands, setProjectSettingsCommands] = useState<Array<{ id: string; name: string; command: string }>>([]);
+  const [projectSettingsCommands, setProjectSettingsCommands] = useState<
+    Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>
+  >([]);
   const [projectSettingsDefaultCommandId, setProjectSettingsDefaultCommandId] = useState("");
   const [projectSettingsAutoStart, setProjectSettingsAutoStart] = useState(true);
   const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">("");
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
+  const [branchDropdownPosition, setBranchDropdownPosition] = useState<{ bottom: number; left: number; width: number } | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
   const lastStartedOptionsKeyRef = useRef<string>("");
   const attachmentsRef = useRef<ComposerAttachment[]>([]);
   const imagePickerRef = useRef<HTMLInputElement | null>(null);
   const previewWebviewRef = useRef<HTMLElement | null>(null);
+  const branchTriggerRef = useRef<HTMLDivElement | null>(null);
+  const branchDropdownMenuRef = useRef<HTMLDivElement | null>(null);
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
   const selectedProject = useMemo(
@@ -966,14 +1023,69 @@ export const App = () => {
     () => (activeProjectId ? projectTerminalById[activeProjectId] : undefined),
     [activeProjectId, projectTerminalById]
   );
-  const activeProjectTerminalLines = useMemo(
-    () => (activeProjectId ? projectTerminalLinesById[activeProjectId] ?? [] : []),
-    [activeProjectId, projectTerminalLinesById]
+  const activeProjectTerminals = useMemo(
+    () => activeProjectTerminalState?.terminals ?? [],
+    [activeProjectTerminalState]
   );
   const activeProjectPreviewUrl = useMemo(
     () => (activeProjectId ? projectPreviewUrlById[activeProjectId] ?? "" : ""),
     [activeProjectId, projectPreviewUrlById]
   );
+  const activeGitState = useMemo(
+    () => (activeProjectId ? gitStateByProjectId[activeProjectId] : undefined),
+    [activeProjectId, gitStateByProjectId]
+  );
+  const activeGitDiff = useMemo(
+    () => (activeProjectId ? gitDiffByProjectId[activeProjectId] ?? "" : ""),
+    [activeProjectId, gitDiffByProjectId]
+  );
+  const activeSelectedGitPath = useMemo(
+    () => (activeProjectId ? gitSelectedPathByProjectId[activeProjectId] ?? null : null),
+    [activeProjectId, gitSelectedPathByProjectId]
+  );
+  const activeGitActivity = useMemo(
+    () => (activeProjectId ? gitActivityByProjectId[activeProjectId] ?? [] : []),
+    [activeProjectId, gitActivityByProjectId]
+  );
+  const activeStagedFiles = useMemo(
+    () => (activeGitState?.files ?? []).filter((file) => file.staged),
+    [activeGitState?.files]
+  );
+  const activeUnstagedFiles = useMemo(
+    () => (activeGitState?.files ?? []).filter((file) => file.unstaged || file.untracked),
+    [activeGitState?.files]
+  );
+  const gitBranchInput = gitBranchSearch.trim();
+  const filteredBranches = useMemo(() => {
+    const branches = activeGitState?.branches ?? [];
+    if (!gitBranchInput) {
+      return branches;
+    }
+    const search = gitBranchInput.toLowerCase();
+    return branches.filter((branch) => branch.name.toLowerCase().includes(search));
+  }, [activeGitState?.branches, gitBranchInput]);
+  const exactBranchMatch = useMemo(() => {
+    if (!gitBranchInput || !activeGitState?.insideRepo) {
+      return null;
+    }
+    return activeGitState.branches.find((branch) => branch.name === gitBranchInput) ?? null;
+  }, [activeGitState, gitBranchInput]);
+  const canCreateBranchFromInput = Boolean(gitBranchInput) && !/\s/.test(gitBranchInput) && !exactBranchMatch;
+  const importQuery = importProjectQuery.trim();
+  const shouldShowCloneAction = isLikelyGitRepositoryUrl(importQuery);
+  const importCandidatesFiltered = useMemo(() => {
+    if (!importQuery) {
+      return importCandidates;
+    }
+    const search = importQuery.toLowerCase();
+    return importCandidates.filter((candidate) => {
+      return (
+        candidate.name.toLowerCase().includes(search) ||
+        candidate.path.toLowerCase().includes(search) ||
+        (candidate.remoteUrl?.toLowerCase().includes(search) ?? false)
+      );
+    });
+  }, [importCandidates, importQuery]);
 
   const groupedThreads = useMemo(() => {
     return threads.reduce<Record<string, Thread[]>>((acc, thread) => {
@@ -1042,6 +1154,29 @@ export const App = () => {
       [projectId]: state
     }));
     return state;
+  };
+
+  const loadGitState = async (projectId: string) => {
+    const gitState = await api.git.getState({ projectId });
+    setGitStateByProjectId((prev) => ({
+      ...prev,
+      [projectId]: gitState
+    }));
+    return gitState;
+  };
+
+  const loadGitDiff = async (projectId: string, path?: string) => {
+    const result = await api.git.getDiff({ projectId, path });
+    const nextDiff = result.ok ? result.diff : result.stderr ?? "No diff available.";
+    setGitDiffByProjectId((prev) => ({
+      ...prev,
+      [projectId]: nextDiff
+    }));
+    setGitSelectedPathByProjectId((prev) => ({
+      ...prev,
+      [projectId]: path ?? null
+    }));
+    return result;
   };
 
   const addImageFiles = async (files: File[]) => {
@@ -1216,16 +1351,6 @@ export const App = () => {
         });
       }
 
-      if (event.type === "stdout" || event.type === "stderr" || event.type === "status" || event.type === "exit") {
-        setProjectTerminalLinesById((prev) => {
-          const current = prev[event.projectId] ?? [];
-          return {
-            ...prev,
-            [event.projectId]: [...current.slice(-500), event.payload]
-          };
-        });
-      }
-
       if (activeProjectId && event.projectId === activeProjectId) {
         api.projectTerminal
           .getState({ projectId: activeProjectId })
@@ -1255,6 +1380,63 @@ export const App = () => {
   }, [isPreviewPoppedOut, activeProjectPreviewUrl, activeProjectId, activeProject]);
 
   useEffect(() => {
+    if (!isGitPoppedOut || !activeProjectId) {
+      return;
+    }
+    api.git.openPopout({ projectId: activeProjectId, projectName: activeProject?.name }).catch((error) => {
+      setLogs((prev) => [...prev, `Git pop-out sync failed: ${String(error)}`]);
+    });
+  }, [isGitPoppedOut, activeProjectId, activeProject]);
+
+  useEffect(() => {
+    setIsBranchDropdownOpen(false);
+    setGitBranchSearch("");
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!isBranchDropdownOpen) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const rect = branchTriggerRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      setBranchDropdownPosition({
+        bottom: Math.max(8, window.innerHeight - rect.top + 6),
+        left: Math.max(8, rect.right - 352),
+        width: 352
+      });
+    };
+
+    updatePosition();
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        !branchTriggerRef.current?.contains(target) &&
+        !branchDropdownMenuRef.current?.contains(target)
+      ) {
+        setIsBranchDropdownOpen(false);
+      }
+    };
+
+    const handleReposition = () => {
+      updatePosition();
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+    };
+  }, [isBranchDropdownOpen]);
+
+  useEffect(() => {
     api.projectTerminal
       .setActiveProject({ projectId: activeProjectId })
       .catch((error) => setLogs((prev) => [...prev, `Terminal switch failed: ${String(error)}`]));
@@ -1263,8 +1445,13 @@ export const App = () => {
     }
     const targetProjectId = activeProjectId;
     let cancelled = false;
-    Promise.all([loadThreads(), loadProjectSettings(targetProjectId), loadProjectTerminalState(targetProjectId)])
-      .then(([, projectSettings]) => {
+    Promise.all([
+      loadThreads(),
+      loadProjectSettings(targetProjectId),
+      loadProjectTerminalState(targetProjectId),
+      loadGitState(targetProjectId)
+    ])
+      .then(([, projectSettings, , gitState]) => {
         if (cancelled) {
           return;
         }
@@ -1272,6 +1459,9 @@ export const App = () => {
           ...prev,
           [targetProjectId]: projectSettings.lastDetectedPreviewUrl ?? prev[targetProjectId] ?? ""
         }));
+        loadGitDiff(targetProjectId, gitState.files[0]?.path).catch((error) => {
+          setLogs((prev) => [...prev, `Git diff load failed: ${String(error)}`]);
+        });
       })
       .catch((error) => {
         setLogs((prev) => [...prev, `Load project failed: ${String(error)}`]);
@@ -1344,6 +1534,7 @@ export const App = () => {
   }, [activeThreadId]);
 
   const openProject = async () => {
+    setIsProjectMenuOpen(false);
     const path = await api.projects.pickPath();
     if (!path) return;
 
@@ -1353,7 +1544,70 @@ export const App = () => {
     setActiveProjectId(project.id);
   };
 
+  const loadImportCandidates = async () => {
+    setImportLoading(true);
+    try {
+      const repositories = await api.projects.listGitRepositories();
+      setImportCandidates(repositories);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Load import candidates failed: ${String(error)}`]);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const openImportProjectModal = async () => {
+    setIsProjectMenuOpen(false);
+    const parentDir = settings.defaultProjectDirectory?.trim() ?? "";
+    if (!parentDir) {
+      setLogs((prev) => [...prev, "Set a default project directory in Settings first."]);
+      setShowSettings(true);
+      return;
+    }
+
+    setImportProjectQuery("");
+    setImportCandidates([]);
+    setShowImportProjectModal(true);
+    await loadImportCandidates();
+  };
+
+  const importProjectFromPath = async (path: string) => {
+    setImportBusyPath(path);
+    try {
+      const project = await api.projects.importFromPath({ path });
+      await loadProjects();
+      setActiveProjectId(project.id);
+      setShowImportProjectModal(false);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Import project failed: ${String(error)}`]);
+    } finally {
+      setImportBusyPath(null);
+    }
+  };
+
+  const cloneProjectFromQuery = async () => {
+    const url = importProjectQuery.trim();
+    if (!isLikelyGitRepositoryUrl(url)) {
+      setLogs((prev) => [...prev, "Paste a valid git repository URL to clone."]);
+      return;
+    }
+
+    setCloneBusy(true);
+    try {
+      const project = await api.projects.cloneFromGitUrl({ url });
+      await loadProjects();
+      setActiveProjectId(project.id);
+      setShowImportProjectModal(false);
+      setImportProjectQuery("");
+    } catch (error) {
+      setLogs((prev) => [...prev, `Clone project failed: ${String(error)}`]);
+    } finally {
+      setCloneBusy(false);
+    }
+  };
+
   const createProjectInDefaultDirectory = async () => {
+    setIsProjectMenuOpen(false);
     const parentDir = settings.defaultProjectDirectory?.trim() ?? "";
     if (!parentDir) {
       setLogs((prev) => [...prev, "Set a default project directory in Settings first."]);
@@ -1400,7 +1654,13 @@ export const App = () => {
     }
     const current = projectSettingsById[projectId] ?? (await loadProjectSettings(projectId));
     setProjectSettingsEnvText(JSON.stringify(current.envVars, null, 2));
-    setProjectSettingsCommands(current.devCommands);
+    setProjectSettingsCommands(
+      current.devCommands.map((command, index) => ({
+        ...command,
+        autoStart: command.autoStart ?? index === 0,
+        useForPreview: command.useForPreview ?? index === 0
+      }))
+    );
     setProjectSettingsDefaultCommandId(current.defaultDevCommandId ?? current.devCommands[0]?.id ?? "");
     setProjectSettingsAutoStart(current.autoStartDevTerminal);
     setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
@@ -1427,13 +1687,19 @@ export const App = () => {
       .map((command) => ({
         id: command.id.trim(),
         name: command.name.trim(),
-        command: command.command.trim()
+        command: command.command.trim(),
+        autoStart: Boolean(command.autoStart),
+        useForPreview: Boolean(command.useForPreview)
       }))
       .filter((command) => command.id && command.name && command.command);
 
     if (sanitizedCommands.length === 0) {
       setLogs((prev) => [...prev, "Project settings save failed: at least one dev command is required."]);
       return;
+    }
+
+    if (!sanitizedCommands.some((command) => command.useForPreview) && sanitizedCommands[0]) {
+      sanitizedCommands[0] = { ...sanitizedCommands[0], useForPreview: true };
     }
 
     const saved = await api.projectSettings.set({
@@ -1458,27 +1724,188 @@ export const App = () => {
     setShowProjectSettings(false);
   };
 
-  const startActiveProjectTerminal = async () => {
+  const startActiveProjectTerminal = async (commandId?: string) => {
     if (!activeProjectId) {
       return;
     }
-    const state = await api.projectTerminal.start({ projectId: activeProjectId });
+    const state = await api.projectTerminal.start({ projectId: activeProjectId, commandId });
     setProjectTerminalById((prev) => ({
       ...prev,
       [activeProjectId]: state
     }));
   };
 
-  const stopActiveProjectTerminal = async () => {
+  const stopActiveProjectTerminal = async (commandId?: string) => {
     if (!activeProjectId) {
       return;
     }
-    await api.projectTerminal.stop({ projectId: activeProjectId });
+    await api.projectTerminal.stop({ projectId: activeProjectId, commandId });
     const state = await api.projectTerminal.getState({ projectId: activeProjectId });
     setProjectTerminalById((prev) => ({
       ...prev,
       [activeProjectId]: state
     }));
+  };
+
+  const runGitAction = async (
+    label: string,
+    action: (projectId: string) => Promise<{ ok: boolean; stdout: string; stderr: string }>
+  ) => {
+    if (!activeProjectId) {
+      return;
+    }
+
+    setGitBusyAction(label);
+    try {
+      const result = await action(activeProjectId);
+      const pushGitActivity = (message: string, tone: GitActivityEntry["tone"]) => {
+        setGitActivityByProjectId((prev) => {
+          const existing = prev[activeProjectId] ?? [];
+          const next: GitActivityEntry[] = [
+            ...existing,
+            {
+              id: crypto.randomUUID(),
+              ts: new Date().toISOString(),
+              message,
+              tone
+            }
+          ].slice(-80);
+          return {
+            ...prev,
+            [activeProjectId]: next
+          };
+        });
+      };
+
+      if (result.stdout) {
+        pushGitActivity(`[${label}] ${result.stdout}`, result.ok ? "success" : "error");
+      }
+      if (result.stderr) {
+        pushGitActivity(`[${label}] ${result.stderr}`, result.ok ? "info" : "error");
+      }
+      if (!result.ok) {
+        setLogs((prev) => [...prev, `Git ${label} failed.${result.stderr ? ` ${result.stderr}` : ""}`]);
+      }
+
+      const nextState = await loadGitState(activeProjectId);
+      const selectedPath =
+        activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
+          ? activeSelectedGitPath
+          : nextState.files[0]?.path;
+      await loadGitDiff(activeProjectId, selectedPath);
+    } finally {
+      setGitBusyAction(null);
+    }
+  };
+
+  const checkoutBranch = async (branch: string) => {
+    await runGitAction("checkout", (projectId) => api.git.checkoutBranch({ projectId, branch }));
+  };
+
+  const stageGitPath = async (path?: string) => {
+    await runGitAction(path ? "stage" : "stage-all", (projectId) => api.git.stage({ projectId, path }));
+  };
+
+  const unstageGitPath = async (path?: string) => {
+    await runGitAction(path ? "unstage" : "unstage-all", (projectId) => api.git.unstage({ projectId, path }));
+  };
+
+  const commitGitChanges = async () => {
+    if (!activeProjectId) {
+      return;
+    }
+    setGitBusyAction("commit");
+    try {
+      const result = await api.git.commit({
+        projectId: activeProjectId,
+        message: gitCommitMessage.trim() || undefined
+      });
+      const pushGitActivity = (message: string, tone: GitActivityEntry["tone"]) => {
+        setGitActivityByProjectId((prev) => {
+          const existing = prev[activeProjectId] ?? [];
+          const next: GitActivityEntry[] = [
+            ...existing,
+            {
+              id: crypto.randomUUID(),
+              ts: new Date().toISOString(),
+              message,
+              tone
+            }
+          ].slice(-80);
+          return {
+            ...prev,
+            [activeProjectId]: next
+          };
+        });
+      };
+
+      if (result.stdout) {
+        pushGitActivity(`[commit] ${result.stdout}`, result.ok ? "success" : "error");
+      }
+      if (result.stderr) {
+        pushGitActivity(`[commit] ${result.stderr}`, result.ok ? "info" : "error");
+      }
+      if (result.ok && result.autoGenerated) {
+        pushGitActivity(`[commit] Auto message: ${result.message}`, "info");
+      }
+      if (result.ok && result.autoStaged) {
+        pushGitActivity("[commit] Auto-staged all changes before commit.", "info");
+      }
+      if (!result.ok) {
+        setLogs((prev) => [...prev, `Git commit failed.${result.stderr ? ` ${result.stderr}` : ""}`]);
+      } else {
+        setGitCommitMessage("");
+      }
+
+      const nextState = await loadGitState(activeProjectId);
+      const selectedPath =
+        activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
+          ? activeSelectedGitPath
+          : nextState.files[0]?.path;
+      await loadGitDiff(activeProjectId, selectedPath);
+    } finally {
+      setGitBusyAction(null);
+    }
+  };
+
+  const switchOrCreateBranch = async (value?: string) => {
+    if (!activeGitState?.insideRepo) {
+      return;
+    }
+
+    const branch = (value ?? gitBranchSearch).trim();
+    if (!branch) {
+      setGitActivityByProjectId((prev) => {
+        const existing = prev[activeProjectId ?? ""] ?? [];
+        return {
+          ...prev,
+          [activeProjectId ?? ""]: [...existing, { id: crypto.randomUUID(), ts: new Date().toISOString(), message: "Branch name is required.", tone: "info" }].slice(-80)
+        };
+      });
+      return;
+    }
+    if (/\s/.test(branch)) {
+      setGitActivityByProjectId((prev) => {
+        const existing = prev[activeProjectId ?? ""] ?? [];
+        return {
+          ...prev,
+          [activeProjectId ?? ""]: [...existing, { id: crypto.randomUUID(), ts: new Date().toISOString(), message: "Branch name cannot contain spaces.", tone: "info" }].slice(-80)
+        };
+      });
+      return;
+    }
+
+    const exists = activeGitState.branches.some((item) => item.name === branch);
+    if (exists) {
+      await checkoutBranch(branch);
+      setIsBranchDropdownOpen(false);
+      setGitBranchSearch("");
+      return;
+    }
+
+    await runGitAction("create-branch", (projectId) => api.git.createBranch({ projectId, branch, checkout: true }));
+    setIsBranchDropdownOpen(false);
+    setGitBranchSearch("");
   };
 
   const reloadPreviewPane = () => {
@@ -1506,6 +1933,19 @@ export const App = () => {
     }
     const webview = previewWebviewRef.current as { openDevTools?: () => void } | null;
     webview?.openDevTools?.();
+  };
+
+  const openGitPopout = async () => {
+    if (!activeProjectId) {
+      return;
+    }
+    await api.git.openPopout({ projectId: activeProjectId, projectName: activeProject?.name });
+    setIsGitPoppedOut(true);
+  };
+
+  const closeGitPopout = async () => {
+    await api.git.closePopout();
+    setIsGitPoppedOut(false);
   };
 
   const createThread = async (projectId = activeProjectId, title = "New thread") => {
@@ -1861,17 +2301,36 @@ export const App = () => {
             <div className="text-sm font-semibold tracking-tight text-slate-100">Code App</div>
             <div className="no-drag flex items-center gap-2">
               {updateMessage && <span className="hidden text-xs text-slate-400 md:inline">{updateMessage}</span>}
-              <button className="btn-ghost" onClick={createProjectInDefaultDirectory}>
-                New Project
-              </button>
-              <button className="btn-ghost" onClick={openProject}>
-                Open Project
-              </button>
               <button className="btn-ghost" onClick={checkUpdates}>
                 Updates
               </button>
-              <button className="btn-ghost" onClick={() => setIsPreviewOpen((prev) => !prev)}>
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  setIsPreviewOpen((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setIsGitPanelOpen(false);
+                    }
+                    return next;
+                  });
+                }}
+              >
                 {isPreviewOpen ? "Hide Preview" : "Preview"}
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  setIsGitPanelOpen((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setIsPreviewOpen(false);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                {isGitPanelOpen ? "Hide Git" : "Git"}
               </button>
               <button className="btn-ghost" onClick={() => openActiveProjectSettings().catch((error) => setLogs((prev) => [...prev, `Project settings open failed: ${String(error)}`]))}>
                 Project Settings
@@ -1884,10 +2343,37 @@ export const App = () => {
 
           <div
             className={`grid flex-1 min-h-0 overflow-hidden ${
-              isPreviewOpen ? "grid-cols-[300px_minmax(0,1fr)_420px]" : "grid-cols-[300px_1fr]"
+              isPreviewOpen || isGitPanelOpen ? "grid-cols-[300px_minmax(0,1fr)_420px]" : "grid-cols-[300px_1fr]"
             }`}
           >
             <aside className="relative flex h-full min-h-0 flex-col border-r border-border/90 bg-[linear-gradient(180deg,#151515_0%,#121212_100%)] px-3 py-3">
+	              <div className="projects-header">
+	                <h2 className="projects-title">Projects</h2>
+	                <div className="relative">
+	                  <button
+	                    className="btn-ghost h-7 w-7 p-0 text-sm"
+	                    onClick={() => setIsProjectMenuOpen((prev) => !prev)}
+	                    title="Add project"
+	                    aria-label="Add project"
+	                  >
+	                    +
+	                  </button>
+	                  {isProjectMenuOpen && (
+	                    <div className="project-action-pop">
+	                      <button className="btn-ghost w-full text-left" onClick={createProjectInDefaultDirectory}>
+	                        New Project
+	                      </button>
+	                      <button className="btn-ghost w-full text-left" onClick={() => openImportProjectModal().catch((error) => setLogs((prev) => [...prev, `Open import failed: ${String(error)}`]))}>
+	                        Import Project
+	                      </button>
+	                      <button className="btn-ghost w-full text-left" onClick={openProject}>
+	                        Open Project
+	                      </button>
+	                    </div>
+	                  )}
+                </div>
+              </div>
+
               {!hasProjects && (
                 <div className="px-2 pb-3">
                   <p className="text-sm text-slate-300">Add a project to start.</p>
@@ -2377,6 +2863,22 @@ export const App = () => {
                       />
                       network
                     </label>
+                    <div className="branch-inline" ref={branchTriggerRef}>
+                      <button
+                        className="branch-trigger"
+                        onClick={() => {
+                          if (!activeProjectId || !activeGitState?.insideRepo || gitBusyAction) {
+                            return;
+                          }
+                          setIsBranchDropdownOpen((prev) => !prev);
+                          setGitBranchSearch("");
+                        }}
+                        disabled={!activeProjectId || !activeGitState?.insideRepo || Boolean(gitBusyAction)}
+                      >
+                        <span className="truncate">branch: {activeGitState?.branch ?? "(detached)"}</span>
+                        <span className="text-[10px] text-slate-500">v</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -2396,77 +2898,442 @@ export const App = () => {
               )}
             </main>
 
-            {isPreviewOpen && (
+            {(isPreviewOpen || isGitPanelOpen) && (
               <aside className="flex min-h-0 flex-col border-l border-border/90 bg-black/55">
-                <div className="flex items-center justify-between border-b border-border/80 px-3 py-2">
-                  <div className="text-xs uppercase tracking-[0.16em] text-muted">Project Dev</div>
-                  <div className="flex items-center gap-1">
-                    <button className="btn-ghost" onClick={reloadPreviewPane} disabled={!activeProjectPreviewUrl}>
-                      Reload
-                    </button>
-                    <button
-                      className="btn-ghost"
-                      onClick={() => openPreviewDevTools().catch((error) => setLogs((prev) => [...prev, `Preview DevTools failed: ${String(error)}`]))}
-                    >
-                      DevTools
-                    </button>
-                    {!isPreviewPoppedOut ? (
-                      <button className="btn-ghost" onClick={() => popoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview pop-out failed: ${String(error)}`]))} disabled={!activeProjectPreviewUrl}>
-                        Pop Out
-                      </button>
-                    ) : (
-                      <button className="btn-ghost" onClick={() => closePopoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]))}>
-                        Close Pop-out
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <section className="border-b border-border/80 px-3 py-2">
-                  <div className="mb-2 flex items-center justify-between">
-                    <div className="text-xs text-slate-300">
-                      {activeProjectTerminalState?.running ? "Server running" : "Server stopped"}
-                    </div>
-                    <div className="flex gap-1">
-                      <button className="btn-ghost" onClick={() => startActiveProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Terminal start failed: ${String(error)}`]))}>
-                        {activeProjectTerminalState?.running ? "Restart" : "Start"}
-                      </button>
-                      <button className="btn-ghost" onClick={() => stopActiveProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Terminal stop failed: ${String(error)}`]))} disabled={!activeProjectTerminalState?.running}>
-                        Stop
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mb-2 rounded border border-border/70 bg-black/35 px-2 py-1 text-[11px] text-slate-300">
-                    {activeProjectTerminalState?.command ?? "No command selected"}
-                  </div>
-                  <pre className="h-28 overflow-y-auto rounded border border-border bg-black/35 p-2 font-mono text-[11px] text-slate-300">
-                    {activeProjectTerminalLines.join("\n") || "No terminal output yet."}
-                  </pre>
-                </section>
-
-                <section className="flex min-h-0 flex-1 flex-col">
-                  <div className="truncate border-b border-border/80 px-3 py-2 text-xs text-slate-300">
-                    {activeProjectPreviewUrl || "Start dev command to detect preview URL."}
-                  </div>
-                  <div className="min-h-0 flex-1">
-                    {activeProjectPreviewUrl ? (
-                      <webview
-                        ref={previewWebviewRef}
-                        src={activeProjectPreviewUrl}
-                        className="h-full w-full"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted">
-                        No preview URL detected yet.
+                {isPreviewOpen && (
+                  <>
+                    <div className="flex items-center justify-between border-b border-border/80 px-3 py-2">
+                      <div className="text-xs uppercase tracking-[0.16em] text-muted">Project Dev</div>
+                      <div className="flex items-center gap-1">
+                        <button className="btn-ghost" onClick={reloadPreviewPane} disabled={!activeProjectPreviewUrl}>
+                          Reload
+                        </button>
+                        <button
+                          className="btn-ghost"
+                          onClick={() => openPreviewDevTools().catch((error) => setLogs((prev) => [...prev, `Preview DevTools failed: ${String(error)}`]))}
+                        >
+                          DevTools
+                        </button>
+                        {!isPreviewPoppedOut ? (
+                          <button className="btn-ghost" onClick={() => popoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview pop-out failed: ${String(error)}`]))} disabled={!activeProjectPreviewUrl}>
+                            Pop Out
+                          </button>
+                        ) : (
+                          <button className="btn-ghost" onClick={() => closePopoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]))}>
+                            Close Pop-out
+                          </button>
+                        )}
                       </div>
+                    </div>
+
+                    <section className={isPreviewPoppedOut ? "min-h-0 flex-1 overflow-y-auto px-3 py-2" : "border-b border-border/80 px-3 py-2"}>
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-xs text-slate-300">Terminals running: {activeProjectTerminals.filter((terminal) => terminal.running).length}/{activeProjectTerminals.length}</div>
+                        <div className="flex gap-1">
+                          <button className="btn-ghost" onClick={() => startActiveProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Terminal start failed: ${String(error)}`]))}>
+                            {activeProjectTerminalState?.running ? "Restart All" : "Start All"}
+                          </button>
+                          <button className="btn-ghost" onClick={() => stopActiveProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Terminal stop failed: ${String(error)}`]))} disabled={!activeProjectTerminalState?.running}>
+                            Stop All
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {activeProjectTerminals.length === 0 && (
+                          <div className="rounded border border-border/70 bg-black/35 px-2 py-2 text-[11px] text-slate-400">
+                            No dev commands configured.
+                          </div>
+                        )}
+                        {activeProjectTerminals.map((terminal) => (
+                          <div key={terminal.commandId} className="rounded border border-border/70 bg-black/35 p-2">
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="truncate text-[12px] text-slate-100">
+                                  {terminal.name}
+                                  {terminal.useForPreview ? " (Browser)" : ""}
+                                </div>
+                                <div className="truncate text-[10px] text-slate-400">{terminal.command}</div>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  className="btn-ghost px-2 py-1 text-[11px]"
+                                  onClick={() =>
+                                    startActiveProjectTerminal(terminal.commandId).catch((error) =>
+                                      setLogs((prev) => [...prev, `Terminal start failed: ${String(error)}`])
+                                    )
+                                  }
+                                >
+                                  {terminal.running ? "Restart" : "Start"}
+                                </button>
+                                <button
+                                  className="btn-ghost px-2 py-1 text-[11px]"
+                                  onClick={() =>
+                                    stopActiveProjectTerminal(terminal.commandId).catch((error) =>
+                                      setLogs((prev) => [...prev, `Terminal stop failed: ${String(error)}`])
+                                    )
+                                  }
+                                  disabled={!terminal.running}
+                                >
+                                  Stop
+                                </button>
+                              </div>
+                            </div>
+                            <pre className="h-20 overflow-y-auto rounded border border-border bg-black/35 p-2 font-mono text-[10px] text-slate-300">
+                              {terminal.outputTail || "No terminal output yet."}
+                            </pre>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    {!isPreviewPoppedOut && (
+                      <section className="flex min-h-0 flex-1 flex-col">
+                        <div className="truncate border-b border-border/80 px-3 py-2 text-xs text-slate-300">
+                          {activeProjectPreviewUrl || "Start dev command to detect preview URL."}
+                        </div>
+                        <div className="min-h-0 flex-1">
+                          {activeProjectPreviewUrl ? (
+                            <webview
+                              ref={previewWebviewRef}
+                              src={activeProjectPreviewUrl}
+                              className="h-full w-full"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted">
+                              No preview URL detected yet.
+                            </div>
+                          )}
+                        </div>
+                      </section>
                     )}
-                  </div>
-                </section>
+                  </>
+                )}
+
+                {isGitPanelOpen && (
+                  <>
+                    <div className="flex items-center justify-between border-b border-border/80 px-3 py-2">
+                      <div className="text-xs uppercase tracking-[0.16em] text-muted">Git</div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="btn-ghost"
+                          onClick={() => {
+                            if (!activeProjectId) {
+                              return;
+                            }
+                            loadGitState(activeProjectId)
+                              .then((state) => loadGitDiff(activeProjectId, activeSelectedGitPath ?? state.files[0]?.path))
+                              .catch((error) => setLogs((prev) => [...prev, `Git refresh failed: ${String(error)}`]));
+                          }}
+                          disabled={!activeProjectId || Boolean(gitBusyAction)}
+                        >
+                          Refresh
+                        </button>
+                        {!isGitPoppedOut ? (
+                          <button
+                            className="btn-ghost"
+                            onClick={() => openGitPopout().catch((error) => setLogs((prev) => [...prev, `Git pop-out failed: ${String(error)}`]))}
+                            disabled={!activeProjectId}
+                          >
+                            Pop Out
+                          </button>
+                        ) : (
+                          <button
+                            className="btn-ghost"
+                            onClick={() => closeGitPopout().catch((error) => setLogs((prev) => [...prev, `Git pop-out close failed: ${String(error)}`]))}
+                          >
+                            Close Pop-out
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <section className="space-y-2 border-b border-border/80 px-3 py-2">
+                      {!activeProjectId ? (
+                        <p className="text-xs text-slate-400">Select a project to view git state.</p>
+                      ) : !activeGitState?.insideRepo ? (
+                        <p className="text-xs text-slate-400">This project is not a git repository.</p>
+                      ) : (
+                        <>
+                          <div className="text-xs text-slate-300">
+                            Branch: <span className="text-slate-100">{activeGitState.branch ?? "(detached)"}</span>
+                            {activeGitState.upstream ? ` -> ${activeGitState.upstream}` : ""}
+                          </div>
+                          <div className="text-xs text-slate-400">
+                            Ahead {activeGitState.ahead} / Behind {activeGitState.behind} - {activeGitState.stagedCount} staged,{" "}
+                            {activeGitState.unstagedCount} unstaged, {activeGitState.untrackedCount} untracked
+                          </div>
+                          <div className="grid grid-cols-4 gap-1">
+                            <button className="btn-ghost" onClick={() => runGitAction("fetch", (projectId) => api.git.fetch({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git fetch failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
+                              Fetch
+                            </button>
+                            <button className="btn-ghost" onClick={() => runGitAction("pull", (projectId) => api.git.pull({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git pull failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
+                              Pull
+                            </button>
+                            <button className="btn-ghost" onClick={() => runGitAction("push", (projectId) => api.git.push({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git push failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
+                              Push
+                            </button>
+                            <button className="btn-ghost" onClick={() => stageGitPath().catch((error) => setLogs((prev) => [...prev, `Git stage failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction) || activeGitState.files.length === 0}>
+                              Stage All
+                            </button>
+                            {(activeGitState.ahead > 0 || activeGitState.behind > 0) && (
+                              <button className="btn-secondary col-span-4" onClick={() => runGitAction("sync", (projectId) => api.git.sync({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git sync failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
+                                Sync (fetch + pull + push)
+                              </button>
+                            )}
+                          </div>
+                          <div className="mt-2 flex items-center gap-1">
+                            <input
+                              className="input h-8 text-xs"
+                              value={gitCommitMessage}
+                              onChange={(event) => setGitCommitMessage(event.target.value)}
+                              placeholder="Commit message (optional: auto-generate if empty)"
+                              disabled={Boolean(gitBusyAction)}
+                            />
+                            <button
+                              className="btn-secondary whitespace-nowrap"
+                              onClick={() => commitGitChanges().catch((error) => setLogs((prev) => [...prev, `Git commit failed: ${String(error)}`]))}
+                              disabled={Boolean(gitBusyAction) || activeGitState.stagedCount === 0}
+                            >
+                              Commit
+                            </button>
+                          </div>
+                          <div className="git-activity mt-2">
+                            <div className="git-activity-head">
+                              <span>Activity</span>
+                              {activeGitActivity.length > 0 && (
+                                <button
+                                  className="btn-ghost px-2 py-0 text-[10px]"
+                                  onClick={() =>
+                                    activeProjectId &&
+                                    setGitActivityByProjectId((prev) => ({
+                                      ...prev,
+                                      [activeProjectId]: []
+                                    }))
+                                  }
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            <div className="git-activity-list">
+                              {activeGitActivity.length === 0 ? (
+                                <div className="git-activity-item info">No git activity yet.</div>
+                              ) : (
+                                activeGitActivity.slice(-10).map((entry) => (
+                                  <div key={entry.id} className={`git-activity-item ${entry.tone}`}>
+                                    {entry.message}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </section>
+
+                    <section className="grid min-h-0 flex-1 grid-rows-[200px_minmax(0,1fr)]">
+                      <div className="overflow-y-auto border-b border-border/70 px-3 py-2">
+                        {activeGitState?.insideRepo ? (
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                                Staged ({activeStagedFiles.length})
+                              </div>
+                              {activeStagedFiles.length === 0 ? (
+                                <p className="mt-1 text-xs text-slate-500">No staged files.</p>
+                              ) : (
+                                activeStagedFiles.map((file) => (
+                                  <div
+                                    key={`staged-${file.path}-${file.indexStatus}-${file.workTreeStatus}`}
+                                    className={`mt-1 rounded px-2 py-1 text-xs ${activeSelectedGitPath === file.path ? "bg-zinc-800 text-slate-100" : "text-slate-300"}`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <button
+                                        className="min-w-0 flex-1 text-left hover:text-white"
+                                        onClick={() =>
+                                          activeProjectId &&
+                                          loadGitDiff(activeProjectId, file.path).catch((error) =>
+                                            setLogs((prev) => [...prev, `Git diff failed: ${String(error)}`])
+                                          )
+                                        }
+                                      >
+                                        <div className="truncate">{file.path}</div>
+                                        <div className="text-[10px] text-slate-500">{gitFileStatusText(file)}</div>
+                                      </button>
+                                      <button
+                                        className="btn-ghost shrink-0 px-2 py-0 text-[10px]"
+                                        onClick={() => unstageGitPath(file.path).catch((error) => setLogs((prev) => [...prev, `Git unstage failed: ${String(error)}`]))}
+                                        disabled={Boolean(gitBusyAction)}
+                                      >
+                                        Unstage
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                                Unstaged / Untracked ({activeUnstagedFiles.length})
+                              </div>
+                              {activeUnstagedFiles.length === 0 ? (
+                                <p className="mt-1 text-xs text-slate-500">No unstaged files.</p>
+                              ) : (
+                                activeUnstagedFiles.map((file) => (
+                                  <div
+                                    key={`unstaged-${file.path}-${file.indexStatus}-${file.workTreeStatus}`}
+                                    className={`mt-1 rounded px-2 py-1 text-xs ${activeSelectedGitPath === file.path ? "bg-zinc-800 text-slate-100" : "text-slate-300"}`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <button
+                                        className="min-w-0 flex-1 text-left hover:text-white"
+                                        onClick={() =>
+                                          activeProjectId &&
+                                          loadGitDiff(activeProjectId, file.path).catch((error) =>
+                                            setLogs((prev) => [...prev, `Git diff failed: ${String(error)}`])
+                                          )
+                                        }
+                                      >
+                                        <div className="truncate">{file.path}</div>
+                                        <div className="text-[10px] text-slate-500">{gitFileStatusText(file)}</div>
+                                      </button>
+                                      <button
+                                        className="btn-ghost shrink-0 px-2 py-0 text-[10px]"
+                                        onClick={() => stageGitPath(file.path).catch((error) => setLogs((prev) => [...prev, `Git stage failed: ${String(error)}`]))}
+                                        disabled={Boolean(gitBusyAction)}
+                                      >
+                                        Stage
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                            {activeGitState.files.length === 0 && (
+                              <p className="text-xs text-slate-500">Working tree clean.</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-500">No git data.</p>
+                        )}
+                      </div>
+                      <div className="min-h-0 px-3 py-2">
+                        <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                          Diff {activeSelectedGitPath ? `- ${activeSelectedGitPath}` : "(working tree)"}
+                        </div>
+                        <pre className="file-diff h-full rounded border border-border/70 bg-black/35 p-2">
+                          {activeGitDiff || "No diff available."}
+                        </pre>
+                      </div>
+                    </section>
+                  </>
+                )}
               </aside>
             )}
           </div>
         </div>
       </div>
+
+      {isBranchDropdownOpen &&
+        activeProjectId &&
+        activeGitState?.insideRepo &&
+        branchDropdownPosition &&
+        createPortal(
+          <div
+            ref={branchDropdownMenuRef}
+            className="branch-dropdown-pop"
+            style={{
+              position: "fixed",
+              bottom: `${branchDropdownPosition.bottom}px`,
+              left: `${branchDropdownPosition.left}px`,
+              width: `${branchDropdownPosition.width}px`,
+              zIndex: 90
+            }}
+          >
+            <div className="p-2">
+              <input
+                className="input branch-search-input h-8 text-xs"
+                value={gitBranchSearch}
+                placeholder="Search branches or type a new one"
+                autoFocus
+                onChange={(event) => {
+                  setGitBranchSearch(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setIsBranchDropdownOpen(false);
+                    return;
+                  }
+                  if (event.key !== "Enter") {
+                    return;
+                  }
+                  event.preventDefault();
+                  switchOrCreateBranch().catch((error) => {
+                    setLogs((prev) => [...prev, `Branch change failed: ${String(error)}`]);
+                  });
+                }}
+                disabled={Boolean(gitBusyAction)}
+              />
+            </div>
+            <div className="branch-dropdown-list">
+              {filteredBranches.length === 0 ? (
+                <div className="branch-dropdown-empty">No matching branches.</div>
+              ) : (
+                filteredBranches.map((branch) => (
+                  <button
+                    key={branch.name}
+                    className={branch.isCurrent ? "branch-dropdown-row branch-dropdown-row-current" : "branch-dropdown-row"}
+                    onClick={() => {
+                      switchOrCreateBranch(branch.name).catch((error) => {
+                        setLogs((prev) => [...prev, `Checkout failed: ${String(error)}`]);
+                      });
+                    }}
+                    disabled={Boolean(gitBusyAction)}
+                  >
+                    <span className="truncate">{branch.name}</span>
+                    <span className="flex items-center gap-1">
+                      {branch.isLocal ? <span className="branch-dropdown-chip">local</span> : null}
+                      {branch.isOnOrigin && !branch.isLocal ? <span className="branch-dropdown-chip" title="Exists on origin only">↓</span> : null}
+                      {branch.isCurrent ? <span className="branch-dropdown-chip">current</span> : null}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="branch-dropdown-actions">
+              {exactBranchMatch ? (
+                <button
+                  className="btn-ghost w-full text-left"
+                  onClick={() => {
+                    switchOrCreateBranch().catch((error) => {
+                      setLogs((prev) => [...prev, `Branch change failed: ${String(error)}`]);
+                    });
+                  }}
+                  disabled={Boolean(gitBusyAction) || exactBranchMatch.isCurrent}
+                >
+                  {exactBranchMatch.isCurrent ? "Already on this branch" : `Switch to ${exactBranchMatch.name}`}
+                </button>
+              ) : canCreateBranchFromInput ? (
+                <button
+                  className="btn-ghost w-full text-left"
+                  onClick={() => {
+                    switchOrCreateBranch().catch((error) => {
+                      setLogs((prev) => [...prev, `Branch change failed: ${String(error)}`]);
+                    });
+                  }}
+                  disabled={Boolean(gitBusyAction)}
+                >
+                  Create and switch to {gitBranchInput}
+                </button>
+              ) : (
+                <div className="branch-dropdown-empty">Type a branch name to switch or create.</div>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
 
       {showSettings && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
@@ -2688,7 +3555,7 @@ export const App = () => {
             <label className="mb-2 block text-sm text-muted">Dev commands</label>
             <div className="mb-3 space-y-2">
               {projectSettingsCommands.map((command, index) => (
-                <div key={command.id || index} className="grid gap-2 md:grid-cols-[160px_1fr_28px]">
+                <div key={command.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_96px_96px_28px]">
                   <input
                     className="input text-xs"
                     value={command.name}
@@ -2709,6 +3576,31 @@ export const App = () => {
                       )
                     }
                   />
+                  <label className="inline-flex items-center justify-center gap-1 rounded-lg border border-border bg-black/25 px-2 py-2 text-[11px] text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={command.autoStart}
+                      onChange={(event) =>
+                        setProjectSettingsCommands((prev) =>
+                          prev.map((item, idx) => (idx === index ? { ...item, autoStart: event.target.checked } : item))
+                        )
+                      }
+                    />
+                    Auto
+                  </label>
+                  <label className="inline-flex items-center justify-center gap-1 rounded-lg border border-border bg-black/25 px-2 py-2 text-[11px] text-slate-300">
+                    <input
+                      type="radio"
+                      name="preview-command"
+                      checked={command.useForPreview}
+                      onChange={() =>
+                        setProjectSettingsCommands((prev) =>
+                          prev.map((item, idx) => ({ ...item, useForPreview: idx === index }))
+                        )
+                      }
+                    />
+                    Browser
+                  </label>
                   <button
                     className="btn-secondary px-0"
                     onClick={() => setProjectSettingsCommands((prev) => prev.filter((_, idx) => idx !== index))}
@@ -2729,13 +3621,19 @@ export const App = () => {
                   {
                     id: `cmd-${crypto.randomUUID()}`,
                     name: `Command ${prev.length + 1}`,
-                    command: ""
+                    command: "",
+                    autoStart: false,
+                    useForPreview: false
                   }
                 ])
               }
             >
               Add command
             </button>
+
+            <p className="mb-4 text-xs text-slate-400">
+              Mark each command that should auto-start when entering this project, and choose exactly one Browser command used for preview URL detection.
+            </p>
 
             <label className="mb-2 block text-sm text-muted">Default command</label>
             <select
@@ -2849,6 +3747,108 @@ export const App = () => {
               >
                 {creatingProject ? "Creating..." : "Create"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportProjectModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Import Project</h3>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  if (importLoading || importBusyPath || cloneBusy) {
+                    return;
+                  }
+                  setShowImportProjectModal(false);
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="mb-2 text-xs text-slate-400">
+              Search local git repos in <span className="font-mono">{settings.defaultProjectDirectory}</span> or paste a git URL to clone.
+            </p>
+
+            <div className="mb-3 flex items-center gap-2">
+              <input
+                autoFocus
+                className="input"
+                value={importProjectQuery}
+                placeholder="Search local repos or paste git URL"
+                onChange={(event) => setImportProjectQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && shouldShowCloneAction && !cloneBusy) {
+                    event.preventDefault();
+                    cloneProjectFromQuery().catch((error) => {
+                      setLogs((prev) => [...prev, `Clone project failed: ${String(error)}`]);
+                    });
+                  }
+                }}
+              />
+              <button
+                className="btn-ghost whitespace-nowrap"
+                onClick={() => {
+                  loadImportCandidates().catch((error) => {
+                    setLogs((prev) => [...prev, `Reload import candidates failed: ${String(error)}`]);
+                  });
+                }}
+                disabled={importLoading || cloneBusy || Boolean(importBusyPath)}
+              >
+                Refresh
+              </button>
+              <button
+                className="btn-primary whitespace-nowrap"
+                onClick={() => {
+                  cloneProjectFromQuery().catch((error) => {
+                    setLogs((prev) => [...prev, `Clone project failed: ${String(error)}`]);
+                  });
+                }}
+                disabled={!shouldShowCloneAction || cloneBusy || importLoading || Boolean(importBusyPath)}
+              >
+                {cloneBusy ? "Cloning..." : "Clone URL"}
+              </button>
+            </div>
+
+            <div className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-border bg-black/20 p-2">
+              {importLoading ? (
+                <p className="px-2 py-2 text-sm text-slate-400">Scanning repositories...</p>
+              ) : importCandidatesFiltered.length === 0 ? (
+                <p className="px-2 py-2 text-sm text-slate-400">No git repositories found for this search.</p>
+              ) : (
+                importCandidatesFiltered.map((candidate) => {
+                  const existingProject = projects.find((project) => project.path === candidate.path) ?? null;
+                  const isBusy = importBusyPath === candidate.path;
+                  return (
+                    <div key={candidate.path} className="rounded-lg border border-border/70 bg-black/25 p-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-slate-100">{candidate.name}</div>
+                          <div className="truncate font-mono text-xs text-slate-400">{candidate.path}</div>
+                          {candidate.remoteUrl && (
+                            <div className="truncate font-mono text-xs text-slate-500">{candidate.remoteUrl}</div>
+                          )}
+                        </div>
+                        <button
+                          className="btn-ghost whitespace-nowrap"
+                          onClick={() => {
+                            importProjectFromPath(candidate.path).catch((error) => {
+                              setLogs((prev) => [...prev, `Import project failed: ${String(error)}`]);
+                            });
+                          }}
+                          disabled={Boolean(importBusyPath) || cloneBusy || importLoading}
+                        >
+                          {isBusy ? "Importing..." : existingProject ? "Open" : "Import"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
