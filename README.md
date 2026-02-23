@@ -82,6 +82,14 @@ npm install
 npm run package:win
 ```
 
+If it still fails after reinstall, verify the binary executes directly:
+
+```powershell
+.\node_modules\app-builder-bin\win\x64\app-builder.exe --version
+```
+
+If that direct command fails, Windows Security/AV likely quarantined or blocked it. Add an exclusion for the repo folder, reinstall dependencies, and re-run packaging.
+
 ## Testing
 
 ```bash
