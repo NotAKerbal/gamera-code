@@ -47,7 +47,8 @@ try {
   platformPackageJsonPath = requireFromWorkspace.resolve(`${target.packageName}/package.json`);
 }
 
-const sourceBinary = join(path.dirname(platformPackageJsonPath), "vendor", target.triple, "codex", target.binaryName);
+const sourceDir = join(path.dirname(platformPackageJsonPath), "vendor", target.triple, "codex");
+const sourceBinary = join(sourceDir, target.binaryName);
 
 if (!existsSync(sourceBinary)) {
   console.error(`Codex binary not found: ${sourceBinary}`);
@@ -56,4 +57,5 @@ if (!existsSync(sourceBinary)) {
 
 const outputDir = join(workspaceRoot, "dist", "codex-bin", target.triple);
 mkdirSync(outputDir, { recursive: true });
-cpSync(sourceBinary, join(outputDir, target.binaryName), { force: true });
+
+cpSync(sourceDir, outputDir, { recursive: true, force: true });
