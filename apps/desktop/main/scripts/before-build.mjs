@@ -86,10 +86,11 @@ export default async function beforeBuild(context) {
     console.warn("  • native module rebuild warning:", e.message);
   }
 
-  // ── 7. Tidy up ────────────────────────────────────────────────────
-  rmSync(tempDir, { recursive: true, force: true });
-
+  // ── 7. Tidy up (delayed until process exit so symlinks survive packaging) ─
   process.on("exit", () => {
+    try {
+      if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
     try {
       if (existsSync(localNM)) rmSync(localNM, { recursive: true, force: true });
     } catch {}
