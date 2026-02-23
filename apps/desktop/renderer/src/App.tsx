@@ -1249,10 +1249,10 @@ export const App = () => {
     if (!isPreviewPoppedOut || !activeProjectPreviewUrl) {
       return;
     }
-    api.preview.navigate({ url: activeProjectPreviewUrl }).catch((error) => {
+    api.preview.navigate({ url: activeProjectPreviewUrl, projectName: activeProject?.name }).catch((error) => {
       setLogs((prev) => [...prev, `Preview pop-out navigate failed: ${String(error)}`]);
     });
-  }, [isPreviewPoppedOut, activeProjectPreviewUrl, activeProjectId]);
+  }, [isPreviewPoppedOut, activeProjectPreviewUrl, activeProjectId, activeProject]);
 
   useEffect(() => {
     api.projectTerminal
@@ -1490,13 +1490,22 @@ export const App = () => {
     if (!activeProjectPreviewUrl) {
       return;
     }
-    await api.preview.openPopout({ url: activeProjectPreviewUrl });
+    await api.preview.openPopout({ url: activeProjectPreviewUrl, projectName: activeProject?.name });
     setIsPreviewPoppedOut(true);
   };
 
   const closePopoutPreview = async () => {
     await api.preview.closePopout();
     setIsPreviewPoppedOut(false);
+  };
+
+  const openPreviewDevTools = async () => {
+    if (isPreviewPoppedOut) {
+      await api.preview.openDevTools();
+      return;
+    }
+    const webview = previewWebviewRef.current as { openDevTools?: () => void } | null;
+    webview?.openDevTools?.();
   };
 
   const createThread = async (projectId = activeProjectId, title = "New thread") => {
@@ -2394,6 +2403,12 @@ export const App = () => {
                   <div className="flex items-center gap-1">
                     <button className="btn-ghost" onClick={reloadPreviewPane} disabled={!activeProjectPreviewUrl}>
                       Reload
+                    </button>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => openPreviewDevTools().catch((error) => setLogs((prev) => [...prev, `Preview DevTools failed: ${String(error)}`]))}
+                    >
+                      DevTools
                     </button>
                     {!isPreviewPoppedOut ? (
                       <button className="btn-ghost" onClick={() => popoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview pop-out failed: ${String(error)}`]))} disabled={!activeProjectPreviewUrl}>

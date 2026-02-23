@@ -28,7 +28,8 @@ const api: DesktopApi = {
   preview: {
     openPopout: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewOpenPopout, input),
     closePopout: () => ipcRenderer.invoke(IPC_CHANNELS.previewClosePopout),
-    navigate: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewNavigate, input)
+    navigate: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewNavigate, input),
+    openDevTools: () => ipcRenderer.invoke(IPC_CHANNELS.previewOpenDevTools)
   },
   threads: {
     list: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsList, input),

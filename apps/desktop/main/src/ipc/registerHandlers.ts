@@ -25,9 +25,10 @@ export interface HandlerDeps {
   permissionEngine: PermissionEngine;
   updaterService: UpdaterService;
   preview: {
-    openPopout: (url: string) => Promise<{ ok: boolean }>;
+    openPopout: (url: string, projectName?: string) => Promise<{ ok: boolean }>;
     closePopout: () => Promise<{ ok: boolean }>;
-    navigate: (url: string) => Promise<{ ok: boolean }>;
+    navigate: (url: string, projectName?: string) => Promise<{ ok: boolean }>;
+    openDevTools: () => Promise<{ ok: boolean }>;
   };
 }
 
@@ -133,16 +134,20 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return deps.projectTerminalManager.getState(input.projectId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.previewOpenPopout, async (_event, input: { url: string }) => {
-    return deps.preview.openPopout(input.url);
+  ipcMain.handle(IPC_CHANNELS.previewOpenPopout, async (_event, input: { url: string; projectName?: string }) => {
+    return deps.preview.openPopout(input.url, input.projectName);
   });
 
   ipcMain.handle(IPC_CHANNELS.previewClosePopout, async () => {
     return deps.preview.closePopout();
   });
 
-  ipcMain.handle(IPC_CHANNELS.previewNavigate, async (_event, input: { url: string }) => {
-    return deps.preview.navigate(input.url);
+  ipcMain.handle(IPC_CHANNELS.previewNavigate, async (_event, input: { url: string; projectName?: string }) => {
+    return deps.preview.navigate(input.url, input.projectName);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.previewOpenDevTools, async () => {
+    return deps.preview.openDevTools();
   });
 
   ipcMain.handle(IPC_CHANNELS.threadsList, async (_event, input?: { projectId?: string; includeArchived?: boolean }) => {

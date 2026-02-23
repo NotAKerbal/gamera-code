@@ -46,9 +46,10 @@ export interface DesktopApi {
     onEvent: (listener: (event: ProjectTerminalEvent) => void) => () => void;
   };
   preview: {
-    openPopout: (input: { url: string }) => Promise<{ ok: boolean }>;
+    openPopout: (input: { url: string; projectName?: string }) => Promise<{ ok: boolean }>;
     closePopout: () => Promise<{ ok: boolean }>;
-    navigate: (input: { url: string }) => Promise<{ ok: boolean }>;
+    navigate: (input: { url: string; projectName?: string }) => Promise<{ ok: boolean }>;
+    openDevTools: () => Promise<{ ok: boolean }>;
   };
   threads: {
     list: (input?: { projectId?: string; includeArchived?: boolean }) => Promise<Thread[]>;

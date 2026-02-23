@@ -15,6 +15,7 @@ export const IPC_CHANNELS = {
   previewOpenPopout: "preview:openPopout",
   previewClosePopout: "preview:closePopout",
   previewNavigate: "preview:navigate",
+  previewOpenDevTools: "preview:openDevTools",
   threadsList: "threads:list",
   threadsCreate: "threads:create",
   threadsUpdate: "threads:update",
