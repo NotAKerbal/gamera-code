@@ -12,8 +12,11 @@ export type CodexModelReasoningEffort = "minimal" | "low" | "medium" | "high" | 
 
 export type CodexWebSearchMode = "disabled" | "cached" | "live";
 
+export type CodexCollaborationMode = "coding" | "plan";
+
 export interface CodexThreadOptions {
   model?: string;
+  collaborationMode?: CodexCollaborationMode;
   sandboxMode?: CodexSandboxMode;
   modelReasoningEffort?: CodexModelReasoningEffort;
   networkAccessEnabled?: boolean;

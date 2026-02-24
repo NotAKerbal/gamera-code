@@ -101,6 +101,9 @@ export const initializeDatabase = (dbPath: string) => {
     CREATE INDEX IF NOT EXISTS idx_message_events_thread_stream
       ON message_events(thread_id, stream_seq);
 
+    CREATE INDEX IF NOT EXISTS idx_message_events_thread_role_ts
+      ON message_events(thread_id, role, ts DESC);
+
     CREATE INDEX IF NOT EXISTS idx_sessions_thread_started
       ON sessions(thread_id, started_at DESC);
 

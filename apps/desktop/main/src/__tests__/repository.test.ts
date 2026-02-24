@@ -73,6 +73,43 @@ describeRepository("Repository", () => {
     expect(repo.getProviderThreadId(thread.id, "codex")).toBeNull();
   });
 
+  it("orders threads by latest user/assistant message and ignores system messages", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-thread-order-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-thread-order" });
+    const older = repo.createThread({ projectId: project.id, title: "older", provider: "codex" });
+    const newer = repo.createThread({ projectId: project.id, title: "newer", provider: "codex" });
+
+    repo.appendMessage({
+      threadId: older.id,
+      role: "user",
+      content: "older user prompt",
+      ts: "2024-01-01T00:00:00.000Z",
+      streamSeq: 1
+    });
+    repo.appendMessage({
+      threadId: newer.id,
+      role: "assistant",
+      content: "newer assistant response",
+      ts: "2024-01-02T00:00:00.000Z",
+      streamSeq: 1
+    });
+    repo.appendMessage({
+      threadId: older.id,
+      role: "system",
+      content: "system update should not affect sort",
+      ts: "2024-01-03T00:00:00.000Z",
+      streamSeq: 2
+    });
+
+    const listed = repo.listThreads({ projectId: project.id });
+    expect(listed[0]?.id).toBe(newer.id);
+    expect(listed[1]?.id).toBe(older.id);
+  });
+
   it("seeds and updates project settings", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-app-project-settings-"));
     const paths = createAppPaths(dir);

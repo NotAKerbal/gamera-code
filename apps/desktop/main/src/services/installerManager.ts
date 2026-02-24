@@ -128,14 +128,23 @@ export class InstallerManager {
     };
   }
 
-  async installDependencies(targets: InstallDependencyKey[] = DEFAULT_SETUP_TARGETS): Promise<InstallDependenciesResult> {
+  async installDependencies(
+    targets: InstallDependencyKey[] = DEFAULT_SETUP_TARGETS,
+    onLog?: (line: string) => void
+  ): Promise<InstallDependenciesResult> {
     const requested = uniqueTargets(targets);
     const logs: string[] = [];
+
+    const pushLog = (line: string) => {
+      logs.push(line);
+      onLog?.(line);
+    };
+
     const initialStatus = await this.doctor();
     const missing = this.resolveMissingDependencies(initialStatus, requested);
 
     if (missing.length === 0) {
-      logs.push("All selected dependencies are already available.");
+      pushLog("All selected dependencies are already available.");
       return {
         ok: true,
         logs,
@@ -145,7 +154,7 @@ export class InstallerManager {
 
     const actionable = this.mapToActionableDependencies(missing);
     if (actionable.length === 0) {
-      logs.push("Missing dependencies do not require a package-manager install.");
+      pushLog("Missing dependencies do not require a package-manager install.");
       const status = await this.doctor();
       return {
         ok: this.resolveMissingDependencies(status, requested).length === 0,
@@ -156,7 +165,7 @@ export class InstallerManager {
 
     const plan = await this.buildInstallPlan(actionable);
     if (plan.length === 0) {
-      logs.push("No supported package manager found for automatic installation on this system.");
+      pushLog("No supported package manager found for automatic installation on this system.");
       const status = await this.doctor();
       return {
         ok: false,
@@ -168,20 +177,20 @@ export class InstallerManager {
     let hadInstallFailure = false;
     for (const step of plan) {
       const printable = `${step.command} ${step.args.join(" ")}`.trim();
-      logs.push(`Running (${step.label}): ${printable}`);
+      pushLog(`Running (${step.label}): ${printable}`);
       const result = await this.runner.stream(step.command, step.args, {
         onData: (chunk) => {
-          linesFromChunk(chunk).forEach((line) => logs.push(line));
+          linesFromChunk(chunk).forEach((line) => pushLog(line));
         }
       });
       if (result.code !== 0) {
         hadInstallFailure = true;
-        logs.push(`Step failed (${step.label}) with exit code ${result.code}.`);
+        pushLog(`Step failed (${step.label}) with exit code ${result.code}.`);
         if (result.stderr) {
-          linesFromChunk(result.stderr).forEach((line) => logs.push(line));
+          linesFromChunk(result.stderr).forEach((line) => pushLog(line));
         }
       } else {
-        logs.push(`Step completed (${step.label}).`);
+        pushLog(`Step completed (${step.label}).`);
       }
     }
 
@@ -190,11 +199,11 @@ export class InstallerManager {
     const ok = unresolved.length === 0 && !hadInstallFailure;
 
     if (ok) {
-      logs.push("Automatic setup completed successfully.");
+      pushLog("Automatic setup completed successfully.");
     } else if (unresolved.length > 0) {
-      logs.push(`Setup incomplete. Missing: ${unresolved.join(", ")}.`);
+      pushLog(`Setup incomplete. Missing: ${unresolved.join(", ")}.`);
     } else {
-      logs.push("Setup finished but at least one installer command failed.");
+      pushLog("Setup finished but at least one installer command failed.");
     }
 
     return {

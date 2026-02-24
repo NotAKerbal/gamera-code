@@ -1,102 +1,87 @@
 /**
  * electron-builder beforeBuild hook.
  *
- * In an npm-workspaces monorepo the shared node_modules lives at the repo
- * root.  electron-builder's default "install production dependencies" step
- * runs `npm install --production` inside the workspace, which removes
- * devDependencies (including electron-builder itself and app-builder-bin)
- * from the shared tree — breaking the build mid-flight.
+ * In this npm-workspaces repo, electron-builder's default dependency install
+ * can mutate the shared root node_modules tree. We skip that step by returning
+ * false and package the currently-installed workspace dependencies as-is.
  *
- * This hook installs production deps into a LOCAL node_modules inside the
- * app directory (isolated from the workspace root), then returns `false`
- * so electron-builder skips its own destructive npm install.
+ * Workspace packages (like @code-app/shared) are symlinked by npm into the
+ * root node_modules. Symlinks pointing outside the app directory are NOT
+ * followed by asar packaging, so we physically copy workspace packages into
+ * the app's local node_modules before the build.
+ *
+ * Hoisted packages (like @openai/codex-sdk) that live only in the root
+ * node_modules must also be copied so they resolve inside the asar.
  */
 
-import { execSync } from "node:child_process";
-import {
-  copyFileSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 
+function copyPackage(src, dst) {
+  mkdirSync(dst, { recursive: true });
+  cpSync(src, dst, { recursive: true });
+}
+
+/**
+ * Copy all @openai/* packages from root node_modules into the app's local
+ * node_modules. This covers codex-sdk, codex, and the platform-specific
+ * optional binary packages (e.g. codex-win32-x64).
+ */
+function copyHoistedOpenAiPackages(rootNodeModules, localNodeModules) {
+  const scopeDir = join(rootNodeModules, "@openai");
+  if (!existsSync(scopeDir)) {
+    console.warn("  - WARNING: @openai scope not found in root node_modules");
+    return;
+  }
+
+  const localScope = join(localNodeModules, "@openai");
+  mkdirSync(localScope, { recursive: true });
+
+  for (const entry of readdirSync(scopeDir)) {
+    const src = join(scopeDir, entry);
+    if (!lstatSync(src).isDirectory()) continue;
+    const dst = join(localScope, entry);
+    copyPackage(src, dst);
+    console.log(`  - copied @openai/${entry} into app node_modules`);
+  }
+}
+
 export default async function beforeBuild(context) {
-  const { appDir, electronVersion } = context;
+  const { appDir } = context;
   const repoRoot = join(appDir, "..", "..", "..");
+  const localNodeModules = join(appDir, "node_modules");
+  const rootNodeModules = join(repoRoot, "node_modules");
 
-  const tempDir = join(repoRoot, ".prod-install-temp");
-  const localNM = join(appDir, "node_modules");
-
-  // ── 1. Clean previous runs ────────────────────────────────────────
-  for (const d of [tempDir, localNM]) {
-    if (existsSync(d)) rmSync(d, { recursive: true, force: true });
-  }
-  mkdirSync(tempDir, { recursive: true });
-
-  // ── 2. Create a standalone package.json (no workspace refs) ───────
-  const pkg = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8"));
-  const deps = { ...pkg.dependencies };
-  delete deps["@code-app/shared"]; // copied manually below
-
-  writeFileSync(
-    join(tempDir, "package.json"),
-    JSON.stringify(
-      { name: pkg.name, version: pkg.version, dependencies: deps },
-      null,
-      2
-    )
-  );
-
-  // ── 3. Install production deps in an isolated temp directory ──────
-  console.log("  • installing production dependencies (workspace-safe)");
-  execSync("npm install --omit=dev --prefer-offline", {
-    cwd: tempDir,
-    stdio: "inherit",
-    env: { ...process.env, npm_config_workspaces: "false" },
-  });
-
-  // ── 4. Move node_modules into the app directory ───────────────────
-  cpSync(join(tempDir, "node_modules"), localNM, { recursive: true });
-
-  // ── 5. Copy the workspace package @code-app/shared ────────────────
-  const sharedSrc = join(repoRoot, "apps", "desktop", "shared");
-  const sharedDst = join(localNM, "@code-app", "shared");
-  mkdirSync(sharedDst, { recursive: true });
-  copyFileSync(join(sharedSrc, "package.json"), join(sharedDst, "package.json"));
-  if (existsSync(join(sharedSrc, "dist"))) {
-    cpSync(join(sharedSrc, "dist"), join(sharedDst, "dist"), {
-      recursive: true,
-    });
-  }
-
-  // ── 6. Rebuild native modules for Electron ────────────────────────
-  console.log(
-    `  • rebuilding native modules for Electron ${electronVersion}`
-  );
-  try {
-    execSync(
-      `npx @electron/rebuild --version ${electronVersion} --module-dir "${appDir}"`,
-      { cwd: repoRoot, stdio: "inherit" }
+  if (!existsSync(localNodeModules)) {
+    throw new Error(
+      "Missing app node_modules. Run npm install (repo root) before packaging."
     );
-  } catch (e) {
-    console.warn("  • native module rebuild warning:", e.message);
   }
 
-  // ── 7. Tidy up (delayed until process exit so symlinks survive packaging) ─
-  process.on("exit", () => {
-    try {
-      if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
-    } catch {}
-    try {
-      if (existsSync(localNM)) rmSync(localNM, { recursive: true, force: true });
-    } catch {}
-  });
+  // Copy workspace package @code-app/shared so it's physically present
+  // in the asar archive (symlinks to outside the app dir are not followed).
+  const sharedSrc = join(repoRoot, "apps", "desktop", "shared");
+  const sharedDst = join(localNodeModules, "@code-app", "shared");
 
-  console.log("  • production dependencies ready");
+  if (existsSync(sharedSrc)) {
+    mkdirSync(sharedDst, { recursive: true });
+    cpSync(join(sharedSrc, "package.json"), join(sharedDst, "package.json"));
+    if (existsSync(join(sharedSrc, "dist"))) {
+      cpSync(join(sharedSrc, "dist"), join(sharedDst, "dist"), {
+        recursive: true,
+      });
+    }
+    console.log("  - copied @code-app/shared into app node_modules");
+  } else {
+    throw new Error("Cannot find @code-app/shared source at " + sharedSrc);
+  }
+
+  // Copy hoisted @openai/* packages (codex-sdk, codex, platform binaries)
+  // so dynamic import("@openai/codex-sdk") resolves inside the asar.
+  copyHoistedOpenAiPackages(rootNodeModules, localNodeModules);
+
+  console.log("  - using existing workspace dependencies");
+  console.log("  - skipping electron-builder dependency reinstall");
 
   return false;
 }

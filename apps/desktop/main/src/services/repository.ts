@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showThreadSummaries: true,
   projectTerminalSwitchBehaviorDefault: "start_stop",
   codexDefaults: {
+    collaborationMode: "coding",
     sandboxMode: "workspace-write",
     modelReasoningEffort: "medium",
     webSearchMode: "cached",
@@ -457,13 +458,18 @@ export class Repository {
         .prepare(
           `SELECT
               t.*,
-              MAX(m.ts) AS last_message_ts
+              (
+                SELECT m.ts
+                FROM message_events m
+                WHERE m.thread_id = t.id
+                  AND m.role IN ('user', 'assistant')
+                ORDER BY m.ts DESC
+                LIMIT 1
+              ) AS last_message_ts
             FROM threads t
-            LEFT JOIN message_events m ON m.thread_id = t.id AND m.role IN ('user', 'assistant')
             WHERE t.project_id = @projectId
               AND (@includeArchived = 1 OR t.archived_at IS NULL)
-            GROUP BY t.id
-            ORDER BY COALESCE(MAX(m.ts), t.updated_at) DESC`
+            ORDER BY COALESCE(last_message_ts, t.updated_at) DESC`
         )
         .all({ projectId: input.projectId, includeArchived: includeArchived ? 1 : 0 }) as ThreadRow[];
 
@@ -474,12 +480,17 @@ export class Repository {
       .prepare(
         `SELECT
             t.*,
-            MAX(m.ts) AS last_message_ts
+            (
+              SELECT m.ts
+              FROM message_events m
+              WHERE m.thread_id = t.id
+                AND m.role IN ('user', 'assistant')
+              ORDER BY m.ts DESC
+              LIMIT 1
+            ) AS last_message_ts
           FROM threads t
-          LEFT JOIN message_events m ON m.thread_id = t.id AND m.role IN ('user', 'assistant')
           WHERE (@includeArchived = 1 OR t.archived_at IS NULL)
-          GROUP BY t.id
-          ORDER BY COALESCE(MAX(m.ts), t.updated_at) DESC`
+          ORDER BY COALESCE(last_message_ts, t.updated_at) DESC`
       )
       .all({ includeArchived: includeArchived ? 1 : 0 }) as ThreadRow[];
 

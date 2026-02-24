@@ -98,6 +98,7 @@ export interface DesktopApi {
     installCli: (input: { provider: Provider }) => Promise<{ ok: boolean; logs: string[] }>;
     installDependencies: (input?: { targets?: InstallDependencyKey[] }) => Promise<InstallDependenciesResult>;
     verify: () => Promise<InstallStatus>;
+    onInstallLog: (listener: (line: string) => void) => () => void;
   };
   permissions: {
     evaluate: (input: { threadId?: string; command: string; cwd: string; approve?: boolean }) => Promise<RiskCheck>;

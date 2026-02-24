@@ -37,6 +37,7 @@ export const IPC_CHANNELS = {
   installerDoctor: "installer:doctor",
   installerInstallCli: "installer:installCli",
   installerInstallDependencies: "installer:installDependencies",
+  installerInstallLog: "installer:installLog",
   installerVerify: "installer:verify",
   permissionsEvaluate: "permissions:evaluate",
   permissionsSetMode: "permissions:setMode",

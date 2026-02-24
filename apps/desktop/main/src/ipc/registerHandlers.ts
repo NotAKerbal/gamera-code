@@ -99,6 +99,13 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
       }
     });
   };
+  const pushInstallLog = (line: string) => {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.installerInstallLog, line);
+      }
+    });
+  };
 
   ipcMain.handle(IPC_CHANNELS.projectsList, async () => deps.repository.listProjects());
 
@@ -359,7 +366,7 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   ipcMain.handle(
     IPC_CHANNELS.installerInstallDependencies,
     async (_event, input?: { targets?: Array<"node" | "npm" | "git" | "rg" | "codex"> }) => {
-      return deps.installerManager.installDependencies(input?.targets);
+      return deps.installerManager.installDependencies(input?.targets, pushInstallLog);
     }
   );
 

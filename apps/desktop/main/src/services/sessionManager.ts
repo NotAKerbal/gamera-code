@@ -90,15 +90,19 @@ const isCodexWebSearchMode = (value: unknown): value is NonNullable<CodexThreadO
 const isCodexApprovalPolicy = (value: unknown): value is NonNullable<CodexThreadOptions["approvalPolicy"]> =>
   value === "never" || value === "on-request" || value === "on-failure" || value === "untrusted";
 
+const isCodexCollaborationMode = (value: unknown): value is NonNullable<CodexThreadOptions["collaborationMode"]> =>
+  value === "coding" || value === "plan";
+
 const normalizeCodexThreadOptions = (
   cwd: string,
   options?: CodexThreadOptions
 ): Required<Pick<CodexThreadOptions, "sandboxMode" | "modelReasoningEffort" | "webSearchMode" | "networkAccessEnabled" | "approvalPolicy">> &
-  Pick<CodexThreadOptions, "model"> & {
+  Pick<CodexThreadOptions, "model" | "collaborationMode"> & {
     workingDirectory: string;
     skipGitRepoCheck: true;
   } => {
   const model = asString(options?.model) ?? undefined;
+  const collaborationMode = isCodexCollaborationMode(options?.collaborationMode) ? options.collaborationMode : "coding";
   const sandboxMode = isCodexSandboxMode(options?.sandboxMode) ? options.sandboxMode : "workspace-write";
   const modelReasoningEffort = isCodexModelReasoningEffort(options?.modelReasoningEffort)
     ? options.modelReasoningEffort
@@ -109,6 +113,7 @@ const normalizeCodexThreadOptions = (
 
   return {
     model,
+    collaborationMode,
     sandboxMode,
     modelReasoningEffort,
     webSearchMode,
@@ -122,6 +127,7 @@ const normalizeCodexThreadOptions = (
 const codexThreadOptionsKey = (options: ReturnType<typeof normalizeCodexThreadOptions>) =>
   JSON.stringify({
     model: options.model ?? "",
+    collaborationMode: options.collaborationMode ?? "",
     sandboxMode: options.sandboxMode,
     modelReasoningEffort: options.modelReasoningEffort,
     webSearchMode: options.webSearchMode,
@@ -382,7 +388,7 @@ const shouldPersistActivityEvent = (type: SessionEventType, data?: Record<string
   }
 
   const category = typeof data?.category === "string" ? data.category : "";
-  const blocked = new Set(["reasoning", "assistant_draft", "turn", "thread"]);
+  const blocked = new Set(["assistant_draft", "turn", "thread"]);
   return !blocked.has(category);
 };
 
@@ -723,6 +729,9 @@ export class SessionManager {
     const codexPathOverride = resolveCodexBinaryPath();
     const codex = new Codex({
       env,
+      config: {
+        show_raw_agent_reasoning: true
+      },
       ...(codexPathOverride ? { codexPathOverride } : {})
     });
 
@@ -1008,7 +1017,7 @@ export class SessionManager {
 
     if (itemType === "reasoning") {
       const text = sanitizePtyOutput(asString(item.text) ?? "");
-      this.emitSessionEvent(threadId, "progress", "Thinking...", {
+      this.emitSessionEvent(threadId, "progress", text || "Thinking...", {
         provider: "codex",
         category: "reasoning",
         itemType,

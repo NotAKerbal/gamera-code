@@ -68,7 +68,12 @@ const api: DesktopApi = {
     doctor: () => ipcRenderer.invoke(IPC_CHANNELS.installerDoctor),
     installCli: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallCli, input),
     installDependencies: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallDependencies, input),
-    verify: () => ipcRenderer.invoke(IPC_CHANNELS.installerVerify)
+    verify: () => ipcRenderer.invoke(IPC_CHANNELS.installerVerify),
+    onInstallLog: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, line: string) => listener(line);
+      ipcRenderer.on(IPC_CHANNELS.installerInstallLog, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.installerInstallLog, wrapped);
+    }
   },
   permissions: {
     evaluate: (input) => ipcRenderer.invoke(IPC_CHANNELS.permissionsEvaluate, input),
