@@ -134,6 +134,12 @@ export interface MessageEvent {
   streamSeq: number;
 }
 
+export interface ThreadEventsPage {
+  events: MessageEvent[];
+  hasMore: boolean;
+  nextBeforeStreamSeq?: number;
+}
+
 export type RiskLevel = "low" | "medium" | "high";
 
 export interface RiskCheck {

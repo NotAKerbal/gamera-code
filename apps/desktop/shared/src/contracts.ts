@@ -8,6 +8,7 @@ import type {
   GitState,
   InstallStatus,
   MessageEvent,
+  ThreadEventsPage,
   PermissionMode,
   Project,
   ProjectSettings,
@@ -70,7 +71,11 @@ export interface DesktopApi {
     create: (input: { projectId: string; title: string; provider: Provider }) => Promise<Thread>;
     update: (input: { id: string; title?: string; provider?: Provider; status?: Thread["status"] }) => Promise<Thread>;
     archive: (input: { id: string; archived: boolean }) => Promise<Thread>;
-    events: (input: { threadId: string }) => Promise<MessageEvent[]>;
+    events: (input: {
+      threadId: string;
+      beforeStreamSeq?: number;
+      userPromptCount?: number;
+    }) => Promise<ThreadEventsPage>;
   };
   sessions: {
     start: (input: { threadId: string; options?: CodexThreadOptions }) => Promise<Session>;

@@ -303,9 +303,12 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return deps.repository.archiveThread(input.id, input.archived);
   });
 
-  ipcMain.handle(IPC_CHANNELS.threadsEvents, async (_event, input: { threadId: string }) => {
-    return deps.repository.listMessages(input.threadId);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.threadsEvents,
+    async (_event, input: { threadId: string; beforeStreamSeq?: number; userPromptCount?: number }) => {
+      return deps.repository.listMessages(input);
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.sessionsStart, async (_event, input: { threadId: string; options?: CodexThreadOptions }) => {
     const thread = deps.repository.getThread(input.threadId);

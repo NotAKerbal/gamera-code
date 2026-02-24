@@ -12,6 +12,7 @@ import type {
   ProjectTerminalSwitchBehavior,
   Provider,
   Session,
+  ThreadEventsPage,
   Thread,
   ThreadStatus
 } from "@code-app/shared";
@@ -616,12 +617,90 @@ export class Repository {
     return event;
   }
 
-  listMessages(threadId: string): MessageEvent[] {
-    const rows = this.db
-      .prepare("SELECT * FROM message_events WHERE thread_id = ? ORDER BY stream_seq ASC")
-      .all(threadId) as MessageRow[];
+  listMessages(input: { threadId: string; beforeStreamSeq?: number; userPromptCount?: number }): ThreadEventsPage {
+    const { threadId } = input;
+    const upperStreamSeq =
+      typeof input.beforeStreamSeq === "number" && Number.isFinite(input.beforeStreamSeq)
+        ? Math.max(Math.floor(input.beforeStreamSeq) - 1, 0)
+        : Number.MAX_SAFE_INTEGER;
+    const userPromptCountRaw =
+      typeof input.userPromptCount === "number" && Number.isFinite(input.userPromptCount)
+        ? Math.floor(input.userPromptCount)
+        : 2;
+    const userPromptCount = Math.max(1, Math.min(userPromptCountRaw, 8));
 
-    return rows.map(mapMessage);
+    if (upperStreamSeq <= 0) {
+      return { events: [], hasMore: false };
+    }
+
+    const anchorUserRow = this.db
+      .prepare(
+        `SELECT stream_seq
+         FROM message_events
+         WHERE thread_id = @threadId
+           AND role = 'user'
+           AND stream_seq <= @upperStreamSeq
+         ORDER BY stream_seq DESC
+         LIMIT 1 OFFSET @offset`
+      )
+      .get({
+        threadId,
+        upperStreamSeq,
+        offset: userPromptCount - 1
+      }) as Pick<MessageRow, "stream_seq"> | undefined;
+
+    const firstRow = this.db
+      .prepare(
+        `SELECT stream_seq
+         FROM message_events
+         WHERE thread_id = @threadId
+           AND stream_seq <= @upperStreamSeq
+         ORDER BY stream_seq ASC
+         LIMIT 1`
+      )
+      .get({ threadId, upperStreamSeq }) as Pick<MessageRow, "stream_seq"> | undefined;
+
+    if (!firstRow) {
+      return { events: [], hasMore: false };
+    }
+
+    const lowerStreamSeq = anchorUserRow?.stream_seq ?? firstRow.stream_seq;
+
+    const rows = this.db
+      .prepare(
+        `SELECT *
+         FROM message_events
+         WHERE thread_id = @threadId
+           AND stream_seq BETWEEN @lowerStreamSeq AND @upperStreamSeq
+         ORDER BY stream_seq ASC`
+      )
+      .all({
+        threadId,
+        lowerStreamSeq,
+        upperStreamSeq
+      }) as MessageRow[];
+
+    if (rows.length === 0) {
+      return { events: [], hasMore: false };
+    }
+
+    const firstLoadedStreamSeq = rows[0]!.stream_seq;
+    const hasMoreRow = this.db
+      .prepare(
+        `SELECT 1 AS has_more
+         FROM message_events
+         WHERE thread_id = @threadId
+           AND stream_seq < @firstLoadedStreamSeq
+         LIMIT 1`
+      )
+      .get({ threadId, firstLoadedStreamSeq }) as { has_more: number } | undefined;
+    const hasMore = Boolean(hasMoreRow);
+
+    return {
+      events: rows.map(mapMessage),
+      hasMore,
+      nextBeforeStreamSeq: hasMore ? firstLoadedStreamSeq : undefined
+    };
   }
 
   appendPtyLog(threadId: string, text: string): void {

@@ -19,6 +19,7 @@ import {
   FaExternalLinkAlt,
   FaGlobeAmericas,
   FaNetworkWired,
+  FaPen,
   FaFolderOpen,
   FaPaperPlane,
   FaPlus,
@@ -37,7 +38,6 @@ import type {
   CodexSandboxMode,
   CodexThreadOptions,
   CodexWebSearchMode,
-  GitFileStatus,
   GitRepositoryCandidate,
   GitState,
   InstallStatus,
@@ -51,7 +51,8 @@ import type {
   ProjectTerminalState,
   ProjectTerminalSwitchBehavior,
   SessionEvent,
-  Thread
+  Thread,
+  ThreadEventsPage
 } from "@code-app/shared";
 
 const api = window.desktopAPI;
@@ -74,6 +75,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const SHOW_TERMINAL = false;
 const MAX_ATTACHMENTS = 8;
+const HISTORY_USER_PROMPT_WINDOW = 2;
 
 const QUICK_PROMPTS = [
   "Summarize this repository and list the top 3 risky areas.",
@@ -210,22 +212,6 @@ const getProjectNameFromPath = (path: string) => {
   return segments[segments.length - 1] || path;
 };
 
-const gitFileStatusText = (file: GitFileStatus) => {
-  if (file.untracked) {
-    return "untracked";
-  }
-  if (file.staged && file.unstaged) {
-    return "staged + unstaged";
-  }
-  if (file.staged) {
-    return "staged";
-  }
-  if (file.unstaged) {
-    return "unstaged";
-  }
-  return "unknown";
-};
-
 type ActivityTone = "info" | "success" | "warn" | "error";
 
 interface ActivityFileChange {
@@ -270,6 +256,13 @@ interface QueuedPrompt {
   input: string;
   attachments: PromptAttachment[];
   options: CodexThreadOptions;
+}
+
+interface RenameDialogState {
+  kind: "thread";
+  id: string;
+  value: string;
+  original: string;
 }
 
 type ThreadRunState = "idle" | "running" | "completed" | "failed";
@@ -410,6 +403,38 @@ const codexOptionsKey = (options: CodexThreadOptions) =>
     approvalPolicy: options.approvalPolicy ?? "on-request"
   });
 
+const envVarsToText = (envVars: Record<string, string>) =>
+  Object.entries(envVars)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+
+const parseEnvText = (text: string): Record<string, string> => {
+  const envVars: Record<string, string> = {};
+  const lines = text.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const withoutExport = trimmed.startsWith("export ") ? trimmed.slice(7).trim() : trimmed;
+    const separator = withoutExport.indexOf("=");
+    if (separator <= 0) {
+      throw new Error(`Line ${index + 1}: expected KEY=value`);
+    }
+    const key = withoutExport.slice(0, separator).trim();
+    const value = withoutExport.slice(separator + 1);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error(`Line ${index + 1}: invalid key "${key}"`);
+    }
+    envVars[key] = value;
+  }
+  return envVars;
+};
+
 const extractCommandFromTitle = (title: string) => {
   const match = /^(?:Running command|Command completed|Command failed|Tool call|Tool completed):\s+(.+)$/.exec(title.trim());
   return match?.[1]?.trim() || undefined;
@@ -537,6 +562,41 @@ const parseStoredActivityEvent = (message: MessageEvent): SessionEvent | null =>
   } catch {
     return null;
   }
+};
+
+const parseHistoryBatch = (history: MessageEvent[]) => {
+  const restoredActivity: ActivityEntry[] = [];
+  const restoredMessages: MessageEvent[] = [];
+
+  history.forEach((message) => {
+    const storedEvent = parseStoredActivityEvent(message);
+    if (storedEvent) {
+      const entry = eventToActivityEntry(storedEvent);
+      if (entry) {
+        restoredActivity.push(entry);
+      }
+      return;
+    }
+
+    if (message.role === "system") {
+      return;
+    }
+
+    const content = sanitizeForDisplay(message.content);
+    if (!content) {
+      return;
+    }
+
+    restoredMessages.push({
+      ...message,
+      content
+    });
+  });
+
+  return {
+    restoredActivity,
+    restoredMessages
+  };
 };
 
 const AssistantMarkdown = ({ content }: { content: string }) => {
@@ -745,19 +805,7 @@ const summarizeRunStates = (runs: CommandRun[]) => {
 };
 
 const buildRunGroupLabel = (prefix: string, runs: CommandRun[]) => {
-  const states = summarizeRunStates(runs);
-  const segments = [`${prefix} (${runs.length})`];
-  if (states.completed > 0) {
-    segments.push(`${states.completed} done`);
-  }
-  if (states.failed > 0) {
-    segments.push(`${states.failed} failed`);
-  }
-  if (states.inProgress > 0) {
-    segments.push(`${states.inProgress} running`);
-  }
-
-  return segments.join(" • ");
+  return prefix;
 };
 
 const pluralize = (count: number, singular: string, plural: string) => `${count} ${count === 1 ? singular : plural}`;
@@ -849,10 +897,10 @@ const diffLineClass = (line: string) => {
   return "";
 };
 
-const renderDiff = (diff: string) => {
+const renderDiff = (diff: string, className = "file-diff") => {
   const lines = diff.split("\n");
   return (
-    <pre className="file-diff">
+    <pre className={className}>
       {lines.map((line, idx) => (
         <div key={`${idx}-${line.slice(0, 32)}`} className={diffLineClass(line)}>
           {line || " "}
@@ -865,6 +913,31 @@ const renderDiff = (diff: string) => {
 const tokenizeShell = (command: string) => {
   const matches = command.match(/"[^"]*"|'[^']*'|[^\s]+/g) ?? [];
   return matches.map((token) => stripOuterQuotes(token));
+};
+
+const extractOptionValues = (tokens: string[], optionNames: string[]) => {
+  const values: string[] = [];
+  const normalizedOptions = new Set(optionNames.map((name) => name.toLowerCase()));
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token || !token.startsWith("-")) {
+      continue;
+    }
+
+    const lowered = token.toLowerCase();
+    if (!normalizedOptions.has(lowered)) {
+      continue;
+    }
+
+    const nextToken = tokens[index + 1];
+    if (!nextToken || nextToken.startsWith("-")) {
+      continue;
+    }
+
+    values.push(nextToken);
+  }
+
+  return values;
 };
 
 const candidateLinesFromRun = (run: CommandRun) => {
@@ -1018,6 +1091,33 @@ const explorationStatsFromRuns = (runs: CommandRun[]) => {
         fileKeys.add(`read:${run.id}`);
       }
     }
+
+    if (/^(?:select-string|sls)(?:\s|$)/.test(normalized)) {
+      const baseSegment = command.split(/\||&&|\|\|/)[0]?.trim() ?? command;
+      const tokens = tokenizeShell(baseSegment);
+      const pathArgs = extractOptionValues(tokens, ["-path", "-literalpath"]);
+      pathArgs
+        .flatMap((value) => value.split(",").map((entry) => entry.trim()).filter(Boolean))
+        .forEach((value) => {
+          fileKeys.add(`search:${value}`);
+          fileNames.add(value);
+        });
+
+      lines
+        .map((line) => {
+          const match = /^(.+?):\d+/.exec(line);
+          return match?.[1]?.trim() || null;
+        })
+        .filter((value): value is string => Boolean(value))
+        .forEach((value) => {
+          fileKeys.add(`match:${value}`);
+          fileNames.add(value);
+        });
+
+      if (pathArgs.length === 0 && lines.length === 0) {
+        fileKeys.add(`search:${run.id}`);
+      }
+    }
   });
 
   return {
@@ -1049,10 +1149,10 @@ const buildExplorationLabel = (runs: CommandRun[]) => {
   }
 
   if (segments.length === 0) {
-    segments.push(`Exploration (${runs.length})`);
+    segments.push("Exploration");
   }
 
-  return segments.join(" • ");
+  return segments.join(" | ");
 };
 
 export const App = () => {
@@ -1073,6 +1173,9 @@ export const App = () => {
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showImportProjectModal, setShowImportProjectModal] = useState(false);
+  const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState("");
   const [newProjectName, setNewProjectName] = useState("");
   const [importProjectQuery, setImportProjectQuery] = useState("");
   const [importCandidates, setImportCandidates] = useState<GitRepositoryCandidate[]>([]);
@@ -1084,6 +1187,9 @@ export const App = () => {
   const [updateMessage, setUpdateMessage] = useState<string>("");
   const [settingsEnvText, setSettingsEnvText] = useState("{}");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [threadHistoryCursorById, setThreadHistoryCursorById] = useState<Record<string, number | undefined>>({});
+  const [threadHistoryHasMoreById, setThreadHistoryHasMoreById] = useState<Record<string, boolean>>({});
+  const [threadHistoryLoadingById, setThreadHistoryLoadingById] = useState<Record<string, boolean>>({});
   const [runStateByThreadId, setRunStateByThreadId] = useState<Record<string, ThreadRunState>>({});
   const [composerDraftByThreadId, setComposerDraftByThreadId] = useState<Record<string, string>>({});
   const [queuedPromptsByThreadId, setQueuedPromptsByThreadId] = useState<Record<string, QueuedPrompt[]>>({});
@@ -1104,8 +1210,10 @@ export const App = () => {
   const [gitCommitMessage, setGitCommitMessage] = useState("");
   const [gitBranchSearch, setGitBranchSearch] = useState("");
   const [gitActivityByProjectId, setGitActivityByProjectId] = useState<Record<string, GitActivityEntry[]>>({});
+  const [gitActivityExpandedByProjectId, setGitActivityExpandedByProjectId] = useState<Record<string, boolean>>({});
   const [isGitPoppedOut, setIsGitPoppedOut] = useState(false);
   const [projectSettingsEnvText, setProjectSettingsEnvText] = useState("{}");
+  const [projectSettingsProjectName, setProjectSettingsProjectName] = useState("");
   const [projectSettingsCommands, setProjectSettingsCommands] = useState<
     Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>
   >([]);
@@ -1133,7 +1241,13 @@ export const App = () => {
   const composerApprovalTriggerRef = useRef<HTMLButtonElement | null>(null);
   const composerWebSearchTriggerRef = useRef<HTMLButtonElement | null>(null);
   const composerDropdownMenuRef = useRef<HTMLDivElement | null>(null);
+  const threadCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const timelineViewportRef = useRef<HTMLElement | null>(null);
+  const pendingHistoryScrollRestoreRef = useRef<{
+    threadId: string;
+    previousHeight: number;
+    previousTop: number;
+  } | null>(null);
   const runStateByThreadIdRef = useRef<Record<string, ThreadRunState>>({});
   const queuedPromptsByThreadIdRef = useRef<Record<string, QueuedPrompt[]>>({});
   const queueProcessingThreadIdsRef = useRef<Set<string>>(new Set());
@@ -1212,8 +1326,21 @@ export const App = () => {
     return activeGitState.branches.find((branch) => branch.name === gitBranchInput) ?? null;
   }, [activeGitState, gitBranchInput]);
   const canCreateBranchFromInput = Boolean(gitBranchInput) && !/\s/.test(gitBranchInput) && !exactBranchMatch;
+  const activeUntrackedFilesCount = useMemo(
+    () => activeUnstagedFiles.filter((file) => file.untracked).length,
+    [activeUnstagedFiles]
+  );
+  const activeUnstagedTrackedFilesCount = useMemo(
+    () => activeUnstagedFiles.filter((file) => !file.untracked).length,
+    [activeUnstagedFiles]
+  );
+  const hasStageableFiles = activeUnstagedFiles.length > 0;
+  const isWorkingTreeClean = hasStageableFiles === false && activeStagedFiles.length === 0;
   const activeRunState: ThreadRunState = activeThreadId ? runStateByThreadId[activeThreadId] ?? "idle" : "idle";
   const activeQueuedPromptCount = activeThreadId ? queuedPromptsByThreadId[activeThreadId]?.length ?? 0 : 0;
+  const activeThreadHistoryLoading = activeThreadId ? threadHistoryLoadingById[activeThreadId] ?? false : false;
+  const activeThreadHasMoreHistory = activeThreadId ? threadHistoryHasMoreById[activeThreadId] ?? false : false;
+  const activeThreadHistoryCursor = activeThreadId ? threadHistoryCursorById[activeThreadId] : undefined;
   const sandboxLabel = SANDBOX_OPTIONS.find((option) => option.value === (composerOptions.sandboxMode ?? "workspace-write"))?.label ?? "Workspace write";
   const approvalLabel = APPROVAL_OPTIONS.find((option) => option.value === (composerOptions.approvalPolicy ?? "on-request"))?.label ?? "On request";
   const webSearchLabel = WEB_SEARCH_OPTIONS.find((option) => option.value === (composerOptions.webSearchMode ?? "cached"))?.label ?? "Cached";
@@ -1324,7 +1451,7 @@ export const App = () => {
   const loadSettings = async () => {
     const current = await api.settings.get();
     setSettings(current);
-    setSettingsEnvText(JSON.stringify(current.envVars, null, 2));
+    setSettingsEnvText(envVarsToText(current.envVars));
     setComposerOptions(current.codexDefaults);
   };
 
@@ -1505,6 +1632,86 @@ export const App = () => {
     return `${input ? `${input}\n\n` : ""}Attached images:\n${attachments.map((attachment) => `- [image] ${attachment.name}`).join("\n")}`;
   };
 
+  const applyThreadHistoryPage = (
+    threadId: string,
+    page: ThreadEventsPage,
+    mode: "replace" | "prepend"
+  ) => {
+    const { restoredActivity, restoredMessages } = parseHistoryBatch(page.events);
+
+    if (mode === "replace") {
+      setMessages(restoredMessages);
+      setActivity(restoredActivity);
+    } else {
+      setMessages((prev) => {
+        const seen = new Set(prev.map((entry) => entry.id));
+        const older = restoredMessages.filter((entry) => !seen.has(entry.id));
+        return older.length > 0 ? [...older, ...prev] : prev;
+      });
+      setActivity((prev) => {
+        const seen = new Set(prev.map((entry) => entry.id));
+        const older = restoredActivity.filter((entry) => !seen.has(entry.id));
+        return older.length > 0 ? [...older, ...prev] : prev;
+      });
+    }
+
+    setThreadHistoryCursorById((prev) => ({
+      ...prev,
+      [threadId]: page.nextBeforeStreamSeq
+    }));
+    setThreadHistoryHasMoreById((prev) => ({
+      ...prev,
+      [threadId]: page.hasMore
+    }));
+  };
+
+  const loadOlderHistory = async (threadId: string) => {
+    const isAlreadyLoading = threadHistoryLoadingById[threadId] ?? false;
+    const hasMore = threadHistoryHasMoreById[threadId] ?? false;
+    const cursor = threadHistoryCursorById[threadId];
+    if (isAlreadyLoading || !hasMore || typeof cursor !== "number") {
+      return;
+    }
+
+    const viewport = timelineViewportRef.current;
+    if (viewport) {
+      pendingHistoryScrollRestoreRef.current = {
+        threadId,
+        previousHeight: viewport.scrollHeight,
+        previousTop: viewport.scrollTop
+      };
+    }
+
+    setThreadHistoryLoadingById((prev) => ({
+      ...prev,
+      [threadId]: true
+    }));
+
+    try {
+      const page = await api.threads.events({
+        threadId,
+        beforeStreamSeq: cursor,
+        userPromptCount: HISTORY_USER_PROMPT_WINDOW
+      });
+      applyThreadHistoryPage(threadId, page, "prepend");
+    } finally {
+      setThreadHistoryLoadingById((prev) => ({
+        ...prev,
+        [threadId]: false
+      }));
+    }
+  };
+
+  const scrollTimelineToBottom = () => {
+    const viewport = timelineViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+  };
+
   const dispatchPromptToThread = async (threadId: string, prompt: QueuedPrompt) => {
     const optionKey = codexOptionsKey(prompt.options);
     if (optionKey !== lastStartedOptionsKeyRef.current) {
@@ -1650,7 +1857,7 @@ export const App = () => {
 
       const entry = eventToActivityEntry(event);
       if (entry) {
-        setActivity((prev) => [...prev.slice(-199), entry]);
+        setActivity((prev) => [...prev, entry]);
       }
 
       const category = asString(data?.category);
@@ -1743,6 +1950,27 @@ export const App = () => {
       }
       return Object.fromEntries(nextEntries) as Record<string, boolean>;
     });
+    setThreadHistoryCursorById((prev) => {
+      const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      return Object.fromEntries(nextEntries) as Record<string, number | undefined>;
+    });
+    setThreadHistoryHasMoreById((prev) => {
+      const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      return Object.fromEntries(nextEntries) as Record<string, boolean>;
+    });
+    setThreadHistoryLoadingById((prev) => {
+      const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      return Object.fromEntries(nextEntries) as Record<string, boolean>;
+    });
   }, [threads]);
 
   useEffect(() => {
@@ -1819,6 +2047,39 @@ export const App = () => {
     setGitBranchSearch("");
     setComposerDropdown(null);
   }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!threadMenuProjectId) {
+      return;
+    }
+    const openProjectId = threadMenuProjectId;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+      if (threadCreateMenuRef.current?.contains(target)) {
+        return;
+      }
+      const element = target as HTMLElement;
+      const trigger = element.closest(`[data-thread-menu-trigger="${openProjectId}"]`);
+      if (trigger) {
+        return;
+      }
+      setThreadMenuProjectId(null);
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setThreadMenuProjectId(null);
+      }
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, [threadMenuProjectId]);
 
   useEffect(() => {
     if (!isBranchDropdownOpen) {
@@ -1965,6 +2226,7 @@ export const App = () => {
       setMessages([]);
       setTerminalLines([]);
       setActivity([]);
+      pendingHistoryScrollRestoreRef.current = null;
       lastStartedOptionsKeyRef.current = "";
       setComposerAttachments((prev) => {
         prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
@@ -1979,40 +2241,15 @@ export const App = () => {
         return [];
       });
       setIsDraggingFiles(false);
-      const history = await api.threads.events({ threadId: activeThreadId });
-      const restoredActivity: ActivityEntry[] = [];
-      const restoredMessages: MessageEvent[] = [];
-
-      history.forEach((message) => {
-        const storedEvent = parseStoredActivityEvent(message);
-        if (storedEvent) {
-          const entry = eventToActivityEntry(storedEvent);
-          if (entry) {
-            restoredActivity.push(entry);
-          }
-          return;
-        }
-
-        if (message.role === "system") {
-          return;
-        }
-
-        const content = sanitizeForDisplay(message.content);
-        if (!content) {
-          return;
-        }
-
-        restoredMessages.push({
-          ...message,
-          content
-        });
+      const historyPage = await api.threads.events({
+        threadId: activeThreadId,
+        userPromptCount: HISTORY_USER_PROMPT_WINDOW
       });
-
-      setMessages(restoredMessages);
+      applyThreadHistoryPage(activeThreadId, historyPage, "replace");
       setTerminalLines([]);
-      setActivity(restoredActivity.slice(-200));
       await api.sessions.start({ threadId: activeThreadId, options: composerOptions });
       lastStartedOptionsKeyRef.current = codexOptionsKey(composerOptions);
+      scrollTimelineToBottom();
     };
 
     bootThread().catch((error) => {
@@ -2140,7 +2377,7 @@ export const App = () => {
       return;
     }
     const current = projectSettingsById[projectId] ?? (await loadProjectSettings(projectId));
-    setProjectSettingsEnvText(JSON.stringify(current.envVars, null, 2));
+    setProjectSettingsEnvText(envVarsToText(current.envVars));
     setProjectSettingsCommands(
       current.devCommands.map((command, index) => ({
         ...command,
@@ -2155,6 +2392,8 @@ export const App = () => {
         url: link.url ?? ""
       }))
     );
+    const projectName = projects.find((project) => project.id === projectId)?.name ?? "";
+    setProjectSettingsProjectName(projectName);
     setProjectSettingsAutoStart(current.autoStartDevTerminal);
     setProjectSettingsBrowserEnabled(current.browserEnabled ?? true);
     setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
@@ -2168,12 +2407,17 @@ export const App = () => {
     if (!activeProjectId) {
       return;
     }
+    const nextProjectName = projectSettingsProjectName.trim();
+    if (!nextProjectName) {
+      setLogs((prev) => [...prev, "Project settings save failed: project name is required."]);
+      return;
+    }
 
     let envVars: Record<string, string> = {};
     try {
-      envVars = JSON.parse(projectSettingsEnvText) as Record<string, string>;
-    } catch {
-      setLogs((prev) => [...prev, "Project settings save failed: env vars must be valid JSON object."]);
+      envVars = parseEnvText(projectSettingsEnvText);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Project settings save failed: ${String(error)}`]);
       return;
     }
 
@@ -2218,6 +2462,12 @@ export const App = () => {
         url: normalizedUrl
       });
     }
+
+    const updatedProject = await api.projects.update({
+      id: activeProjectId,
+      name: nextProjectName
+    });
+    setProjects((prev) => prev.map((project) => (project.id === updatedProject.id ? updatedProject : project)));
 
     const saved = await api.projectSettings.set({
       projectId: activeProjectId,
@@ -2544,6 +2794,47 @@ export const App = () => {
     });
   };
 
+  const beginProjectInlineRename = (project: Project) => {
+    setEditingProjectId(project.id);
+    setEditingProjectName(project.name);
+  };
+
+  const submitProjectInlineRename = async (project: Project) => {
+    const nextName = editingProjectName.trim();
+    if (!nextName || nextName === project.name) {
+      setEditingProjectId(null);
+      setEditingProjectName("");
+      return;
+    }
+    const updated = await api.projects.update({ id: project.id, name: nextName });
+    setProjects((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    setEditingProjectId(null);
+    setEditingProjectName("");
+  };
+
+  const renameThread = async (thread: Thread) => {
+    setRenameDialog({
+      kind: "thread",
+      id: thread.id,
+      value: thread.title,
+      original: thread.title
+    });
+  };
+
+  const submitRenameDialog = async () => {
+    if (!renameDialog) {
+      return;
+    }
+    const nextValue = renameDialog.value.trim();
+    if (!nextValue || nextValue === renameDialog.original) {
+      setRenameDialog(null);
+      return;
+    }
+    const updated = await api.threads.update({ id: renameDialog.id, title: nextValue });
+    setThreads((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    setRenameDialog(null);
+  };
+
   const sendPrompt = async () => {
     if (!activeThreadId) return;
     const targetThreadId = activeThreadId;
@@ -2554,6 +2845,7 @@ export const App = () => {
       targetThread &&
       !hasUserPromptInThread &&
       (settings.autoRenameThreadTitles ?? true) &&
+      targetThread.createdAt === targetThread.updatedAt &&
       GENERIC_THREAD_TITLES.has(targetThread.title.trim().toLowerCase());
 
     const sendAttachments: PromptAttachment[] = composerAttachments.map((attachment) => ({
@@ -2703,9 +2995,9 @@ export const App = () => {
   const saveSettings = async () => {
     let envVars: Record<string, string> = {};
     try {
-      envVars = JSON.parse(settingsEnvText) as Record<string, string>;
-    } catch {
-      setLogs((prev) => [...prev, "Settings save failed: envVars must be valid JSON object."]);
+      envVars = parseEnvText(settingsEnvText);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Settings save failed: ${String(error)}`]);
       return;
     }
 
@@ -2886,6 +3178,41 @@ export const App = () => {
   }, [messages, activity]);
 
   useEffect(() => {
+    const pendingRestore = pendingHistoryScrollRestoreRef.current;
+    const viewport = timelineViewportRef.current;
+    if (!pendingRestore || !viewport || !activeThreadId || pendingRestore.threadId !== activeThreadId) {
+      return;
+    }
+
+    const heightDelta = viewport.scrollHeight - pendingRestore.previousHeight;
+    viewport.scrollTop = pendingRestore.previousTop + Math.max(heightDelta, 0);
+    pendingHistoryScrollRestoreRef.current = null;
+  }, [activeThreadId, timelineItems.length]);
+
+  useEffect(() => {
+    const viewport = timelineViewportRef.current;
+    if (!viewport || !activeThreadId) {
+      return;
+    }
+
+    const handleScroll = () => {
+      if (viewport.scrollTop > 80) {
+        return;
+      }
+
+      loadOlderHistory(activeThreadId).catch((error) => {
+        setLogs((prev) => [...prev, `Load older history failed: ${String(error)}`]);
+      });
+    };
+
+    viewport.addEventListener("scroll", handleScroll);
+
+    return () => {
+      viewport.removeEventListener("scroll", handleScroll);
+    };
+  }, [activeThreadId, activeThreadHasMoreHistory, activeThreadHistoryLoading, activeThreadHistoryCursor, timelineItems.length]);
+
+  useEffect(() => {
     if (activeRunState !== "running") {
       return;
     }
@@ -3032,9 +3359,42 @@ export const App = () => {
                   return (
                     <section key={project.id} className="project-section">
                       <div className="project-head">
-                        <button className={active ? "project-row active" : "project-row"} onClick={() => setActiveProjectId(project.id)}>
-                          <span className="truncate">{project.name}</span>
-                        </button>
+                        {editingProjectId === project.id ? (
+                          <input
+                            className="input h-8 flex-1 text-xs"
+                            value={editingProjectName}
+                            onChange={(event) => setEditingProjectName(event.target.value)}
+                            onBlur={() => {
+                              submitProjectInlineRename(project).catch((error) => {
+                                setLogs((prev) => [...prev, `Project rename failed: ${String(error)}`]);
+                              });
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                submitProjectInlineRename(project).catch((error) => {
+                                  setLogs((prev) => [...prev, `Project rename failed: ${String(error)}`]);
+                                });
+                                return;
+                              }
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                setEditingProjectId(null);
+                                setEditingProjectName("");
+                              }
+                            }}
+                            autoFocus
+                          />
+                        ) : (
+                          <button
+                            className={active ? "project-row active" : "project-row"}
+                            onClick={() => setActiveProjectId(project.id)}
+                            onDoubleClick={() => beginProjectInlineRename(project)}
+                            title="Double-click to rename project"
+                          >
+                            <span className="truncate">{project.name}</span>
+                          </button>
+                        )}
                         <button
                           className="thread-add-btn"
                           onClick={() => {
@@ -3049,6 +3409,7 @@ export const App = () => {
                         </button>
                         <button
                           className="thread-add-btn"
+                          data-thread-menu-trigger={project.id}
                           onClick={() => {
                             setActiveProjectId(project.id);
                             setThreadMenuProjectId((prev) => (prev === project.id ? null : project.id));
@@ -3060,12 +3421,20 @@ export const App = () => {
                       </div>
 
                       {menuOpen && (
-                        <div className="thread-create-pop">
+                        <div ref={threadCreateMenuRef} className="thread-create-pop">
                           <input
                             value={threadDraftTitle}
                             onChange={(event) => setThreadDraftTitle(event.target.value)}
                             className="input h-8 text-xs"
                             placeholder="New thread"
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                createThread(project.id, threadDraftTitle).catch((error) => {
+                                  setLogs((prev) => [...prev, `Create thread failed: ${String(error)}`]);
+                                });
+                              }
+                            }}
                           />
                           <button
                             className="btn-primary h-8 px-2 py-0 text-xs"
@@ -3104,6 +3473,29 @@ export const App = () => {
                               )}
                               <span
                                 className="thread-row-action-btn"
+                                title="Rename thread"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  renameThread(thread).catch((error) => {
+                                    setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
+                                  });
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    renameThread(thread).catch((error) => {
+                                      setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
+                                    });
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
+                              >
+                                <FaPen className="text-[10px]" />
+                              </span>
+                              <span
+                                className="thread-row-action-btn"
                                 title="Archive thread"
                                 onClick={(event) => {
                                   event.stopPropagation();
@@ -3128,21 +3520,23 @@ export const App = () => {
                             </div>
                           </button>
                         ))}
-                        <button
-                          className="thread-archived-toggle"
-                          onClick={() =>
-                            setShowArchivedByProjectId((prev) => ({
-                              ...prev,
-                              [project.id]: !showArchived
-                            }))
-                          }
-                          disabled={archivedThreads.length === 0}
-                          title={archivedThreads.length === 0 ? "No archived threads" : "View archived threads"}
-                        >
-                          {showArchived ? "Hide archived" : `View archived (${archivedThreads.length})`}
-                        </button>
-                        {showArchived &&
-                          archivedThreads.map((thread) => (
+                        {archivedThreads.length > 0 && (
+                          <button
+                            className="thread-archived-toggle"
+                            onClick={() =>
+                              setShowArchivedByProjectId((prev) => ({
+                                ...prev,
+                                [project.id]: !showArchived
+                              }))
+                            }
+                            title="View archived threads"
+                          >
+                            {showArchived ? "Hide archived" : `View archived (${archivedThreads.length})`}
+                          </button>
+                        )}
+                        <div className={showArchived ? "thread-archived-group expanded" : "thread-archived-group"}>
+                          <div className="thread-archived-group-inner">
+                            {archivedThreads.map((thread) => (
                             <button
                               key={`archived-${thread.id}`}
                               className={`${activeThreadId === thread.id ? "thread-row active archived" : "thread-row archived"} ${
@@ -3162,6 +3556,29 @@ export const App = () => {
                                 ) : (
                                   <div className="thread-row-time text-[11px] text-muted">{formatRelative(thread.updatedAt)}</div>
                                 )}
+                                <span
+                                  className="thread-row-action-btn"
+                                  title="Rename thread"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    renameThread(thread).catch((error) => {
+                                      setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
+                                    });
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      renameThread(thread).catch((error) => {
+                                        setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
+                                      });
+                                    }
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                >
+                                  <FaPen className="text-[10px]" />
+                                </span>
                                 <span
                                   className="thread-row-action-btn"
                                   title="Restore thread"
@@ -3187,7 +3604,9 @@ export const App = () => {
                                 </span>
                               </div>
                             </button>
-                          ))}
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </section>
                   );
@@ -3257,6 +3676,12 @@ export const App = () => {
                 )}
 
                 <div className="min-w-0 space-y-5 pb-6">
+                  {activeThread && activeThreadHasMoreHistory && (
+                    <div className="text-center text-xs text-slate-500">
+                      {activeThreadHistoryLoading ? "Loading older prompts..." : "Scroll up to load earlier prompts"}
+                    </div>
+                  )}
+
                   {timelineItems.map((item) => {
                     if (item.kind === "message") {
                       return item.message.role === "assistant" ? (
@@ -3273,10 +3698,19 @@ export const App = () => {
                     }
 
                     if (item.kind === "command-group") {
+                      const states = summarizeRunStates(item.runs);
                       return (
                         <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
                           <details className="activity-group activity-group-commands">
-                            <summary className="activity-summary">{item.label}</summary>
+                            <summary className="activity-summary">
+                              <span>{item.label}</span>
+                              {states.completed > 0 && <span className="summary-chip summary-chip-success">{states.completed} done</span>}
+                              {states.failed > 0 && <span className="summary-chip summary-chip-error">{states.failed} failed</span>}
+                              {states.inProgress > 0 && <span className="summary-chip summary-chip-running">{states.inProgress} running</span>}
+                              {states.completed === 0 && states.failed === 0 && states.inProgress === 0 && (
+                                <span className="summary-chip">{item.runs.length}</span>
+                              )}
+                            </summary>
                             <div className="activity-body">
                               {item.runs.map((run) => (
                                 <details key={run.id} className="activity-command">
@@ -3310,7 +3744,10 @@ export const App = () => {
                       return (
                         <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
                           <details className="activity-group activity-group-reads">
-                            <summary className="activity-summary">{item.label}</summary>
+                            <summary className="activity-summary">
+                              <span>{item.label}</span>
+                              <span className="summary-chip">{item.runs.length}</span>
+                            </summary>
                             <div className="activity-body">
                               {item.runs.map((run) => (
                                 <details key={run.id} className="activity-command">
@@ -3810,7 +4247,7 @@ export const App = () => {
                       </div>
                     </div>
 
-                    <section className="space-y-2 border-b border-border/80 px-3 py-2">
+                    <section className="space-y-2 border-b border-border/80 px-3 py-2 max-h-[52vh] overflow-y-auto">
                       {!activeProjectId ? (
                         <p className="text-xs text-slate-400">Select a project to view git state.</p>
                       ) : !activeGitState?.insideRepo ? (
@@ -3821,14 +4258,36 @@ export const App = () => {
                             Branch: <span className="text-slate-100">{activeGitState.branch ?? "(detached)"}</span>
                             {activeGitState.upstream ? ` -> ${activeGitState.upstream}` : ""}
                           </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-emerald-200">
+                              {activeStagedFiles.length} staged
+                            </span>
+                            <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-amber-200">
+                              {activeUnstagedTrackedFilesCount} unstaged
+                            </span>
+                            <span className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-cyan-200">
+                              {activeUntrackedFilesCount} untracked
+                            </span>
+                            <span
+                              className={
+                                isWorkingTreeClean
+                                  ? "rounded-full border border-zinc-600/70 bg-zinc-900/70 px-2 py-0.5 text-slate-300"
+                                  : "rounded-full border border-orange-500/40 bg-orange-500/15 px-2 py-0.5 text-orange-200"
+                              }
+                            >
+                              {isWorkingTreeClean ? "working tree clean" : "changes pending commit"}
+                            </span>
+                          </div>
                           <div className="text-xs text-slate-400">
                             Ahead {activeGitState.ahead} / Behind {activeGitState.behind} - {activeGitState.stagedCount} staged,{" "}
                             {activeGitState.unstagedCount} unstaged, {activeGitState.untrackedCount} untracked
                           </div>
                           <div className="grid grid-cols-1 gap-1">
-                            <button className="btn-ghost" onClick={() => stageGitPath().catch((error) => setLogs((prev) => [...prev, `Git stage failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction) || activeGitState.files.length === 0}>
-                              Stage All
-                            </button>
+                            {hasStageableFiles && (
+                              <button className="btn-ghost" onClick={() => stageGitPath().catch((error) => setLogs((prev) => [...prev, `Git stage failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
+                                Stage All
+                              </button>
+                            )}
                             {(activeGitState.ahead > 0 || activeGitState.behind > 0) && (
                               <button className="btn-secondary" onClick={() => runGitAction("sync", (projectId) => api.git.sync({ projectId })).catch((error) => setLogs((prev) => [...prev, `Git sync failed: ${String(error)}`]))} disabled={Boolean(gitBusyAction)}>
                                 <span className="inline-flex items-center gap-1">
@@ -3840,7 +4299,7 @@ export const App = () => {
                           </div>
                           <div className="mt-2 flex items-start gap-1">
                             <textarea
-                              className="input min-h-[56px] text-xs leading-relaxed"
+                              className="input min-h-[42px] text-xs leading-relaxed"
                               value={gitCommitMessage}
                               onChange={(event) => setGitCommitMessage(event.target.value)}
                               placeholder="Commit message (optional: auto-generate if empty)"
@@ -3854,36 +4313,52 @@ export const App = () => {
                               Commit
                             </button>
                           </div>
-                          <div className="git-activity mt-2">
-                            <div className="git-activity-head">
+                          <details
+                            className="git-activity mt-2"
+                            open={activeProjectId ? Boolean(gitActivityExpandedByProjectId[activeProjectId]) : false}
+                            onToggle={(event) => {
+                              if (!activeProjectId) {
+                                return;
+                              }
+                              setGitActivityExpandedByProjectId((prev) => ({
+                                ...prev,
+                                [activeProjectId]: (event.currentTarget as HTMLDetailsElement).open
+                              }));
+                            }}
+                          >
+                            <summary className="git-activity-head">
                               <span>Activity</span>
-                              {activeGitActivity.length > 0 && (
-                                <button
-                                  className="btn-ghost px-2 py-0 text-[10px]"
-                                  onClick={() =>
-                                    activeProjectId &&
-                                    setGitActivityByProjectId((prev) => ({
-                                      ...prev,
-                                      [activeProjectId]: []
-                                    }))
-                                  }
-                                >
-                                  Clear
-                                </button>
-                              )}
-                            </div>
+                              <span className="git-activity-summary-right">
+                                {activeGitActivity.length > 0 && (
+                                  <button
+                                    className="btn-ghost px-2 py-0 text-[10px]"
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      activeProjectId &&
+                                        setGitActivityByProjectId((prev) => ({
+                                          ...prev,
+                                          [activeProjectId]: []
+                                        }));
+                                    }}
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </span>
+                            </summary>
                             <div className="git-activity-list">
                               {activeGitActivity.length === 0 ? (
                                 <div className="git-activity-item info">No git activity yet.</div>
                               ) : (
-                                activeGitActivity.slice(-10).map((entry) => (
+                                activeGitActivity.slice(-30).map((entry) => (
                                   <div key={entry.id} className={`git-activity-item ${entry.tone}`}>
                                     {entry.message}
                                   </div>
                                 ))
                               )}
                             </div>
-                          </div>
+                          </details>
                         </>
                       )}
                     </section>
@@ -3902,7 +4377,11 @@ export const App = () => {
                                 activeStagedFiles.map((file) => (
                                   <div
                                     key={`staged-${file.path}-${file.indexStatus}-${file.workTreeStatus}`}
-                                    className={`mt-1 rounded px-2 py-1 text-xs ${activeSelectedGitPath === file.path ? "bg-zinc-800 text-slate-100" : "text-slate-300"}`}
+                                    className={`mt-1 rounded border px-2 py-1 text-xs ${
+                                      activeSelectedGitPath === file.path
+                                        ? "border-emerald-500/60 bg-emerald-500/15 text-slate-100"
+                                        : "border-emerald-900/40 bg-emerald-950/20 text-emerald-100/90"
+                                    }`}
                                   >
                                     <div className="flex items-start justify-between gap-2">
                                       <button
@@ -3915,7 +4394,6 @@ export const App = () => {
                                         }
                                       >
                                         <div className="truncate">{file.path}</div>
-                                        <div className="text-[10px] text-slate-500">{gitFileStatusText(file)}</div>
                                       </button>
                                       <button
                                         className="btn-ghost shrink-0 px-2 py-0 text-[10px]"
@@ -3939,7 +4417,13 @@ export const App = () => {
                                 activeUnstagedFiles.map((file) => (
                                   <div
                                     key={`unstaged-${file.path}-${file.indexStatus}-${file.workTreeStatus}`}
-                                    className={`mt-1 rounded px-2 py-1 text-xs ${activeSelectedGitPath === file.path ? "bg-zinc-800 text-slate-100" : "text-slate-300"}`}
+                                    className={`mt-1 rounded border px-2 py-1 text-xs ${
+                                      activeSelectedGitPath === file.path
+                                        ? "border-amber-500/60 bg-amber-500/15 text-slate-100"
+                                        : file.untracked
+                                          ? "border-cyan-900/40 bg-cyan-950/20 text-cyan-100/90"
+                                          : "border-amber-900/40 bg-amber-950/20 text-amber-100/90"
+                                    }`}
                                   >
                                     <div className="flex items-start justify-between gap-2">
                                       <button
@@ -3952,7 +4436,6 @@ export const App = () => {
                                         }
                                       >
                                         <div className="truncate">{file.path}</div>
-                                        <div className="text-[10px] text-slate-500">{gitFileStatusText(file)}</div>
                                       </button>
                                       <button
                                         className="btn-ghost shrink-0 px-2 py-0 text-[10px]"
@@ -3978,9 +4461,11 @@ export const App = () => {
                         <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-slate-500">
                           Diff {activeSelectedGitPath ? `- ${activeSelectedGitPath}` : "(working tree)"}
                         </div>
-                        <pre className="file-diff h-full rounded border border-border/70 bg-black/35 p-2">
-                          {activeGitDiff || "No diff available."}
-                        </pre>
+                        {activeGitDiff ? (
+                          renderDiff(activeGitDiff, "file-diff file-diff-panel")
+                        ) : (
+                          <pre className="file-diff file-diff-panel">No diff available.</pre>
+                        )}
                       </div>
                     </section>
                   </>
@@ -4290,11 +4775,12 @@ export const App = () => {
               </label>
             </div>
 
-            <label className="mb-2 block text-sm text-muted">Environment variables (JSON object)</label>
+            <label className="mb-2 block text-sm text-muted">Environment variables (.env.local format)</label>
             <textarea
               className="input mb-4 h-28 font-mono text-xs"
               value={settingsEnvText}
               onChange={(event) => setSettingsEnvText(event.target.value)}
+              placeholder={`NEXT_PUBLIC_API_URL=https://api.example.com\nFEATURE_FLAG=true`}
             />
 
             <label className="mb-2 block text-sm text-muted">Project switch terminal behavior (default)</label>
@@ -4381,11 +4867,20 @@ export const App = () => {
               </button>
             </div>
 
-            <label className="mb-2 block text-sm text-muted">Environment variables (JSON object)</label>
+            <label className="mb-2 block text-sm text-muted">Project name</label>
+            <input
+              className="input mb-4 text-xs"
+              value={projectSettingsProjectName}
+              onChange={(event) => setProjectSettingsProjectName(event.target.value)}
+              placeholder="Project name"
+            />
+
+            <label className="mb-2 block text-sm text-muted">Environment variables (.env.local format)</label>
             <textarea
               className="input mb-4 h-28 font-mono text-xs"
               value={projectSettingsEnvText}
               onChange={(event) => setProjectSettingsEnvText(event.target.value)}
+              placeholder={`VITE_API_BASE=https://api.example.com\nLOG_LEVEL=debug`}
             />
 
             <label className="mb-2 block text-sm text-muted">Dev commands</label>
@@ -4732,6 +5227,56 @@ export const App = () => {
                   );
                 })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renameDialog && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-4 shadow-neon">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Rename Thread</h3>
+              <button className="btn-secondary" onClick={() => setRenameDialog(null)}>
+                Close
+              </button>
+            </div>
+            <input
+              className="input mb-4"
+              value={renameDialog.value}
+              onChange={(event) =>
+                setRenameDialog((prev) => (prev ? { ...prev, value: event.target.value } : prev))
+              }
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  submitRenameDialog().catch((error) => {
+                    setLogs((prev) => [
+                      ...prev,
+                      `Thread rename failed: ${String(error)}`
+                    ]);
+                  });
+                }
+              }}
+              autoFocus
+              placeholder="Thread title"
+            />
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => setRenameDialog(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  submitRenameDialog().catch((error) => {
+                    setLogs((prev) => [
+                      ...prev,
+                      `Thread rename failed: ${String(error)}`
+                    ]);
+                  });
+                }}
+              >
+                Save
+              </button>
             </div>
           </div>
         </div>

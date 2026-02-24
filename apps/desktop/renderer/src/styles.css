@@ -138,11 +138,24 @@ webview {
 }
 
 .git-activity-head {
-  @apply flex items-center justify-between border-b border-border/70 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-slate-500;
+  @apply flex cursor-pointer list-none items-center justify-between border-b border-border/70 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-slate-500;
+}
+
+.git-activity-head::-webkit-details-marker {
+  display: none;
+}
+
+.git-activity-summary-right {
+  @apply flex items-center gap-1;
 }
 
 .git-activity-list {
-  @apply max-h-24 space-y-1 overflow-y-auto p-2;
+  @apply max-h-0 space-y-1 overflow-y-auto px-2 py-0;
+  transition: max-height 220ms ease, padding 180ms ease;
+}
+
+.git-activity[open] .git-activity-list {
+  @apply max-h-72 py-2;
 }
 
 .git-activity-item {
@@ -238,8 +251,36 @@ webview {
   @apply mt-1 w-full rounded-md bg-black/25 px-2 py-1 text-left text-[11px] text-slate-400 transition hover:bg-zinc-800/70 hover:text-slate-200;
 }
 
-.thread-archived-toggle:disabled {
-  @apply cursor-not-allowed opacity-45 hover:bg-black/25 hover:text-slate-400;
+.thread-archived-group {
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    grid-template-rows 220ms ease,
+    opacity 180ms ease,
+    transform 220ms ease;
+}
+
+.thread-archived-group.expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.thread-archived-group-inner {
+  overflow: hidden;
+}
+
+.thread-archived-group .thread-row {
+  overflow: hidden;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.thread-archived-group:not(.expanded) .thread-row {
+  opacity: 0;
+  transform: translateY(-3px);
 }
 
 .thread-activity-indicator {
@@ -352,6 +393,22 @@ webview {
   @apply flex cursor-pointer items-center gap-2 text-sm text-slate-200;
 }
 
+.summary-chip {
+  @apply rounded-full border border-zinc-600/70 bg-zinc-800/70 px-2 py-0.5 text-[10px] font-medium text-slate-200;
+}
+
+.summary-chip-success {
+  @apply border-emerald-500/40 bg-emerald-500/15 text-emerald-200;
+}
+
+.summary-chip-error {
+  @apply border-red-500/40 bg-red-500/15 text-red-200;
+}
+
+.summary-chip-running {
+  @apply border-amber-500/40 bg-amber-500/15 text-amber-200;
+}
+
 .activity-body {
   @apply mt-2 space-y-2;
 }
@@ -442,6 +499,10 @@ webview {
 
 .file-diff {
   @apply max-h-60 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-slate-300 [overflow-wrap:anywhere];
+}
+
+.file-diff-panel {
+  @apply h-full max-h-none rounded border border-border/70 bg-black/35 p-2;
 }
 
 .file-diff > div {

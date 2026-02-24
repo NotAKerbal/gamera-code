@@ -352,18 +352,21 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       .shell {
         height: 100vh;
         display: grid;
-        grid-template-columns: 300px minmax(0, 1fr);
+        grid-template-columns: 360px minmax(0, 1fr);
       }
       .sidebar {
         display: flex;
         flex-direction: column;
         border-right: 1px solid #2f2f2f;
         background: #111;
+        min-height: 0;
+        overflow-y: auto;
       }
       .main {
         min-width: 0;
-        display: grid;
-        grid-template-rows: 220px minmax(0, 1fr);
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
       }
       .section {
         padding: 10px;
@@ -414,7 +417,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       }
       .commit-input {
         width: 100%;
-        min-height: 64px;
+        min-height: 48px;
         resize: vertical;
         border: 1px solid #3a3a3a;
         border-radius: 8px;
@@ -432,8 +435,15 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       }
       .files {
         flex: 1;
+        min-height: 0;
         overflow: auto;
         padding: 8px 10px;
+      }
+      .files-section {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 180px;
       }
       .file {
         width: 100%;
@@ -475,7 +485,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         color: #94a3b8;
         margin-bottom: 6px;
       }
-      pre {
+      .diff-view {
         margin: 0;
         flex: 1;
         min-height: 0;
@@ -488,6 +498,25 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         font-size: 11px;
         white-space: pre-wrap;
         word-break: break-word;
+      }
+      .diff-line {
+        display: block;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .diff-line.add {
+        background: rgba(16, 185, 129, 0.18);
+        color: #86efac;
+      }
+      .diff-line.remove {
+        background: rgba(239, 68, 68, 0.18);
+        color: #fca5a5;
+      }
+      .diff-line.hunk {
+        color: #67e8f9;
+      }
+      .diff-line.meta {
+        color: #94a3b8;
       }
       .spinner {
         width: 10px;
@@ -528,6 +557,10 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
             <button id="switchBtn" class="btn">Switch/Create</button>
           </div>
         </div>
+        <div class="section files-section">
+          <div class="section-title">Changed Files</div>
+          <div id="files" class="files"></div>
+        </div>
         <div class="section" style="border-bottom: 0;">
           <div class="section-title">Commit</div>
           <textarea id="commitInput" class="commit-input" placeholder="Commit message (optional: auto-generate if empty)"></textarea>
@@ -538,10 +571,9 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         </div>
       </aside>
       <div class="main">
-        <div id="files" class="files"></div>
         <div class="diff-wrap">
           <div id="diffTitle" class="diff-title">Diff</div>
-          <pre id="diff">Loading...</pre>
+          <div id="diff" class="diff-view">Loading...</div>
         </div>
       </div>
     </div>
@@ -582,12 +614,50 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         }
       };
 
-      const fileStatusText = (file) => {
-        if (file.untracked) return "untracked";
-        if (file.staged && file.unstaged) return "staged + unstaged";
-        if (file.staged) return "staged";
-        if (file.unstaged) return "unstaged";
-        return "unknown";
+      const diffLineClass = (line) => {
+        if (
+          line.startsWith("diff --git ") ||
+          line.startsWith("index ") ||
+          line.startsWith("+++ ") ||
+          line.startsWith("--- ") ||
+          line.startsWith("new file mode") ||
+          line.startsWith("deleted file mode")
+        ) {
+          return "meta";
+        }
+        if (line.startsWith("@@")) {
+          return "hunk";
+        }
+        if (line.startsWith("+")) {
+          return "add";
+        }
+        if (line.startsWith("-")) {
+          return "remove";
+        }
+        return "";
+      };
+
+      const renderDiff = (text) => {
+        const content = text || "No diff available.";
+        const lines = content.split("\\n");
+        const maxLines = 12000;
+        const visibleLines = lines.length > maxLines ? lines.slice(0, maxLines) : lines;
+        diff.textContent = "";
+        const fragment = document.createDocumentFragment();
+        visibleLines.forEach((line) => {
+          const row = document.createElement("div");
+          const lineType = diffLineClass(line);
+          row.className = lineType ? "diff-line " + lineType : "diff-line";
+          row.textContent = line || " ";
+          fragment.appendChild(row);
+        });
+        if (lines.length > maxLines) {
+          const footer = document.createElement("div");
+          footer.className = "diff-line meta";
+          footer.textContent = "Diff truncated in view for performance.";
+          fragment.appendChild(footer);
+        }
+        diff.appendChild(fragment);
       };
 
       const renderFiles = () => {
@@ -600,7 +670,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         changed.forEach((file) => {
           const btn = document.createElement("button");
           btn.className = "file" + (selectedPath === file.path ? " active" : "");
-          btn.innerHTML = '<div>' + file.path + '</div><div class="status">' + fileStatusText(file) + '</div>';
+          btn.innerHTML = '<div>' + file.path + '</div>';
           btn.addEventListener("click", async () => {
             selectedPath = file.path;
             renderFiles();
@@ -644,7 +714,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       const loadDiff = async () => {
         diffTitle.textContent = selectedPath ? "Diff - " + selectedPath : "Diff (working tree)";
         const result = await api.git.getDiff({ projectId: activeProjectId, path: selectedPath || undefined });
-        diff.textContent = result.ok ? (result.diff || "No diff available.") : (result.stderr || "No diff available.");
+        renderDiff(result.ok ? (result.diff || "No diff available.") : (result.stderr || "No diff available."));
       };
 
       const loadState = async () => {
@@ -797,9 +867,9 @@ const ensureWebLinkWindow = async (url: string, name?: string, projectName?: str
 const ensureGitPopout = async (projectId: string, projectName?: string) => {
   if (!gitPopoutWindow || gitPopoutWindow.isDestroyed()) {
     gitPopoutWindow = new BrowserWindow({
-      width: 520,
-      height: 860,
-      minWidth: 420,
+      width: 1320,
+      height: 900,
+      minWidth: 980,
       minHeight: 520,
       title: formatGitWindowTitle(projectName),
       backgroundColor: "#0b0d10",
