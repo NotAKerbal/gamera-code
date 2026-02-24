@@ -38,6 +38,39 @@ webview {
   @apply rounded-lg bg-transparent px-2.5 py-1.5 text-xs text-slate-300 transition hover:bg-zinc-900 hover:text-white;
 }
 
+.terminal-menu-pop {
+  @apply absolute right-0 top-9 z-30 flex max-h-[24rem] min-w-[21rem] flex-col gap-1.5 overflow-y-auto rounded-md border border-border bg-zinc-950 p-2 shadow-lg;
+  animation: dropdown-fade 120ms ease-out;
+}
+
+.terminal-menu-row {
+  @apply flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs text-slate-200 transition hover:bg-zinc-800 hover:text-white;
+}
+
+.terminal-menu-meta {
+  @apply px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-slate-500;
+}
+
+.terminal-menu-empty {
+  @apply px-2 py-2 text-xs text-slate-500;
+}
+
+.terminal-menu-item {
+  @apply rounded-md border border-border/60 bg-black/20 px-1 py-1;
+}
+
+.terminal-menu-status {
+  @apply shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400;
+}
+
+.terminal-menu-actions {
+  @apply flex items-center justify-end gap-1.5 px-1 py-1;
+}
+
+.terminal-menu-divider {
+  @apply my-1 border-t border-border/70;
+}
+
 .btn-danger {
   @apply rounded-lg border border-red-400 bg-red-500/15 px-3 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-500/30;
 }
@@ -55,7 +88,11 @@ webview {
 }
 
 .project-section {
-  @apply space-y-1;
+  @apply space-y-1 rounded-lg border border-transparent p-1;
+}
+
+.project-section.active {
+  @apply border-zinc-600/80;
 }
 
 .projects-header {
@@ -84,6 +121,17 @@ webview {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes git-badge-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -175,19 +223,35 @@ webview {
 }
 
 .project-head {
-  @apply flex items-center gap-1;
+  @apply flex items-center gap-1 rounded-lg px-1 transition;
 }
 
-.thread-add-btn {
-  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-700/70 bg-zinc-900/80 text-sm text-slate-300 transition hover:bg-zinc-800 hover:text-white;
+.project-head:hover,
+.project-head:focus-within {
+  @apply bg-zinc-800/85;
+}
+
+.project-head:hover .project-row,
+.project-head:focus-within .project-row,
+.project-head:hover .project-action-btn,
+.project-head:focus-within .project-action-btn {
+  @apply text-white;
+}
+
+.project-action-btn {
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent bg-zinc-900/85 text-sm text-slate-200 transition hover:border-transparent hover:bg-zinc-700/95 hover:text-white focus-visible:border-transparent focus-visible:bg-zinc-700/95 focus-visible:text-white;
+}
+
+.sidebar-settings-btn {
+  @apply rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-sm text-slate-300 transition hover:bg-zinc-800/85 hover:text-white;
 }
 
 .project-row {
-  @apply flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-left text-slate-300 transition hover:bg-zinc-800/85 hover:text-white hover:ring-1 hover:ring-zinc-600/80;
+  @apply flex w-full items-center justify-between rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm text-left text-slate-300 transition;
 }
 
 .project-row.active {
-  @apply border border-zinc-500/70 bg-zinc-800 text-white shadow-[0_0_0_1px_rgba(113,113,122,0.35)];
+  @apply border-transparent bg-transparent text-white shadow-none;
 }
 
 .thread-create-pop {
@@ -203,11 +267,43 @@ webview {
 }
 
 .thread-row {
-  @apply flex w-full items-center justify-between rounded-md px-2 py-1.5 text-slate-400 transition hover:bg-zinc-800/75 hover:text-slate-100 hover:ring-1 hover:ring-zinc-600/70;
+  @apply flex w-full flex-col items-stretch gap-0.5 rounded-md px-2 py-1.5 text-slate-400 transition hover:bg-zinc-800/75 hover:text-slate-100;
 }
 
 .thread-row.active {
   @apply bg-zinc-900 text-white;
+}
+
+.thread-row-main {
+  @apply flex items-center justify-between gap-2;
+}
+
+.thread-row-title-block {
+  @apply min-w-0 flex-1 text-left;
+}
+
+.thread-row-subtitle {
+  @apply text-[11px] text-slate-500;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    max-height 180ms ease,
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.thread-row:hover .thread-row-subtitle,
+.thread-row:focus-visible .thread-row-subtitle,
+.thread-row:focus-within .thread-row-subtitle,
+.thread-row.active .thread-row-subtitle {
+  max-height: 18px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.thread-row.active .thread-row-subtitle {
+  @apply text-slate-300;
 }
 
 .thread-row-complete-flash {
@@ -227,24 +323,24 @@ webview {
 }
 
 .thread-row-action-btn {
-  @apply inline-flex h-5 w-5 items-center justify-center rounded bg-zinc-800/80 text-slate-400 transition hover:bg-zinc-700 hover:text-white;
+  @apply inline-flex h-5 items-center justify-center overflow-hidden rounded bg-zinc-800/80 text-slate-400 transition hover:bg-zinc-700 hover:text-white;
+  width: 0;
   opacity: 0;
   transform: translateX(5px);
   pointer-events: none;
+  transition:
+    width 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
 }
 
 .thread-row:hover .thread-row-action-btn,
 .thread-row:focus-visible .thread-row-action-btn,
 .thread-row:focus-within .thread-row-action-btn {
+  width: 1.25rem;
   opacity: 1;
   transform: translateX(0);
   pointer-events: auto;
-}
-
-.thread-row:hover .thread-row-time,
-.thread-row:focus-visible .thread-row-time,
-.thread-row:focus-within .thread-row-time {
-  transform: translateX(-8px);
 }
 
 .thread-archived-toggle {
@@ -361,7 +457,8 @@ webview {
 
 @media (prefers-reduced-motion: reduce) {
   .thinking-indicator-text,
-  .thinking-indicator-ring {
+  .thinking-indicator-ring,
+  .git-header-diff-badge {
     animation: none;
   }
 }
@@ -375,6 +472,11 @@ webview {
 
 .activity-group {
   @apply rounded-lg bg-zinc-900/50 p-2;
+  transition: border-color 0.22s ease, background-color 0.22s ease, box-shadow 0.22s ease;
+}
+
+.activity-group.is-open {
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.15);
 }
 
 .activity-group-commands {
@@ -391,6 +493,7 @@ webview {
 
 .activity-summary {
   @apply flex cursor-pointer items-center gap-2 text-sm text-slate-200;
+  @apply w-full border-0 bg-transparent p-0 text-left;
 }
 
 .summary-chip {
@@ -415,10 +518,16 @@ webview {
 
 .activity-command {
   @apply rounded-md bg-black/30 p-2;
+  transition: background-color 0.2s ease;
+}
+
+.activity-command.open {
+  @apply bg-black/40;
 }
 
 .activity-command-summary {
   @apply flex cursor-pointer items-center gap-2;
+  @apply w-full border-0 bg-transparent p-0 text-left;
 }
 
 .activity-command-meaning {
@@ -459,6 +568,7 @@ webview {
 
 .file-row {
   @apply flex cursor-pointer items-start gap-2 rounded-md bg-black/25 px-2 py-1.5 text-xs;
+  @apply w-full border-0 text-left;
 }
 
 .file-kind {
@@ -483,6 +593,11 @@ webview {
 
 .file-item {
   @apply rounded-md;
+  transition: background-color 0.2s ease;
+}
+
+.file-item.open {
+  @apply bg-black/20;
 }
 
 .file-source {
@@ -493,8 +608,38 @@ webview {
   @apply shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300;
 }
 
+.git-header-diff-badge {
+  animation: git-badge-in 180ms ease-out;
+}
+
 .file-detail {
   @apply mt-2 rounded bg-black/35 p-2;
+}
+
+.activity-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.24s ease, opacity 0.2s ease;
+}
+
+.activity-collapse > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.activity-collapse.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.accordion-chevron {
+  @apply text-[10px] text-slate-500;
+  transition: transform 0.2s ease;
+}
+
+.accordion-chevron.open {
+  transform: rotate(180deg);
 }
 
 .file-diff {

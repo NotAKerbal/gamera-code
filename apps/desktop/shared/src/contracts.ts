@@ -6,8 +6,11 @@ import type {
   GitDiffResult,
   GitRepositoryCandidate,
   GitState,
+  InstallDependenciesResult,
+  InstallDependencyKey,
   InstallStatus,
   MessageEvent,
+  PreviewEvent,
   ThreadEventsPage,
   PermissionMode,
   Project,
@@ -65,6 +68,7 @@ export interface DesktopApi {
     closePopout: () => Promise<{ ok: boolean }>;
     navigate: (input: { url: string; projectName?: string }) => Promise<{ ok: boolean }>;
     openDevTools: () => Promise<{ ok: boolean }>;
+    onEvent: (listener: (event: PreviewEvent) => void) => () => void;
   };
   threads: {
     list: (input?: { projectId?: string; includeArchived?: boolean }) => Promise<Thread[]>;
@@ -92,6 +96,7 @@ export interface DesktopApi {
   installer: {
     doctor: () => Promise<InstallStatus>;
     installCli: (input: { provider: Provider }) => Promise<{ ok: boolean; logs: string[] }>;
+    installDependencies: (input?: { targets?: InstallDependencyKey[] }) => Promise<InstallDependenciesResult>;
     verify: () => Promise<InstallStatus>;
   };
   permissions: {
@@ -102,6 +107,7 @@ export interface DesktopApi {
   settings: {
     get: () => Promise<AppSettings>;
     set: (input: Partial<AppSettings>) => Promise<AppSettings>;
+    openWindow: () => Promise<{ ok: boolean }>;
   };
   updates: {
     check: () => Promise<UpdateCheckResult>;

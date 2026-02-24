@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC_CHANNELS, type DesktopApi, type ProjectTerminalEvent, type SessionEvent } from "@code-app/shared";
+import { IPC_CHANNELS, type DesktopApi, type PreviewEvent, type ProjectTerminalEvent, type SessionEvent } from "@code-app/shared";
+
+const settingsOpenWindowChannel =
+  (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
 
 const api: DesktopApi = {
   projects: {
@@ -36,7 +39,12 @@ const api: DesktopApi = {
     openPopout: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewOpenPopout, input),
     closePopout: () => ipcRenderer.invoke(IPC_CHANNELS.previewClosePopout),
     navigate: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewNavigate, input),
-    openDevTools: () => ipcRenderer.invoke(IPC_CHANNELS.previewOpenDevTools)
+    openDevTools: () => ipcRenderer.invoke(IPC_CHANNELS.previewOpenDevTools),
+    onEvent: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: PreviewEvent) => listener(payload);
+      ipcRenderer.on(IPC_CHANNELS.previewEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.previewEvent, wrapped);
+    }
   },
   threads: {
     list: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsList, input),
@@ -59,6 +67,7 @@ const api: DesktopApi = {
   installer: {
     doctor: () => ipcRenderer.invoke(IPC_CHANNELS.installerDoctor),
     installCli: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallCli, input),
+    installDependencies: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallDependencies, input),
     verify: () => ipcRenderer.invoke(IPC_CHANNELS.installerVerify)
   },
   permissions: {
@@ -68,7 +77,8 @@ const api: DesktopApi = {
   },
   settings: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),
-    set: (input) => ipcRenderer.invoke(IPC_CHANNELS.settingsSet, input)
+    set: (input) => ipcRenderer.invoke(IPC_CHANNELS.settingsSet, input),
+    openWindow: () => ipcRenderer.invoke(settingsOpenWindowChannel)
   },
   updates: {
     check: () => ipcRenderer.invoke(IPC_CHANNELS.updatesCheck),

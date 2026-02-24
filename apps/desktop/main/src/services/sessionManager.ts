@@ -19,6 +19,7 @@ import { sanitizePtyOutput } from "../utils/stripAnsi";
 import { createCommandRunner } from "../utils/commandRunner";
 import { withRuntimePath } from "../utils/runtimeEnv";
 import { resolveCodexBinaryPath } from "../utils/codexBinary";
+import { withBundledRipgrepInPath } from "../utils/ripgrepBinary";
 
 type UnknownRecord = Record<string, unknown>;
 const commandRunner = createCommandRunner();
@@ -642,16 +643,18 @@ export class SessionManager {
   private buildThreadEnv(threadId: string, projectId: string, provider: Thread["provider"]) {
     const settings = this.deps.repository.getSettings();
     const projectSettings = this.deps.repository.getProjectSettings(projectId);
-    const env = withRuntimePath({
-      ...process.env,
-      ...projectSettings.envVars,
-      FORCE_COLOR: "0",
-      NO_COLOR: "1",
-      CLICOLOR: "0",
-      TERM: "dumb",
-      CODE_APP_THREAD_ID: threadId,
-      CODE_APP_PROVIDER: provider
-    } as Record<string, string>);
+    const env = withBundledRipgrepInPath(
+      withRuntimePath({
+        ...process.env,
+        ...projectSettings.envVars,
+        FORCE_COLOR: "0",
+        NO_COLOR: "1",
+        CLICOLOR: "0",
+        TERM: "dumb",
+        CODE_APP_THREAD_ID: threadId,
+        CODE_APP_PROVIDER: provider
+      } as Record<string, string>)
+    );
 
     return { settings, env };
   }

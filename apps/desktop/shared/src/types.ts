@@ -105,6 +105,12 @@ export interface ProjectPreviewState {
   url?: string;
 }
 
+export type PreviewEventType = "popout_closed";
+
+export interface PreviewEvent {
+  type: PreviewEventType;
+}
+
 export interface Thread {
   id: string;
   projectId: string;
@@ -152,7 +158,7 @@ export interface RiskCheck {
 }
 
 export interface InstallDetail {
-  key: "node" | "npm" | "codex" | "gemini";
+  key: "node" | "npm" | "git" | "rg" | "codex" | "gemini";
   ok: boolean;
   message: string;
   version?: string;
@@ -161,9 +167,19 @@ export interface InstallDetail {
 export interface InstallStatus {
   nodeOk: boolean;
   npmOk: boolean;
+  gitOk: boolean;
+  rgOk: boolean;
   codexOk: boolean;
   geminiOk: boolean;
   details: InstallDetail[];
+}
+
+export type InstallDependencyKey = "node" | "npm" | "git" | "rg" | "codex";
+
+export interface InstallDependenciesResult {
+  ok: boolean;
+  logs: string[];
+  status: InstallStatus;
 }
 
 export interface ProviderInstallCommand {
@@ -188,6 +204,7 @@ export interface AppSettings {
   codexDefaults: CodexThreadOptions;
   defaultProjectDirectory?: string;
   autoRenameThreadTitles?: boolean;
+  showThreadSummaries?: boolean;
   projectTerminalSwitchBehaviorDefault?: ProjectTerminalSwitchBehavior;
 }
 
@@ -221,6 +238,8 @@ export interface GitState {
   ahead: number;
   behind: number;
   clean: boolean;
+  addedLines?: number;
+  removedLines?: number;
   stagedCount: number;
   unstagedCount: number;
   untrackedCount: number;

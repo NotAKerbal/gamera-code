@@ -32,6 +32,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   envVars: {},
   defaultProjectDirectory: "",
   autoRenameThreadTitles: true,
+  showThreadSummaries: true,
   projectTerminalSwitchBehaviorDefault: "start_stop",
   codexDefaults: {
     sandboxMode: "workspace-write",

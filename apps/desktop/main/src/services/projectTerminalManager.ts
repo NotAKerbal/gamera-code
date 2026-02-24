@@ -11,6 +11,7 @@ import type {
 } from "@code-app/shared";
 import { Repository } from "./repository";
 import { sanitizePtyOutput } from "../utils/stripAnsi";
+import { withBundledRipgrepInPath } from "../utils/ripgrepBinary";
 
 interface RunningProjectTerminal {
   projectId: string;
@@ -263,15 +264,15 @@ export class ProjectTerminalManager {
   private startCommand(project: Project, settings: ProjectSettings, command: ProjectDevCommand) {
     this.stop(project.id, command.id);
 
-    const env = {
+    const env = withBundledRipgrepInPath({
       ...process.env,
       ...settings.envVars,
-      FORCE_COLOR: "0",
-      NO_COLOR: "1",
-      CLICOLOR: "0",
+      FORCE_COLOR: "1",
+      CLICOLOR: "1",
+      CLICOLOR_FORCE: "1",
       TERM: "xterm-256color",
       CODE_APP_PROJECT_ID: project.id
-    } as Record<string, string>;
+    } as Record<string, string>);
     const shell = process.platform === "win32" ? "cmd.exe" : "/bin/zsh";
     const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", command.command] : ["-lc", command.command];
     const ptyProcess = pty.spawn(shell, shellArgs, {
@@ -320,16 +321,19 @@ export class ProjectTerminalManager {
     }
 
     ptyProcess.onData((chunk) => {
+      const rawChunk = chunk.replace(/\u0000/g, "");
+      if (rawChunk) {
+        const existing = this.getState(project.id).terminals.find((terminal) => terminal.commandId === command.id);
+        this.updateTerminal(project.id, command.id, {
+          outputTail: mergeOutputTail(existing?.outputTail ?? "", rawChunk),
+          updatedAt: nowIso()
+        });
+      }
+
       const cleaned = sanitizePtyOutput(chunk);
       if (!cleaned) {
         return;
       }
-
-      const existing = this.getState(project.id).terminals.find((terminal) => terminal.commandId === command.id);
-      this.updateTerminal(project.id, command.id, {
-        outputTail: mergeOutputTail(existing?.outputTail ?? "", cleaned),
-        updatedAt: nowIso()
-      });
 
       this.emit(project.id, "stdout", cleaned, {
         commandId: command.id,

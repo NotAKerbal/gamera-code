@@ -83,6 +83,15 @@ const truncateDiff = (diff: string): { diff: string; truncated: boolean } => {
   };
 };
 
+const parseShortStat = (value: string): { addedLines: number; removedLines: number } => {
+  const addedMatch = value.match(/(\d+)\s+insertions?\(\+\)/);
+  const removedMatch = value.match(/(\d+)\s+deletions?\(-\)/);
+  return {
+    addedLines: addedMatch ? Number.parseInt(addedMatch[1] ?? "0", 10) : 0,
+    removedLines: removedMatch ? Number.parseInt(removedMatch[1] ?? "0", 10) : 0
+  };
+};
+
 export class GitService {
   private readonly commandRunner = createCommandRunner();
 
@@ -151,6 +160,8 @@ export class GitService {
         ahead: 0,
         behind: 0,
         clean: true,
+        addedLines: 0,
+        removedLines: 0,
         stagedCount: 0,
         unstagedCount: 0,
         untrackedCount: 0,
@@ -159,10 +170,11 @@ export class GitService {
       };
     }
 
-    const [statusResult, localBranchResult, remoteBranchResult] = await Promise.all([
+    const [statusResult, localBranchResult, remoteBranchResult, shortStatResult] = await Promise.all([
       this.runGit(cwd, ["status", "--porcelain", "-b"]),
       this.runGit(cwd, ["branch", "--format=%(refname:short)|%(upstream:short)|%(HEAD)"]),
-      this.runGit(cwd, ["branch", "--remotes", "--format=%(refname:short)"])
+      this.runGit(cwd, ["branch", "--remotes", "--format=%(refname:short)"]),
+      this.runGit(cwd, ["diff", "--shortstat", "HEAD"])
     ]);
 
     let branch: string | undefined;
@@ -239,6 +251,7 @@ export class GitService {
     const stagedCount = files.filter((file) => file.staged).length;
     const unstagedCount = files.filter((file) => file.unstaged).length;
     const untrackedCount = files.filter((file) => file.untracked).length;
+    const { addedLines, removedLines } = shortStatResult.ok ? parseShortStat(shortStatResult.stdout) : { addedLines: 0, removedLines: 0 };
 
     return {
       insideRepo: true,
@@ -247,6 +260,8 @@ export class GitService {
       ahead,
       behind,
       clean: files.length === 0,
+      addedLines,
+      removedLines,
       stagedCount,
       unstagedCount,
       untrackedCount,

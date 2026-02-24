@@ -41,6 +41,9 @@ export interface HandlerDeps {
     open: (url: string, name?: string, projectName?: string, focus?: boolean) => Promise<{ ok: boolean }>;
     getState: () => Promise<{ open: boolean; url?: string }>;
   };
+  settingsWindow: {
+    open: () => Promise<{ ok: boolean }>;
+  };
 }
 
 export const registerIpcHandlers = (deps: HandlerDeps) => {
@@ -353,6 +356,13 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return deps.installerManager.installCli(input.provider);
   });
 
+  ipcMain.handle(
+    IPC_CHANNELS.installerInstallDependencies,
+    async (_event, input?: { targets?: Array<"node" | "npm" | "git" | "rg" | "codex"> }) => {
+      return deps.installerManager.installDependencies(input?.targets);
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.installerVerify, async () => deps.installerManager.verify());
 
   ipcMain.handle(
@@ -373,6 +383,10 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   ipcMain.handle(IPC_CHANNELS.settingsGet, async () => deps.repository.getSettings());
 
   ipcMain.handle(IPC_CHANNELS.settingsSet, async (_event, input) => deps.repository.setSettings(input));
+
+  const settingsOpenWindowChannel =
+    (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
+  ipcMain.handle(settingsOpenWindowChannel, async () => deps.settingsWindow.open());
 
   ipcMain.handle(IPC_CHANNELS.updatesCheck, async () => deps.updaterService.checkForUpdates());
 

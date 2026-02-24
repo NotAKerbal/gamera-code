@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { app, BrowserWindow } from "electron";
 import log from "electron-log";
-import type { ProjectTerminalEvent, SessionEvent } from "@code-app/shared";
+import { IPC_CHANNELS, type ProjectTerminalEvent, type SessionEvent } from "@code-app/shared";
 import { initializeDatabase } from "./services/database";
 import { createAppPaths } from "./services/paths";
 import { Repository } from "./services/repository";
@@ -18,6 +18,7 @@ let mainWindow: BrowserWindow | null = null;
 let previewPopoutWindow: BrowserWindow | null = null;
 let gitPopoutWindow: BrowserWindow | null = null;
 let webLinkWindow: BrowserWindow | null = null;
+let settingsWindow: BrowserWindow | null = null;
 let webLinkCurrentUrl: string | null = null;
 const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
 const PREVIEW_LOAD_BASE_DELAY_MS = 350;
@@ -75,20 +76,35 @@ const createWindow = () => {
   });
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-
   if (devServerUrl) {
     mainWindow.loadURL(devServerUrl).catch((error) => {
       log.error("Failed to load dev server", error);
     });
     mainWindow.webContents.openDevTools({ mode: "detach" });
-  } else {
-    // In production, __dirname points to ".../Resources/app.asar/dist".
-    // Renderer assets are copied to ".../Resources/app.asar/dist/renderer" at build time.
-    const indexPath = resolve(__dirname, "./renderer/index.html");
-    mainWindow.loadFile(indexPath).catch((error) => {
-      log.error("Failed to load renderer build", error);
-    });
+    return;
   }
+
+  // In production, __dirname points to ".../Resources/app.asar/dist".
+  // Renderer assets are copied to ".../Resources/app.asar/dist/renderer" at build time.
+  const indexPath = resolve(__dirname, "./renderer/index.html");
+  mainWindow.loadFile(indexPath).catch((error) => {
+    log.error("Failed to load renderer build", error);
+  });
+};
+
+const loadRendererWindow = async (window: BrowserWindow, query: Record<string, string> = {}) => {
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    const nextUrl = new URL(devServerUrl);
+    Object.entries(query).forEach(([key, value]) => {
+      nextUrl.searchParams.set(key, value);
+    });
+    await window.loadURL(nextUrl.toString());
+    return;
+  }
+
+  const indexPath = resolve(__dirname, "./renderer/index.html");
+  await window.loadFile(indexPath, { query });
 };
 
 const delay = (ms: number) =>
@@ -306,6 +322,11 @@ const ensurePreviewPopout = async (url: string, projectName?: string) => {
     });
     previewPopoutWindow.on("closed", () => {
       previewPopoutWindow = null;
+      BrowserWindow.getAllWindows().forEach((window) => {
+        if (!window.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.previewEvent, { type: "popout_closed" });
+        }
+      });
     });
   }
   previewPopoutWindow.setTitle(formatPreviewWindowTitle(projectName));
@@ -911,6 +932,32 @@ const navigateGitPopout = async (projectId: string, projectName?: string) => {
   gitPopoutWindow.focus();
 };
 
+const ensureSettingsWindow = async () => {
+  if (!settingsWindow || settingsWindow.isDestroyed()) {
+    settingsWindow = new BrowserWindow({
+      width: 1040,
+      height: 820,
+      minWidth: 860,
+      minHeight: 620,
+      title: "App Settings",
+      backgroundColor: "#0b0d10",
+      webPreferences: {
+        preload: join(__dirname, "preload.js"),
+        contextIsolation: true,
+        sandbox: false,
+        nodeIntegration: false
+      }
+    });
+    settingsWindow.on("closed", () => {
+      settingsWindow = null;
+    });
+  }
+
+  await loadRendererWindow(settingsWindow, { settingsWindow: "1" });
+  settingsWindow.show();
+  settingsWindow.focus();
+};
+
 const bootstrap = async () => {
   await app.whenReady();
   applyRuntimePathToProcessEnv();
@@ -1008,6 +1055,12 @@ const bootstrap = async () => {
         open: Boolean(webLinkWindow && !webLinkWindow.isDestroyed()),
         url: webLinkCurrentUrl ?? undefined
       })
+    },
+    settingsWindow: {
+      open: async () => {
+        await ensureSettingsWindow();
+        return { ok: true };
+      }
     }
   });
   emitSessionEvent = handlers.emitSessionEvent;
