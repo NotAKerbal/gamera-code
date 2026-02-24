@@ -16,12 +16,41 @@ export interface CommandRunner {
   ) => Promise<RunCommandResult>;
 }
 
+const WINDOWS_SHELL_META = /[\s"&|<>^()]/;
+
+const quoteForWindowsShell = (value: string): string => {
+  if (value.length === 0) {
+    return "\"\"";
+  }
+
+  const escaped = value.replace(/"/g, "\\\"").replace(/%/g, "%%");
+  return WINDOWS_SHELL_META.test(value) ? `"${escaped}"` : escaped;
+};
+
+const buildSpawnInput = (command: string, args: string[]) => {
+  if (process.platform !== "win32") {
+    return {
+      command,
+      args,
+      shell: false
+    };
+  }
+
+  const commandLine = [command, ...args].map(quoteForWindowsShell).join(" ");
+  return {
+    command: commandLine,
+    args: [] as string[],
+    shell: true
+  };
+};
+
 export const createCommandRunner = (): CommandRunner => ({
   async run(command, args = [], cwd) {
     return new Promise((resolve) => {
-      const child = spawn(command, args, {
+      const run = buildSpawnInput(command, args);
+      const child = spawn(run.command, run.args, {
         cwd,
-        shell: process.platform === "win32",
+        shell: run.shell,
         env: withRuntimePath(process.env)
       });
 
@@ -48,9 +77,10 @@ export const createCommandRunner = (): CommandRunner => ({
 
   async stream(command, args, options) {
     return new Promise((resolve) => {
-      const child = spawn(command, args, {
+      const run = buildSpawnInput(command, args);
+      const child = spawn(run.command, run.args, {
         cwd: options.cwd,
-        shell: process.platform === "win32",
+        shell: run.shell,
         env: withRuntimePath(process.env)
       });
 

@@ -1,5 +1,6 @@
 import type { Dirent } from "node:fs";
 import { access, readdir } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { basename, join } from "node:path";
 import type {
   GitBranchInfo,
@@ -10,7 +11,7 @@ import type {
   GitRepositoryCandidate,
   GitState
 } from "@code-app/shared";
-import { createCommandRunner } from "../utils/commandRunner";
+import { withRuntimePath } from "../utils/runtimeEnv";
 
 const DIFF_MAX_CHARS = 120000;
 const ORIGIN_PREFIX = "origin/";
@@ -93,8 +94,6 @@ const parseShortStat = (value: string): { addedLines: number; removedLines: numb
 };
 
 export class GitService {
-  private readonly commandRunner = createCommandRunner();
-
   private toProjectDirName(value: string): string {
     return value
       .trim()
@@ -138,13 +137,43 @@ export class GitService {
   }
 
   private async runGit(cwd: string, args: string[]): Promise<GitCommandResult & { code: number }> {
-    const result = await this.commandRunner.run("git", args, cwd);
-    return {
-      ok: result.code === 0,
-      code: result.code,
-      stdout: result.stdout,
-      stderr: result.stderr
-    };
+    return new Promise((resolve) => {
+      const child = spawn("git", args, {
+        cwd,
+        shell: false,
+        env: withRuntimePath(process.env)
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("close", (code) => {
+        const normalizedCode = code ?? 1;
+        resolve({
+          ok: normalizedCode === 0,
+          code: normalizedCode,
+          stdout: stdout.trim(),
+          stderr: stderr.trim()
+        });
+      });
+
+      child.on("error", (error) => {
+        resolve({
+          ok: false,
+          code: 1,
+          stdout: stdout.trim(),
+          stderr: error.message
+        });
+      });
+    });
   }
 
   private async isInsideRepo(cwd: string): Promise<boolean> {
