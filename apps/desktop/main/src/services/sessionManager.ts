@@ -15,7 +15,7 @@ import type {
 import { PROVIDER_ADAPTERS } from "./providerAdapters";
 import { Repository } from "./repository";
 import { PermissionEngine } from "./permissionEngine";
-import { loadCodexSdk, extractCodexResponseText } from "./codexSdk";
+import { CodexAppServerClient } from "./codexAppServer";
 import { sanitizePtyOutput } from "../utils/stripAnsi";
 import { createCommandRunner } from "../utils/commandRunner";
 import { withRuntimePath } from "../utils/runtimeEnv";
@@ -33,9 +33,10 @@ interface RunningPtySession {
 }
 
 interface RunningCodexSession {
-  kind: "codex_sdk";
+  kind: "codex_app_server";
   threadId: string;
-  sdkThread: UnknownRecord;
+  appServer: CodexAppServerClient;
+  providerThreadId: string;
   runQueue: Promise<void>;
   cwd: string;
   optionsKey: string;
@@ -73,10 +74,6 @@ const asString = (value: unknown): string | null => {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-};
-
-const hasAsyncIterator = (value: unknown): value is AsyncIterable<unknown> => {
-  return Boolean(value && typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function");
 };
 
 const isCodexModelReasoningEffort = (value: unknown): value is NonNullable<CodexThreadOptions["modelReasoningEffort"]> =>
@@ -593,7 +590,7 @@ export class SessionManager {
 
       const normalizedOptions = normalizeCodexThreadOptions(projectPath, options ?? this.deps.repository.getSettings().codexDefaults);
       const nextOptionsKey = codexThreadOptionsKey(normalizedOptions);
-      if (existingRuntime.kind === "codex_sdk" && existingRuntime.optionsKey === nextOptionsKey) {
+      if (existingRuntime.kind === "codex_app_server" && existingRuntime.optionsKey === nextOptionsKey) {
         return existing;
       }
 
@@ -618,11 +615,12 @@ export class SessionManager {
       return false;
     }
 
-    if (running.kind === "codex_sdk") {
+    if (running.kind === "codex_app_server") {
+      void running.appServer.close();
       this.deps.repository.stopSession(threadId);
       this.deps.permissionEngine.clearThreadApprovals(threadId);
       this.sessions.delete(threadId);
-      this.emitSessionEvent(threadId, "status", "Codex SDK session stopped", {
+      this.emitSessionEvent(threadId, "status", "Codex app server session stopped", {
         provider: "codex",
         phase: "stopped"
       });
@@ -704,7 +702,7 @@ export class SessionManager {
         this.emitSessionEvent(
           threadId,
           "stderr",
-          `Codex SDK run failed: ${describeRuntimeError(error)}`,
+          `Codex run failed: ${describeRuntimeError(error)}`,
           {
             provider: "codex",
             phase: "failed"
@@ -735,38 +733,20 @@ export class SessionManager {
       return null;
     }
 
-    const sdkModule = await loadCodexSdk();
-    const CodexCtor = sdkModule.Codex;
     const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
     const codexPathOverride = resolveCodexBinaryPath();
-    const codex = new CodexCtor({
-      env,
-      config: {
-        show_raw_agent_reasoning: true
-      },
-      ...(codexPathOverride ? { codexPathOverride } : {})
-    });
-    const startThread = (codex as UnknownRecord).startThread as ((options?: UnknownRecord) => Promise<unknown>) | undefined;
-    if (!startThread) {
-      return null;
-    }
-
     const mergedOptions: CodexThreadOptions = {
       ...this.deps.repository.getSettings().codexDefaults,
       ...options,
       collaborationMode: "plan"
     };
     const threadOptions = normalizeCodexThreadOptions(project.path, mergedOptions);
-    const sdkThreadRaw = await startThread.call(codex, threadOptions);
-    const sdkThread = asRecord(sdkThreadRaw);
-    if (!sdkThread) {
-      return null;
-    }
-
-    const run = sdkThread.run as ((prompt: string, options?: UnknownRecord) => Promise<unknown>) | undefined;
-    if (!run) {
-      return null;
-    }
+    const appServer = new CodexAppServerClient({
+      executablePath: codexPathOverride,
+      env,
+      threadId
+    });
+    await appServer.connect();
 
     const metadataPrompt = [
       "Generate metadata for a new chat thread based on this first user prompt.",
@@ -779,8 +759,47 @@ export class SessionManager {
       prompt
     ].join("\n");
 
-    const runResult = await run.call(sdkThread, metadataPrompt, { outputSchema: THREAD_METADATA_SCHEMA });
-    return this.readThreadMetadataSuggestion(runResult);
+    const providerThreadId = await appServer.startOrResumeThread(null, threadOptions);
+    const chunks: string[] = [];
+    await appServer.runTurn(
+      providerThreadId,
+      [{ type: "text", text: metadataPrompt }],
+      threadOptions,
+      (event) => {
+        const eventType = asString((event as UnknownRecord).type) ?? "";
+        if (eventType !== "item.completed") {
+          return;
+        }
+        const item = asRecord((event as UnknownRecord).item);
+        if (!item || asString(item.type) !== "agent_message") {
+          return;
+        }
+        const text = sanitizePtyOutput(asString(item.text) ?? "");
+        if (text) {
+          chunks.push(text);
+        }
+      }
+    );
+    await appServer.close();
+
+    const text = chunks.join("\n\n").trim();
+    if (!text) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return this.readThreadMetadataSuggestion(parsed);
+    } catch {
+      const match = /\{[\s\S]*\}/.exec(text);
+      if (!match) {
+        return null;
+      }
+      try {
+        return this.readThreadMetadataSuggestion(JSON.parse(match[0]));
+      } catch {
+        return null;
+      }
+    }
   }
 
   private async startOrResumeRuntime(
@@ -861,22 +880,7 @@ export class SessionManager {
       });
     }
 
-    const text = extractCodexResponseText(runResult);
-    if (!text) {
-      return null;
-    }
-    try {
-      const parsed = JSON.parse(text);
-      const record = asRecord(parsed);
-      const title = asString(record?.title);
-      const description = asString(record?.description) ?? asString(record?.summary);
-      if (!title || !description) {
-        return null;
-      }
-      return { title, description };
-    } catch {
-      return null;
-    }
+    return null;
   }
 
   private formatUserMessage(input: string, attachments: StoredAttachment[]) {
@@ -964,7 +968,7 @@ export class SessionManager {
   private buildThreadEnv(threadId: string, projectId: string, provider: Thread["provider"]) {
     const settings = this.deps.repository.getSettings();
     const projectSettings = this.deps.repository.getProjectSettings(projectId);
-    const env = withBundledRipgrepInPath(
+    const merged = withBundledRipgrepInPath(
       withRuntimePath({
         ...process.env,
         ...projectSettings.envVars,
@@ -974,7 +978,10 @@ export class SessionManager {
         TERM: "dumb",
         CODE_APP_THREAD_ID: threadId,
         CODE_APP_PROVIDER: provider
-      } as Record<string, string>)
+      })
+    );
+    const env = Object.fromEntries(
+      Object.entries(merged).filter((entry): entry is [string, string] => typeof entry[1] === "string")
     );
 
     return { settings, env };
@@ -1040,46 +1047,19 @@ export class SessionManager {
     options?: CodexThreadOptions
   ): Promise<Session> {
     const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
-    const { Codex } = await loadCodexSdk();
     const codexPathOverride = resolveCodexBinaryPath();
-    const codex = new Codex({
+    const appServer = new CodexAppServerClient({
+      executablePath: codexPathOverride,
       env,
-      config: {
-        show_raw_agent_reasoning: true
-      },
-      ...(codexPathOverride ? { codexPathOverride } : {})
+      threadId: thread.id
     });
+    await appServer.connect();
 
     const existingProviderThreadId = this.deps.repository.getProviderThreadId(thread.id, "codex");
-
-    const startThread = (codex as UnknownRecord).startThread as
-      | ((options?: UnknownRecord) => UnknownRecord | Promise<UnknownRecord>)
-      | undefined;
-    const resumeThread = (codex as UnknownRecord).resumeThread as
-      | ((threadId: string, options?: UnknownRecord) => UnknownRecord | Promise<UnknownRecord>)
-      | undefined;
-
-    if (!startThread || !resumeThread) {
-      throw new Error("Codex SDK methods startThread/resumeThread are unavailable.");
-    }
-
     const threadOptions = normalizeCodexThreadOptions(projectPath, options);
     const optionsKey = codexThreadOptionsKey(threadOptions);
-
-    const resumeOptions = existingProviderThreadId ? { ...threadOptions, model: undefined } : undefined;
-    const sdkThread = existingProviderThreadId
-      ? await resumeThread.call(codex, existingProviderThreadId, resumeOptions)
-      : await startThread.call(codex, threadOptions);
-
-    const sdkThreadRecord = asRecord(sdkThread);
-    if (!sdkThreadRecord) {
-      throw new Error("Codex SDK failed to create thread.");
-    }
-
-    const sdkThreadId = this.readSdkThreadId(sdkThreadRecord);
-    if (sdkThreadId) {
-      this.deps.repository.setProviderThreadId(thread.id, "codex", sdkThreadId);
-    }
+    const providerThreadId = await appServer.startOrResumeThread(existingProviderThreadId, threadOptions);
+    this.deps.repository.setProviderThreadId(thread.id, "codex", providerThreadId);
 
     const envHash = createHash("sha1").update(JSON.stringify(env)).digest("hex");
     const session = this.deps.repository.startSession({
@@ -1090,9 +1070,10 @@ export class SessionManager {
     });
 
     this.sessions.set(thread.id, {
-      kind: "codex_sdk",
+      kind: "codex_app_server",
       threadId: thread.id,
-      sdkThread: sdkThreadRecord,
+      appServer,
+      providerThreadId,
       runQueue: Promise.resolve(),
       cwd: projectPath,
       optionsKey
@@ -1102,67 +1083,20 @@ export class SessionManager {
   }
 
   private async runCodexPrompt(session: RunningCodexSession, input: CodexInput): Promise<void> {
-    const runStreamed = session.sdkThread.runStreamed as
-      | ((prompt: CodexInput) => Promise<{ events: AsyncIterable<unknown> }>)
-      | undefined;
-    const runMethod = session.sdkThread.run as ((prompt: CodexInput) => Promise<unknown>) | undefined;
-
-    if (runStreamed) {
-      await this.runCodexPromptStreamed(session, input, runStreamed);
-      return;
-    }
-
-    if (!runMethod) {
-      throw new Error("Codex SDK thread does not expose run() or runStreamed().");
-    }
-
-    this.emitSessionEvent(session.threadId, "progress", "Running Codex SDK...", {
-      provider: "codex",
-      phase: "running"
-    });
-
-    const runResult = await runMethod.call(session.sdkThread, input);
-    const providerThreadId = this.readSdkThreadId(session.sdkThread);
-    if (providerThreadId) {
-      this.deps.repository.setProviderThreadId(session.threadId, "codex", providerThreadId);
-    }
-
-    const content = sanitizePtyOutput(extractCodexResponseText(runResult));
-    if (content) {
-      this.persistAssistantChunk(session.threadId, content, {
-        provider: "codex",
-        category: "assistant_message",
-        final: true
-      });
-    } else {
-      this.emitSessionEvent(session.threadId, "status", "Codex SDK returned no text output.", {
-        provider: "codex",
-        phase: "completed"
-      });
-    }
-  }
-
-  private async runCodexPromptStreamed(
-    session: RunningCodexSession,
-    input: CodexInput,
-    runStreamed: (prompt: CodexInput) => Promise<{ events: AsyncIterable<unknown> }>
-  ): Promise<void> {
     this.emitSessionEvent(session.threadId, "progress", "Thinking...", {
       provider: "codex",
       phase: "running",
       category: "turn"
     });
 
-    const streamedTurn = await runStreamed.call(session.sdkThread, input);
-    const events = asRecord(streamedTurn)?.events;
-    if (!hasAsyncIterator(events)) {
-      throw new Error("Codex SDK runStreamed() did not return an async event stream.");
-    }
-
+    const inputItems: Array<{ type: "text"; text: string } | { type: "local_image"; path: string }> =
+      typeof input === "string" ? [{ type: "text", text: input }] : input;
+    const threadOptions = normalizeCodexThreadOptions(session.cwd, this.deps.repository.getSettings().codexDefaults);
     const agentDrafts = new Map<string, string>();
-    for await (const rawEvent of events) {
-      await this.handleCodexStreamEvent(session.threadId, rawEvent, agentDrafts);
-    }
+
+    await session.appServer.runTurn(session.providerThreadId, inputItems, threadOptions, async (event) => {
+      await this.handleCodexStreamEvent(session.threadId, event, agentDrafts);
+    });
   }
 
   private async handleCodexStreamEvent(threadId: string, rawEvent: unknown, agentDrafts: Map<string, string>) {
@@ -1589,10 +1523,5 @@ export class SessionManager {
     });
 
     this.emitSessionEvent(threadId, "stdout", chunk, data);
-  }
-
-  private readSdkThreadId(sdkThread: UnknownRecord): string | null {
-    const maybeId = sdkThread.id ?? sdkThread.threadId;
-    return typeof maybeId === "string" && maybeId.trim() ? maybeId : null;
   }
 }
