@@ -94,6 +94,22 @@ const isCodexApprovalPolicy = (value: unknown): value is NonNullable<CodexThread
 const isCodexCollaborationMode = (value: unknown): value is NonNullable<CodexThreadOptions["collaborationMode"]> =>
   value === "coding" || value === "plan";
 
+const normalizeCodexModel = (value: string | null): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.toLowerCase();
+  if (normalized === "codex-5.3") {
+    return "gpt-5.3-codex";
+  }
+  if (normalized === "codex-5.3-spark") {
+    return "gpt-5.3-codex-spark";
+  }
+
+  return value;
+};
+
 const normalizeCodexThreadOptions = (
   cwd: string,
   options?: CodexThreadOptions
@@ -102,7 +118,7 @@ const normalizeCodexThreadOptions = (
     workingDirectory: string;
     skipGitRepoCheck: true;
   } => {
-  const model = asString(options?.model) ?? undefined;
+  const model = normalizeCodexModel(asString(options?.model));
   const collaborationMode = isCodexCollaborationMode(options?.collaborationMode) ? options.collaborationMode : "coding";
   const sandboxMode = isCodexSandboxMode(options?.sandboxMode) ? options.sandboxMode : "workspace-write";
   const modelReasoningEffort = isCodexModelReasoningEffort(options?.modelReasoningEffort)
@@ -944,8 +960,9 @@ export class SessionManager {
     const threadOptions = normalizeCodexThreadOptions(projectPath, options);
     const optionsKey = codexThreadOptionsKey(threadOptions);
 
+    const resumeOptions = existingProviderThreadId ? { ...threadOptions, model: undefined } : undefined;
     const sdkThread = existingProviderThreadId
-      ? await resumeThread.call(codex, existingProviderThreadId, threadOptions)
+      ? await resumeThread.call(codex, existingProviderThreadId, resumeOptions)
       : await startThread.call(codex, threadOptions);
 
     const sdkThreadRecord = asRecord(sdkThread);

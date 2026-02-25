@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultProjectDirectory: "",
   autoRenameThreadTitles: true,
   showThreadSummaries: true,
+  useTurtleSpinners: false,
   projectTerminalSwitchBehaviorDefault: "start_stop",
   codexDefaults: {
     collaborationMode: "coding",

@@ -823,6 +823,20 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         animation: spin-ring 0.75s linear infinite;
         display: inline-block;
       }
+      .spinner.turtle {
+        width: 12px;
+        height: 12px;
+        border: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        animation: spin-ring 1s linear infinite;
+      }
+      .spinner.turtle::before {
+        content: "🐢";
+        font-size: 11px;
+        line-height: 1;
+      }
       @keyframes spin-ring {
         from {
           transform: rotate(0deg);
@@ -915,6 +929,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       const windowMaxBtn = document.getElementById("windowMaxBtn");
       const windowMaxIcon = document.getElementById("windowMaxIcon");
       const windowCloseBtn = document.getElementById("windowCloseBtn");
+      let useTurtleSpinner = false;
 
       const maximizeIconSvg = '<svg viewBox="0 0 512 512" aria-hidden="true"><path d="M32 32C14.3 32 0 46.3 0 64L0 352c0 17.7 14.3 32 32 32l128 0 0-64L64 320 64 96l288 0 0 96 64 0L416 64c0-17.7-14.3-32-32-32L32 32zM224 160c-17.7 0-32 14.3-32 32l0 256c0 17.7 14.3 32 32 32l256 0c17.7 0 32-14.3 32-32l0-256c0-17.7-14.3-32-32-32l-256 0zm32 64l192 0 0 192-192 0 0-192z"/></svg>';
       const restoreIconSvg = '<svg viewBox="0 0 512 512" aria-hidden="true"><path d="M48 96c0-26.5 21.5-48 48-48l224 0c26.5 0 48 21.5 48 48l0 48 48 0c26.5 0 48 21.5 48 48l0 224c0 26.5-21.5 48-48 48l-224 0c-26.5 0-48-21.5-48-48l0-48-48 0c-26.5 0-48-21.5-48-48L48 96zm64 0l0 224 32 0 0-128c0-26.5 21.5-48 48-48l112 0 0-32L112 112zm96 112l0 192 192 0 0-192-192 0z"/></svg>';
@@ -965,9 +980,20 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
 
       const setSyncBusy = (busy) => {
         if (busy) {
-          syncBtn.innerHTML = '<span class="spinner"></span> Syncing...';
+          syncBtn.innerHTML = useTurtleSpinner
+            ? '<span class="spinner turtle"></span> Syncing...'
+            : '<span class="spinner"></span> Syncing...';
         } else {
           syncBtn.textContent = "Sync";
+        }
+      };
+
+      const loadSpinnerPreference = async () => {
+        try {
+          const settings = await api.settings.get();
+          useTurtleSpinner = Boolean(settings?.useTurtleSpinners);
+        } catch {
+          useTurtleSpinner = false;
         }
       };
 
@@ -1170,6 +1196,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       };
 
       loadState();
+      loadSpinnerPreference().catch(() => undefined);
       syncWindowState().catch(() => undefined);
     </script>
   </body>

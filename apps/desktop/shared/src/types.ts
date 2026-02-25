@@ -214,6 +214,7 @@ export interface AppSettings {
   defaultProjectDirectory?: string;
   autoRenameThreadTitles?: boolean;
   showThreadSummaries?: boolean;
+  useTurtleSpinners?: boolean;
   projectTerminalSwitchBehaviorDefault?: ProjectTerminalSwitchBehavior;
 }
 

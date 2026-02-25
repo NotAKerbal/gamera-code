@@ -454,6 +454,22 @@ webview {
   animation: spin-ring 0.75s linear infinite;
 }
 
+.turtle-spinner {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: spin-ring 1s linear infinite;
+}
+
+.turtle-spinner::before {
+  content: "🐢";
+  font-size: 12px;
+  line-height: 1;
+}
+
 @keyframes spin-ring {
   from {
     transform: rotate(0deg);
@@ -498,6 +514,15 @@ webview {
     thinking-pulse 1.4s ease-in-out infinite;
 }
 
+.thinking-indicator-ring.turtle-spinner {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  animation:
+    spin-ring 1s linear infinite,
+    thinking-pulse 1.4s ease-in-out infinite;
+}
+
 @keyframes thinking-shimmer {
   from {
     background-position: 200% 0;
@@ -520,6 +545,7 @@ webview {
 @media (prefers-reduced-motion: reduce) {
   .thinking-indicator-text,
   .thinking-indicator-ring,
+  .turtle-spinner,
   .git-header-diff-badge {
     animation: none;
   }

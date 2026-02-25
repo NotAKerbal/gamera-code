@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+- Model support works
+- Turtle spinners
+
 ## 0.1.3
 - Style improvements on macOS
 - Rounded icon on both systems
