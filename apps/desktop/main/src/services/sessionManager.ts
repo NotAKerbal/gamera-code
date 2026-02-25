@@ -9,7 +9,8 @@ import type {
   Session,
   SessionEvent,
   SessionEventType,
-  Thread
+  Thread,
+  ThreadMetadataSuggestion
 } from "@code-app/shared";
 import { PROVIDER_ADAPTERS } from "./providerAdapters";
 import { Repository } from "./repository";
@@ -135,6 +136,35 @@ const codexThreadOptionsKey = (options: ReturnType<typeof normalizeCodexThreadOp
     approvalPolicy: options.approvalPolicy,
     workingDirectory: options.workingDirectory
   });
+
+const THREAD_METADATA_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    title: { type: "string" },
+    description: { type: "string" }
+  },
+  required: ["title", "description"]
+} as const;
+
+const normalizeMetadataField = (value: string, maxLength: number, maxWords?: number) =>
+  value
+    .replace(/\s+/g, " ")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim()
+    .split(" ")
+    .slice(0, typeof maxWords === "number" ? maxWords : Number.MAX_SAFE_INTEGER)
+    .join(" ")
+    .slice(0, maxLength);
+
+const normalizeThreadTitle = (value: string) => {
+  const compact = normalizeMetadataField(value, 40, 4);
+  if (!compact) {
+    return "";
+  }
+  const words = compact.split(" ").filter(Boolean).slice(0, 4);
+  return words.join(" ").slice(0, 36).trim();
+};
 
 const extensionFromMimeType = (mimeType: string): string => {
   const normalized = mimeType.toLowerCase().trim();
@@ -535,6 +565,7 @@ export class SessionManager {
       threadId,
       role: "user",
       content: userContent,
+      attachments: this.normalizePromptAttachmentsForMessage(attachments ?? []),
       ts: now
     });
 
@@ -562,6 +593,66 @@ export class SessionManager {
     return true;
   }
 
+  async generateThreadMetadata(
+    threadId: string,
+    input: string,
+    options?: CodexThreadOptions
+  ): Promise<ThreadMetadataSuggestion | null> {
+    const prompt = input.trim();
+    if (!prompt) {
+      return null;
+    }
+
+    const thread = this.deps.repository.getThread(threadId);
+    if (!thread || thread.provider !== "codex") {
+      return null;
+    }
+
+    const project = this.deps.repository.getProject(thread.projectId);
+    if (!project) {
+      return null;
+    }
+
+    const sdkModule = await loadCodexSdk();
+    const CodexCtor = sdkModule.Codex;
+    const codex = new CodexCtor({ executable: resolveCodexBinaryPath() });
+    const startThread = (codex as UnknownRecord).startThread as ((options?: UnknownRecord) => Promise<unknown>) | undefined;
+    if (!startThread) {
+      return null;
+    }
+
+    const mergedOptions: CodexThreadOptions = {
+      ...this.deps.repository.getSettings().codexDefaults,
+      ...options,
+      collaborationMode: "plan"
+    };
+    const threadOptions = normalizeCodexThreadOptions(project.path, mergedOptions);
+    const sdkThreadRaw = await startThread.call(codex, threadOptions);
+    const sdkThread = asRecord(sdkThreadRaw);
+    if (!sdkThread) {
+      return null;
+    }
+
+    const run = sdkThread.run as ((prompt: string, options?: UnknownRecord) => Promise<unknown>) | undefined;
+    if (!run) {
+      return null;
+    }
+
+    const metadataPrompt = [
+      "Generate metadata for a new chat thread based on this first user prompt.",
+      "Return concise plain-English strings.",
+      "Title: 2-4 words, very short and specific.",
+      "Description: 2-6 words summarizing intent.",
+      "Avoid filler words and avoid repeating the exact user text.",
+      "",
+      "User prompt:",
+      prompt
+    ].join("\n");
+
+    const runResult = await run.call(sdkThread, metadataPrompt, { outputSchema: THREAD_METADATA_SCHEMA });
+    return this.readThreadMetadataSuggestion(runResult);
+  }
+
   private async startOrResumeRuntime(
     thread: Thread,
     cwd: string,
@@ -578,18 +669,92 @@ export class SessionManager {
     return runtime ?? null;
   }
 
+  private readThreadMetadataSuggestion(runResult: unknown): ThreadMetadataSuggestion | null {
+    const parsed = this.extractMetadataObject(runResult);
+    if (!parsed) {
+      return null;
+    }
+
+    const title = normalizeThreadTitle(parsed.title);
+    const description = normalizeMetadataField(parsed.description, 56, 6);
+    if (!title || !description) {
+      return null;
+    }
+
+    return { title, description };
+  }
+
+  private extractMetadataObject(runResult: unknown): ThreadMetadataSuggestion | null {
+    const queue: unknown[] = [runResult];
+    const visited = new Set<unknown>();
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+
+      const record = asRecord(current);
+      if (!record) {
+        continue;
+      }
+
+      const title = asString(record.title);
+      const description = asString(record.description) ?? asString(record.summary);
+      if (title && description) {
+        return { title, description };
+      }
+
+      Object.values(record).forEach((value) => {
+        if (!value) {
+          return;
+        }
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            try {
+              queue.push(JSON.parse(trimmed));
+            } catch {
+              // Ignore non-JSON strings.
+            }
+          }
+          return;
+        }
+        if (Array.isArray(value)) {
+          value.forEach((item) => queue.push(item));
+          return;
+        }
+        if (typeof value === "object") {
+          queue.push(value);
+        }
+      });
+    }
+
+    const text = extractCodexResponseText(runResult);
+    if (!text) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      const record = asRecord(parsed);
+      const title = asString(record?.title);
+      const description = asString(record?.description) ?? asString(record?.summary);
+      if (!title || !description) {
+        return null;
+      }
+      return { title, description };
+    } catch {
+      return null;
+    }
+  }
+
   private formatUserMessage(input: string, attachments: StoredAttachment[]) {
     const trimmed = input.trim();
     if (attachments.length === 0) {
       return trimmed;
     }
-
-    const imageLines = attachments.map((attachment) => `- [image] ${attachment.name}`);
-    if (!trimmed) {
-      return `Attached images:\n${imageLines.join("\n")}`;
-    }
-
-    return `${trimmed}\n\nAttached images:\n${imageLines.join("\n")}`;
+    return trimmed;
   }
 
   private buildCodexInput(input: string, attachments: StoredAttachment[]): CodexInput {
@@ -644,6 +809,26 @@ export class SessionManager {
         } satisfies StoredAttachment;
       })
       .filter((attachment): attachment is StoredAttachment => Boolean(attachment));
+  }
+
+  private normalizePromptAttachmentsForMessage(attachments: PromptAttachment[]): PromptAttachment[] | undefined {
+    const normalized = attachments
+      .map((attachment, index) => {
+        const parsed = parseDataUrlImage(attachment.dataUrl);
+        if (!parsed) {
+          return null;
+        }
+
+        return {
+          name: asString(attachment.name) ?? `image-${index + 1}.png`,
+          mimeType: parsed.mimeType,
+          dataUrl: attachment.dataUrl.trim(),
+          size: typeof attachment.size === "number" && Number.isFinite(attachment.size) ? attachment.size : parsed.data.length
+        } satisfies PromptAttachment;
+      })
+      .filter((attachment): attachment is PromptAttachment => Boolean(attachment));
+
+    return normalized.length > 0 ? normalized : undefined;
   }
 
   private buildThreadEnv(threadId: string, projectId: string, provider: Thread["provider"]) {

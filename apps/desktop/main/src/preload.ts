@@ -57,6 +57,7 @@ const api: DesktopApi = {
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsStart, input),
     stop: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsStop, input),
     sendInput: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsSendInput, input),
+    generateThreadMetadata: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsGenerateThreadMetadata, input),
     resize: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsResize, input),
     onEvent: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: SessionEvent) => listener(payload);
@@ -88,6 +89,12 @@ const api: DesktopApi = {
   updates: {
     check: () => ipcRenderer.invoke(IPC_CHANNELS.updatesCheck),
     apply: () => ipcRenderer.invoke(IPC_CHANNELS.updatesApply)
+  },
+  windowControls: {
+    minimize: () => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize),
+    toggleMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.windowToggleMaximize),
+    close: () => ipcRenderer.invoke(IPC_CHANNELS.windowClose),
+    isMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.windowIsMaximized)
   },
   git: {
     getState: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetState, input),

@@ -350,6 +350,13 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.sessionsGenerateThreadMetadata,
+    async (_event, input: { threadId: string; input: string; options?: CodexThreadOptions }) => {
+      return deps.sessionManager.generateThreadMetadata(input.threadId, input.input, input.options);
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.sessionsResize,
     async (_event, input: { threadId: string; cols: number; rows: number }) => {
       const ok = deps.sessionManager.resize(input.threadId, input.cols, input.rows);
@@ -398,6 +405,45 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   ipcMain.handle(IPC_CHANNELS.updatesCheck, async () => deps.updaterService.checkForUpdates());
 
   ipcMain.handle(IPC_CHANNELS.updatesApply, async () => deps.updaterService.applyUpdate());
+
+  ipcMain.handle(IPC_CHANNELS.windowMinimize, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return { ok: false };
+    }
+    window.minimize();
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowToggleMaximize, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return { ok: false, maximized: false };
+    }
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+    return { ok: true, maximized: window.isMaximized() };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowClose, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return { ok: false };
+    }
+    window.close();
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowIsMaximized, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return { ok: false, maximized: false };
+    }
+    return { ok: true, maximized: window.isMaximized() };
+  });
 
   ipcMain.handle(IPC_CHANNELS.gitGetState, async (_event, input: { projectId: string }) => {
     return deps.gitService.getState(getProjectPath(input.projectId));

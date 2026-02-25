@@ -58,6 +58,25 @@ const platformTriple = (): { triple: string; packageName: string; binaryName: st
 const asarUnpackedPath = (value: string) =>
   value.replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
 
+const isInsideAsar = (value: string) => value.includes(`${path.sep}app.asar${path.sep}`);
+
+const resolveSpawnablePath = (candidate: string): string | undefined => {
+  if (!candidate) {
+    return undefined;
+  }
+
+  if (!isInsideAsar(candidate)) {
+    return existsSync(candidate) ? candidate : undefined;
+  }
+
+  const unpacked = asarUnpackedPath(candidate);
+  if (unpacked !== candidate && existsSync(unpacked)) {
+    return unpacked;
+  }
+
+  return undefined;
+};
+
 export const resolveCodexBinaryPath = (): string | undefined => {
   const target = platformTriple();
   if (!target) {
@@ -81,17 +100,15 @@ export const resolveCodexBinaryPath = (): string | undefined => {
     const platformRoot = path.dirname(platformPackageJson);
     const binaryPath = path.join(platformRoot, "vendor", target.triple, "codex", target.binaryName);
 
-    if (existsSync(binaryPath)) {
-      const unpacked = asarUnpackedPath(binaryPath);
-      if (unpacked !== binaryPath && existsSync(unpacked)) {
-        return unpacked;
-      }
-      return binaryPath;
+    const spawnableBinaryPath = resolveSpawnablePath(binaryPath);
+    if (spawnableBinaryPath) {
+      return spawnableBinaryPath;
     }
 
     const unpackedBinaryPath = asarUnpackedPath(binaryPath);
-    if (existsSync(unpackedBinaryPath)) {
-      return unpackedBinaryPath;
+    const spawnableUnpackedBinaryPath = resolveSpawnablePath(unpackedBinaryPath);
+    if (spawnableUnpackedBinaryPath) {
+      return spawnableUnpackedBinaryPath;
     }
   } catch {
     return undefined;

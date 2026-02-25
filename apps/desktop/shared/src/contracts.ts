@@ -22,6 +22,7 @@ import type {
   RiskCheck,
   Session,
   SessionEvent,
+  ThreadMetadataSuggestion,
   Thread,
   UpdateCheckResult
 } from "./types";
@@ -90,6 +91,11 @@ export interface DesktopApi {
       options?: CodexThreadOptions;
       attachments?: PromptAttachment[];
     }) => Promise<{ ok: boolean }>;
+    generateThreadMetadata: (input: {
+      threadId: string;
+      input: string;
+      options?: CodexThreadOptions;
+    }) => Promise<ThreadMetadataSuggestion | null>;
     resize: (input: { threadId: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
     onEvent: (listener: (event: SessionEvent) => void) => () => void;
   };
@@ -113,6 +119,12 @@ export interface DesktopApi {
   updates: {
     check: () => Promise<UpdateCheckResult>;
     apply: () => Promise<{ ok: boolean }>;
+  };
+  windowControls: {
+    minimize: () => Promise<{ ok: boolean }>;
+    toggleMaximize: () => Promise<{ ok: boolean; maximized: boolean }>;
+    close: () => Promise<{ ok: boolean }>;
+    isMaximized: () => Promise<{ ok: boolean; maximized: boolean }>;
   };
   git: {
     getState: (input: { projectId: string }) => Promise<GitState>;

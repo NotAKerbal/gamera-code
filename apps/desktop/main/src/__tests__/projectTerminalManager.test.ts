@@ -66,4 +66,62 @@ describe("projectTerminalManager switching", () => {
     expect(stopSpy).toHaveBeenCalledWith("p1");
     expect(startSpy).toHaveBeenCalledWith("p2", undefined, true);
   });
+
+  it("starts on project enter for start_only even when project auto-start flag is false", () => {
+    const repository = {
+      getProjectSettings: vi.fn((projectId: string) => ({
+        ...baseSettings,
+        projectId,
+        autoStartDevTerminal: false
+      })),
+      getSettings: vi.fn(() => ({
+        projectTerminalSwitchBehaviorDefault: "start_only"
+      }))
+    } as unknown as ConstructorParameters<typeof ProjectTerminalManager>[0]["repository"];
+
+    const manager = new ProjectTerminalManager({
+      repository,
+      emit: vi.fn()
+    });
+
+    const startSpy = vi.spyOn(manager, "start").mockImplementation((projectId: string) => ({
+      projectId,
+      running: true,
+      terminals: [],
+      outputTail: "",
+      updatedAt: new Date().toISOString()
+    }));
+
+    manager.setActiveProject("p1");
+
+    expect(startSpy).toHaveBeenCalledWith("p1", undefined, true);
+  });
+
+  it("does not restart already-running terminals during auto-start-only start", () => {
+    const repository = {
+      getProject: vi.fn((projectId: string) => ({ id: projectId, name: projectId, path: process.cwd() })),
+      getProjectSettings: vi.fn((projectId: string) => ({
+        ...baseSettings,
+        projectId
+      })),
+      getSettings: vi.fn(() => ({
+        projectTerminalSwitchBehaviorDefault: "start_only"
+      }))
+    } as unknown as ConstructorParameters<typeof ProjectTerminalManager>[0]["repository"];
+
+    const manager = new ProjectTerminalManager({
+      repository,
+      emit: vi.fn()
+    });
+    const stopSpy = vi.spyOn(manager, "stop");
+
+    (manager as unknown as { running: Map<string, unknown> }).running.set("p1:default", {
+      projectId: "p1",
+      commandId: "default"
+    });
+
+    manager.start("p1", undefined, true);
+
+    expect(stopSpy).not.toHaveBeenCalled();
+  });
 });
