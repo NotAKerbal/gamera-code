@@ -3,11 +3,16 @@ import { IPC_CHANNELS, type DesktopApi, type PreviewEvent, type ProjectTerminalE
 
 const settingsOpenWindowChannel =
   (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
+const projectsListFilesChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsListFiles ?? "projects:listFiles";
 const gitDiscardChannel =
   (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
 const gitGetOutgoingCommitsChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
 type DesktopApiWithGitExtras = DesktopApi & {
+  projects: DesktopApi["projects"] & {
+    listFiles: (input: { projectId: string; limit?: number }) => Promise<Array<{ path: string; updatedAtMs: number }>>;
+  };
   git: DesktopApi["git"] & {
     discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
@@ -27,6 +32,7 @@ const api: DesktopApiWithGitExtras = {
     pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath),
     openTerminal: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenTerminal, input),
     openFiles: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenFiles, input),
+    listFiles: (input: { projectId: string; limit?: number }) => ipcRenderer.invoke(projectsListFilesChannel, input),
     openWebLink: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenWebLink, input),
     getWebLinkState: () => ipcRenderer.invoke(IPC_CHANNELS.projectsGetWebLinkState)
   },

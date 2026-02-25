@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   useTurtleSpinners: false,
   projectTerminalSwitchBehaviorDefault: "start_stop",
   codexDefaults: {
-    collaborationMode: "coding",
+    collaborationMode: "plan",
     sandboxMode: "workspace-write",
     modelReasoningEffort: "medium",
     webSearchMode: "cached",
@@ -304,6 +304,8 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
 };
 
 export class Repository {
+  private readonly streamSequenceCache = new Map<string, number>();
+
   constructor(
     private readonly db: Database.Database,
     private readonly paths: AppPaths
@@ -650,6 +652,10 @@ export class Repository {
   appendMessage(input: Omit<MessageEvent, "id" | "streamSeq" | "ts"> & { ts?: string; streamSeq?: number }): MessageEvent {
     const ts = input.ts ?? new Date().toISOString();
     const nextStreamSeq = input.streamSeq ?? this.nextStreamSequence(input.threadId);
+    const cachedMax = this.streamSequenceCache.get(input.threadId) ?? 0;
+    if (nextStreamSeq > cachedMax) {
+      this.streamSequenceCache.set(input.threadId, nextStreamSeq);
+    }
 
     const event: MessageEvent = {
       id: randomUUID(),
@@ -773,9 +779,15 @@ export class Repository {
   }
 
   nextStreamSequence(threadId: string): number {
+    const cached = this.streamSequenceCache.get(threadId);
+    if (cached !== undefined) {
+      return cached + 1;
+    }
+
     const row = this.db
       .prepare("SELECT COALESCE(MAX(stream_seq), 0) AS max_seq FROM message_events WHERE thread_id = ?")
       .get(threadId) as { max_seq: number };
+    this.streamSequenceCache.set(threadId, row.max_seq);
 
     return row.max_seq + 1;
   }

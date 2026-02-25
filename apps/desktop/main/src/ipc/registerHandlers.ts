@@ -1,7 +1,8 @@
 import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { readdir, stat } from "node:fs/promises";
+import { basename, join, relative, resolve } from "node:path";
 import {
   IPC_CHANNELS,
   type CodexThreadOptions,
@@ -47,7 +48,22 @@ export interface HandlerDeps {
 }
 
 export const registerIpcHandlers = (deps: HandlerDeps) => {
+  const FILE_INDEX_DEFAULT_LIMIT = 3000;
+  const FILE_INDEX_MAX_LIMIT = 8000;
+  const FILE_INDEX_IGNORED_DIRS = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "out",
+    "coverage",
+    ".next",
+    ".turbo",
+    ".cache"
+  ]);
   const gitDiscardChannel = (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
+  const projectsListFilesChannel =
+    (IPC_CHANNELS as Record<string, string>).projectsListFiles ?? "projects:listFiles";
   const gitGetOutgoingCommitsChannel =
     (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
   const normalizePath = (path: string) => resolve(path);
@@ -62,6 +78,69 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
       throw new Error("Project not found");
     }
     return project.path;
+  };
+
+  const listProjectFiles = async (projectPath: string, requestedLimit?: number) => {
+    const limit =
+      typeof requestedLimit === "number" && Number.isFinite(requestedLimit)
+        ? Math.max(1, Math.min(FILE_INDEX_MAX_LIMIT, Math.floor(requestedLimit)))
+        : FILE_INDEX_DEFAULT_LIMIT;
+    const paths = [projectPath];
+    const files: Array<{ path: string; updatedAtMs: number }> = [];
+
+    while (paths.length > 0 && files.length < limit) {
+      const currentDir = paths.pop();
+      if (!currentDir) {
+        continue;
+      }
+
+      let entries: Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }>;
+      try {
+        entries = await readdir(currentDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (FILE_INDEX_IGNORED_DIRS.has(entry.name)) {
+            continue;
+          }
+          paths.push(join(currentDir, entry.name));
+          continue;
+        }
+
+        if (!entry.isFile()) {
+          continue;
+        }
+
+        const absolutePath = join(currentDir, entry.name);
+        const relativePath = relative(projectPath, absolutePath).replace(/\\/g, "/");
+        if (!relativePath || relativePath.startsWith("../")) {
+          continue;
+        }
+
+        let updatedAtMs = 0;
+        try {
+          const fileStats = await stat(absolutePath);
+          updatedAtMs = Number.isFinite(fileStats.mtimeMs) ? fileStats.mtimeMs : 0;
+        } catch {
+          // Ignore stat errors for files that disappear during indexing.
+        }
+
+        files.push({
+          path: relativePath,
+          updatedAtMs
+        });
+
+        if (files.length >= limit) {
+          break;
+        }
+      }
+    }
+
+    files.sort((left, right) => right.updatedAtMs - left.updatedAtMs || left.path.localeCompare(right.path));
+    return files;
   };
 
   const openNativeTerminal = (cwd: string) => {
@@ -221,6 +300,11 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     const projectPath = getProjectPath(input.projectId);
     await shell.openPath(projectPath);
     return { ok: true };
+  });
+
+  ipcMain.handle(projectsListFilesChannel, async (_event, input: { projectId: string; limit?: number }) => {
+    const projectPath = getProjectPath(input.projectId);
+    return listProjectFiles(projectPath, input.limit);
   });
 
   ipcMain.handle(

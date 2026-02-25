@@ -11,6 +11,7 @@ import type {
   InstallDependencyKey,
   InstallStatus,
   MessageEvent,
+  ProjectFileEntry,
   PreviewEvent,
   ThreadEventsPage,
   PermissionMode,
@@ -41,6 +42,7 @@ export interface DesktopApi {
     pickPath: () => Promise<string | null>;
     openTerminal: (input: { projectId: string }) => Promise<{ ok: boolean }>;
     openFiles: (input: { projectId: string }) => Promise<{ ok: boolean }>;
+    listFiles: (input: { projectId: string; limit?: number }) => Promise<ProjectFileEntry[]>;
     openWebLink: (input: { url: string; name?: string; projectName?: string; focus?: boolean }) => Promise<{ ok: boolean }>;
     getWebLinkState: () => Promise<{ open: boolean; url?: string }>;
   };

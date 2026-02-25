@@ -1,62 +1,12 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import {
+  asarUnpackedPath,
+  resolveCodexPlatformTarget,
+  resolvePlatformPackageRoot
+} from "./codexPlatform";
 
-const platformTarget = (): { triple: string; packageName: string; binaryName: string } | null => {
-  const binaryName = process.platform === "win32" ? "rg.exe" : "rg";
-
-  if (process.platform === "darwin" && process.arch === "arm64") {
-    return {
-      triple: "aarch64-apple-darwin",
-      packageName: "@openai/codex-darwin-arm64",
-      binaryName
-    };
-  }
-
-  if (process.platform === "darwin" && process.arch === "x64") {
-    return {
-      triple: "x86_64-apple-darwin",
-      packageName: "@openai/codex-darwin-x64",
-      binaryName
-    };
-  }
-
-  if (process.platform === "linux" && process.arch === "arm64") {
-    return {
-      triple: "aarch64-unknown-linux-musl",
-      packageName: "@openai/codex-linux-arm64",
-      binaryName
-    };
-  }
-
-  if (process.platform === "linux" && process.arch === "x64") {
-    return {
-      triple: "x86_64-unknown-linux-musl",
-      packageName: "@openai/codex-linux-x64",
-      binaryName
-    };
-  }
-
-  if (process.platform === "win32" && process.arch === "arm64") {
-    return {
-      triple: "aarch64-pc-windows-msvc",
-      packageName: "@openai/codex-win32-arm64",
-      binaryName
-    };
-  }
-
-  if (process.platform === "win32" && process.arch === "x64") {
-    return {
-      triple: "x86_64-pc-windows-msvc",
-      packageName: "@openai/codex-win32-x64",
-      binaryName
-    };
-  }
-
-  return null;
-};
-
-const asarUnpackedPath = (value: string) =>
-  value.replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
+const platformTarget = () => resolveCodexPlatformTarget(process.platform === "win32" ? "rg.exe" : "rg");
 
 const splitPathEntries = (value: string) =>
   value
@@ -73,15 +23,7 @@ export const resolveBundledRipgrepBinaryPath = (): string | undefined => {
   }
 
   try {
-    const codexPackageJson = require.resolve("@openai/codex/package.json");
-    const codexRoot = path.dirname(codexPackageJson);
-    let platformPackageJson: string;
-    try {
-      platformPackageJson = require.resolve(`${target.packageName}/package.json`, { paths: [codexRoot] });
-    } catch {
-      platformPackageJson = require.resolve(`${target.packageName}/package.json`);
-    }
-    const platformRoot = path.dirname(platformPackageJson);
+    const platformRoot = resolvePlatformPackageRoot(target.packageName);
     const binaryPath = path.join(platformRoot, "vendor", target.triple, "path", target.binaryName);
 
     if (existsSync(binaryPath)) {

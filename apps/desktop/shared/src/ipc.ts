@@ -10,6 +10,7 @@ export const IPC_CHANNELS = {
   projectsPickPath: "projects:pickPath",
   projectsOpenTerminal: "projects:openTerminal",
   projectsOpenFiles: "projects:openFiles",
+  projectsListFiles: "projects:listFiles",
   projectsOpenWebLink: "projects:openWebLink",
   projectsGetWebLinkState: "projects:getWebLinkState",
   projectSettingsGet: "projectSettings:get",

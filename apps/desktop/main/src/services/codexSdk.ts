@@ -74,6 +74,5 @@ export const extractCodexResponseText = (runResult: unknown): string => {
   const parts: string[] = [];
   collectText(runResult, parts);
 
-  const deduped = parts.filter((part, idx) => parts.indexOf(part) === idx);
-  return deduped.join("\n\n").trim();
+  return Array.from(new Set(parts)).join("\n\n").trim();
 };

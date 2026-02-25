@@ -372,6 +372,14 @@ webview {
   animation: thread-complete-flash 1.4s ease-out;
 }
 
+.thread-row-awaiting-input {
+  @apply border border-amber-500/45 bg-amber-500/10 text-amber-100;
+}
+
+.thread-row-awaiting-input .thread-row-subtitle {
+  @apply text-amber-200/85;
+}
+
 .thread-row.archived {
   @apply opacity-80;
 }
@@ -443,6 +451,10 @@ webview {
 
 .thread-activity-indicator {
   @apply ml-2 inline-flex h-4 w-4 items-center justify-center;
+}
+
+.thread-awaiting-badge {
+  @apply ml-2 rounded border border-amber-400/55 bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100;
 }
 
 .loading-ring {
@@ -559,141 +571,141 @@ webview {
 }
 
 .activity-group {
-  @apply rounded-lg bg-zinc-900/50 p-2;
-  transition: border-color 0.22s ease, background-color 0.22s ease, box-shadow 0.22s ease;
+  @apply p-0;
+  transition: color 0.22s ease;
 }
 
 .activity-group.is-open {
-  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.15);
+  box-shadow: none;
 }
 
 .activity-group-commands {
-  @apply border border-zinc-700/50;
+  @apply border-0;
 }
 
 .activity-group-reads {
-  @apply border border-cyan-700/40 bg-cyan-900/10;
+  @apply border-0 bg-transparent;
 }
 
 .activity-group-edits {
-  @apply border border-emerald-700/40 bg-emerald-900/10;
+  @apply border-0 bg-transparent;
 }
 
 .activity-summary {
-  @apply flex cursor-pointer items-center gap-2 text-sm text-slate-200;
+  @apply flex cursor-pointer items-center gap-2 text-sm text-slate-400;
   @apply w-full border-0 bg-transparent p-0 text-left;
 }
 
 .summary-chip {
-  @apply rounded-full border border-zinc-600/70 bg-zinc-800/70 px-2 py-0.5 text-[10px] font-medium text-slate-200;
+  @apply px-0 py-0 text-[11px] font-normal text-slate-500;
 }
 
 .summary-chip-success {
-  @apply border-emerald-500/40 bg-emerald-500/15 text-emerald-200;
+  @apply border-0 bg-transparent text-emerald-300;
 }
 
 .summary-chip-error {
-  @apply border-red-500/40 bg-red-500/15 text-red-200;
+  @apply border-0 bg-transparent text-red-300;
 }
 
 .summary-chip-running {
-  @apply border-amber-500/40 bg-amber-500/15 text-amber-200;
+  @apply border-0 bg-transparent text-amber-300;
 }
 
 .activity-body {
-  @apply mt-2 space-y-2;
+  @apply mt-1 space-y-1;
 }
 
 .activity-command {
-  @apply rounded-md bg-black/30 p-2;
-  transition: background-color 0.2s ease;
+  @apply p-0;
+  transition: color 0.2s ease;
 }
 
 .activity-command.open {
-  @apply bg-black/40;
+  @apply bg-transparent;
 }
 
 .activity-command-summary {
-  @apply flex cursor-pointer items-center gap-2;
-  @apply w-full border-0 bg-transparent p-0 text-left;
+  @apply flex items-center gap-2;
+  @apply w-full border-0 bg-transparent p-0 text-left text-sm text-slate-400;
 }
 
 .activity-command-meaning {
-  @apply text-xs text-slate-200;
+  @apply text-sm text-slate-400;
 }
 
 .activity-command-code {
-  @apply block max-w-full whitespace-pre-wrap break-words rounded bg-black/50 px-1.5 py-1 text-xs text-slate-100 [overflow-wrap:anywhere];
+  @apply block max-w-full whitespace-pre-wrap break-words px-0 py-0 text-sm text-slate-400 [overflow-wrap:anywhere];
 }
 
 .activity-command-body {
-  @apply mt-2;
+  @apply mt-1;
 }
 
 .activity-exploration {
-  @apply mb-1 text-xs text-slate-400;
+  @apply mb-1 text-sm text-slate-400;
 }
 
 .activity-command-output {
-  @apply whitespace-pre-wrap break-words text-xs text-slate-400 [overflow-wrap:anywhere];
+  @apply whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-400 [overflow-wrap:anywhere];
 }
 
 .status-pill {
-  @apply ml-auto rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide;
+  @apply ml-auto px-0 py-0 text-[11px] normal-case tracking-normal;
 }
 
 .status-pill.completed {
-  @apply border-emerald-400/50 bg-emerald-500/15 text-emerald-300;
+  @apply border-0 bg-transparent text-emerald-300;
 }
 
 .status-pill.failed {
-  @apply border-red-400/50 bg-red-500/15 text-red-300;
+  @apply border-0 bg-transparent text-red-300;
 }
 
 .status-pill.in_progress {
-  @apply border-amber-400/50 bg-amber-500/15 text-amber-300;
+  @apply border-0 bg-transparent text-amber-300;
 }
 
 .file-row {
-  @apply flex cursor-pointer items-start gap-2 rounded-md bg-black/25 px-2 py-1.5 text-xs;
-  @apply w-full border-0 text-left;
+  @apply flex items-start gap-2 px-0 py-0 text-sm text-slate-400;
+  @apply w-full border-0 bg-transparent text-left;
 }
 
 .file-kind {
-  @apply shrink-0 rounded bg-zinc-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-100;
+  @apply shrink-0 text-[11px] uppercase tracking-wide text-slate-500;
 }
 
 .file-kind.add {
-  @apply bg-emerald-700/80 text-emerald-100;
+  @apply bg-transparent text-emerald-300;
 }
 
 .file-kind.update {
-  @apply bg-blue-700/80 text-blue-100;
+  @apply bg-transparent text-blue-300;
 }
 
 .file-kind.delete {
-  @apply bg-red-700/80 text-red-100;
+  @apply bg-transparent text-red-300;
 }
 
 .file-path {
-  @apply min-w-0 break-words text-slate-300 [overflow-wrap:anywhere];
+  @apply min-w-0 break-words text-slate-400 [overflow-wrap:anywhere];
 }
 
 .file-item {
-  @apply rounded-md;
-  transition: background-color 0.2s ease;
+  @apply p-0;
+  transition: color 0.2s ease;
 }
 
 .file-item.open {
-  @apply bg-black/20;
+  @apply bg-transparent;
 }
 
 .file-source {
-  @apply ml-auto shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300;
+  @apply ml-auto shrink-0 text-[11px] text-slate-500;
 }
 
 .file-stats {
-  @apply shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300;
+  @apply shrink-0 text-[11px] text-slate-500;
 }
 
 .git-header-diff-badge {
@@ -701,7 +713,31 @@ webview {
 }
 
 .file-detail {
-  @apply mt-2 rounded bg-black/35 p-2;
+  @apply mt-1 p-0;
+}
+
+.trace-child {
+  @apply mt-1;
+}
+
+.trace-child-content {
+  position: relative;
+  overflow: hidden;
+}
+
+.trace-child:not(.expanded) .trace-child-content::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.8rem;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(24, 24, 27, 0), rgba(24, 24, 27, 0.92));
+}
+
+.trace-child-expand {
+  @apply mt-1 inline-block border-0 bg-transparent p-0 text-sm text-slate-500 transition hover:text-slate-300;
 }
 
 .activity-collapse {
@@ -735,7 +771,7 @@ webview {
 }
 
 .file-diff-panel {
-  @apply h-full max-h-none rounded border border-border/70 bg-black/35 p-2;
+  @apply h-full max-h-none border-0 bg-transparent p-0;
 }
 
 .file-diff > div {

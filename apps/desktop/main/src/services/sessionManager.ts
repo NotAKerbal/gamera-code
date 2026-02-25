@@ -119,7 +119,7 @@ const normalizeCodexThreadOptions = (
     skipGitRepoCheck: true;
   } => {
   const model = normalizeCodexModel(asString(options?.model));
-  const collaborationMode = isCodexCollaborationMode(options?.collaborationMode) ? options.collaborationMode : "coding";
+  const collaborationMode = isCodexCollaborationMode(options?.collaborationMode) ? options.collaborationMode : "plan";
   const sandboxMode = isCodexSandboxMode(options?.sandboxMode) ? options.sandboxMode : "workspace-write";
   const modelReasoningEffort = isCodexModelReasoningEffort(options?.modelReasoningEffort)
     ? options.modelReasoningEffort
@@ -418,6 +418,14 @@ const classifyToolIntent = (tool: string): "read" | "write" | "other" => {
   return "other";
 };
 
+const isUserInputRequestTool = (tool: string | null) => {
+  if (!tool) {
+    return false;
+  }
+  const normalized = tool.trim().toLowerCase();
+  return normalized === "request_user_input" || normalized.endsWith(".request_user_input");
+};
+
 const ACTIVITY_EVENT_PREFIX = "__codeapp_activity__:";
 
 const shouldPersistActivityEvent = (type: SessionEventType, data?: Record<string, unknown>) => {
@@ -470,6 +478,104 @@ interface ChangedFile extends DiffData {
   path: string;
   kind: string;
 }
+
+interface UserInputOption {
+  label: string;
+  description?: string;
+}
+
+interface UserInputQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options: UserInputOption[];
+}
+
+const parseJsonRecord = (value: string): UnknownRecord | null => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return asRecord(parsed);
+  } catch {
+    return null;
+  }
+};
+
+const readToolInputRecord = (item: UnknownRecord): UnknownRecord | null => {
+  const candidates = [item.input, item.arguments, item.params, item.parameters];
+  for (const candidate of candidates) {
+    const fromRecord = asRecord(candidate);
+    if (fromRecord) {
+      return fromRecord;
+    }
+
+    const fromString = asString(candidate);
+    if (!fromString) {
+      continue;
+    }
+    const parsed = parseJsonRecord(fromString);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const extractUserInputQuestions = (item: UnknownRecord): UserInputQuestion[] => {
+  const input = readToolInputRecord(item);
+  const itemIdPrefix = asString(item.id) ?? "request";
+  const questionsRaw = Array.isArray(input?.questions)
+    ? input.questions
+    : Array.isArray(item.questions)
+      ? item.questions
+      : [];
+  const questions: UserInputQuestion[] = [];
+
+  questionsRaw.forEach((question, index) => {
+    const row = asRecord(question);
+    if (!row) {
+      return;
+    }
+
+    const prompt = asString(row.question);
+    if (!prompt) {
+      return;
+    }
+
+    const header = asString(row.header) ?? `Question ${index + 1}`;
+    const id = asString(row.id) ?? `${itemIdPrefix}_question_${index + 1}`;
+    const optionsRaw = Array.isArray(row.options) ? row.options : [];
+    const options: UserInputOption[] = [];
+
+    optionsRaw.forEach((option) => {
+      const optionRow = asRecord(option);
+      if (!optionRow) {
+        return;
+      }
+      const label = asString(optionRow.label);
+      if (!label) {
+        return;
+      }
+      options.push({
+        label,
+        description: asString(optionRow.description) ?? undefined
+      });
+    });
+
+    questions.push({
+      id,
+      header,
+      question: prompt,
+      options
+    });
+  });
+
+  return questions;
+};
 
 export class SessionManager {
   private readonly sessions = new Map<string, RunningSession>();
@@ -1241,6 +1347,31 @@ export class SessionManager {
     if (itemType === "mcp_tool_call") {
       const server = asString(item.server);
       const tool = asString(item.tool);
+      if (isUserInputRequestTool(tool)) {
+        const status = asString(item.status) ?? "in_progress";
+        const isWaiting = status !== "completed" && status !== "failed";
+        const questions = extractUserInputQuestions(item);
+        const payload = isWaiting
+          ? `Waiting for your input${questions.length > 0 ? ` (${countLabel(questions.length, "question", "questions")})` : ""}`
+          : "User input received";
+
+        this.emitSessionEvent(threadId, "progress", payload, {
+          provider: "codex",
+          category: "user_input_request",
+          itemType,
+          itemId,
+          eventType,
+          status,
+          phase: isWaiting ? "awaiting_user_input" : "completed",
+          server: server ?? undefined,
+          tool,
+          command: tool,
+          questions: questions.length > 0 ? questions : undefined,
+          allowCustomOption: true
+        });
+        return;
+      }
+
       const intent = tool ? classifyToolIntent(tool) : "other";
       const status = asString(item.status) ?? "in_progress";
       const payload = `${status === "completed" ? "Tool completed" : "Tool call"}${tool ? `: ${tool}` : ""}`;

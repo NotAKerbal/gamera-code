@@ -40,6 +40,11 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface ProjectFileEntry {
+  path: string;
+  updatedAtMs: number;
+}
+
 export interface ProjectDevCommand {
   id: string;
   name: string;
