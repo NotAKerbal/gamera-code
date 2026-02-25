@@ -24,7 +24,7 @@ let settingsWindow: BrowserWindow | null = null;
 let webLinkCurrentUrl: string | null = null;
 const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
 const PREVIEW_LOAD_BASE_DELAY_MS = 350;
-const APP_ICON_FILENAME = "icon_dark.png";
+const APP_ICON_FILENAME = "icon_rounded.png";
 
 const resolveAppIconPath = (): string | undefined => {
   const devPath = resolve(__dirname, "../../resources", APP_ICON_FILENAME);
