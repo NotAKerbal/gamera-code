@@ -9,6 +9,7 @@ import type {
   Session,
   SessionEvent,
   SessionEventType,
+  SkillRecord,
   Thread,
   ThreadMetadataSuggestion
 } from "@code-app/shared";
@@ -39,6 +40,7 @@ interface RunningCodexSession {
   providerThreadId: string;
   runQueue: Promise<void>;
   cwd: string;
+  threadOptions: ReturnType<typeof normalizeCodexThreadOptions>;
   optionsKey: string;
 }
 
@@ -49,7 +51,12 @@ interface StoredAttachment {
   path: string;
 }
 
-type CodexInput = string | Array<{ type: "text"; text: string } | { type: "local_image"; path: string }>;
+type CodexInputItem =
+  | { type: "text"; text: string }
+  | { type: "local_image"; path: string }
+  | { type: "skill"; name: string; path: string }
+  | { type: "mention"; name: string; path: string };
+type CodexInput = string | CodexInputItem[];
 
 type RunningSession = RunningPtySession | RunningCodexSession;
 
@@ -265,6 +272,16 @@ const describeRuntimeError = (error: unknown) => {
   }
 
   return `${error.message} (${details.join(", ")})`;
+};
+
+const isRecoverableCodexResumeError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("no rollout found for thread id") ||
+    message.includes("failed to load rollout") ||
+    message.includes("empty session file") ||
+    message.includes("session file")
+  );
 };
 
 const extractCommandText = (item: UnknownRecord): string => {
@@ -594,6 +611,11 @@ export class SessionManager {
         return existing;
       }
 
+      if (existingRuntime.kind === "codex_app_server") {
+        void existingRuntime.appServer.close();
+      }
+      this.deps.repository.stopSession(thread.id);
+      this.deps.permissionEngine.clearThreadApprovals(thread.id);
       this.sessions.delete(thread.id);
     }
 
@@ -659,7 +681,8 @@ export class SessionManager {
     threadId: string,
     input: string,
     options?: CodexThreadOptions,
-    attachments?: PromptAttachment[]
+    attachments?: PromptAttachment[],
+    skills?: Array<{ name: string; path: string }>
   ): Promise<boolean> {
     const thread = this.deps.repository.getThread(threadId);
     if (!thread) {
@@ -673,7 +696,13 @@ export class SessionManager {
       return false;
     }
 
-    const running = this.sessions.get(threadId) ?? (await this.startOrResumeRuntime(thread, cwd, options));
+    let running = this.sessions.get(threadId);
+    if (thread.provider === "codex") {
+      await this.start(thread, cwd, options);
+      running = this.sessions.get(threadId);
+    } else {
+      running = running ?? ((await this.startOrResumeRuntime(thread, cwd, options)) ?? undefined);
+    }
     if (!running) {
       return false;
     }
@@ -694,9 +723,9 @@ export class SessionManager {
       return true;
     }
 
-    const codexInput = this.buildCodexInput(input, savedAttachments);
+    const codexInput = this.buildCodexInput(input, savedAttachments, skills ?? []);
     running.runQueue = running.runQueue
-      .then(() => this.runCodexPrompt(running, codexInput))
+      .then(() => this.runCodexPromptWithRecovery(running, codexInput))
       .catch((error) => {
         this.deps.repository.setThreadErrored(threadId);
         this.emitSessionEvent(
@@ -711,6 +740,274 @@ export class SessionManager {
       });
 
     return true;
+  }
+
+  async steerInput(
+    threadId: string,
+    input: string,
+    attachments?: PromptAttachment[],
+    skills?: Array<{ name: string; path: string }>
+  ): Promise<boolean> {
+    const thread = this.deps.repository.getThread(threadId);
+    if (!thread || thread.provider !== "codex") {
+      return false;
+    }
+
+    const running = this.sessions.get(threadId);
+    if (!running || running.kind !== "codex_app_server") {
+      return false;
+    }
+
+    const savedAttachments = this.persistPromptAttachments(threadId, attachments ?? []);
+    const codexInput = this.buildCodexInput(input, savedAttachments, skills ?? []);
+    const inputItems: CodexInputItem[] =
+      typeof codexInput === "string" ? [{ type: "text", text: codexInput }] : codexInput;
+    await running.appServer.steerTurn(inputItems);
+
+    this.deps.repository.appendMessage({
+      threadId,
+      role: "user",
+      content: input.trim(),
+      attachments: this.normalizePromptAttachmentsForMessage(attachments ?? []),
+      ts: new Date().toISOString()
+    });
+    this.emitSessionEvent(threadId, "progress", "Steering active turn...", {
+      provider: "codex",
+      phase: "running",
+      category: "turn"
+    });
+
+    return true;
+  }
+
+  async submitUserInputAnswers(
+    threadId: string,
+    requestId: string,
+    answersByQuestionId: Record<string, string>
+  ): Promise<boolean> {
+    const running = this.sessions.get(threadId);
+    if (!running || running.kind !== "codex_app_server") {
+      return false;
+    }
+
+    const answers = Object.fromEntries(
+      Object.entries(answersByQuestionId).map(([questionId, answer]) => [questionId, { answers: [answer] }])
+    );
+    await running.appServer.submitUserInputAnswers(requestId, answers);
+    return true;
+  }
+
+  async compactThread(threadId: string): Promise<boolean> {
+    const thread = this.deps.repository.getThread(threadId);
+    if (!thread || thread.provider !== "codex") {
+      return false;
+    }
+
+    const providerThreadId = this.deps.repository.getProviderThreadId(threadId, "codex");
+    if (!providerThreadId) {
+      return false;
+    }
+
+    const running = this.sessions.get(threadId);
+    if (running && running.kind === "codex_app_server") {
+      await running.appServer.compactThread(providerThreadId);
+    } else {
+      const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
+      const appServer = new CodexAppServerClient({
+        executablePath: resolveCodexBinaryPath(),
+        env,
+        threadId: thread.id
+      });
+      await appServer.connect();
+      try {
+        await appServer.compactThread(providerThreadId);
+      } finally {
+        await appServer.close();
+      }
+    }
+
+    this.emitSessionEvent(threadId, "progress", "Context compaction started", {
+      provider: "codex",
+      phase: "running",
+      category: "context_compaction"
+    });
+    return true;
+  }
+
+  async forkThread(threadId: string): Promise<Thread | null> {
+    const sourceThread = this.deps.repository.getThread(threadId);
+    if (!sourceThread) {
+      return null;
+    }
+
+    const forked = this.deps.repository.createThread({
+      projectId: sourceThread.projectId,
+      title: `${sourceThread.title} (fork)`,
+      provider: sourceThread.provider,
+      parentThreadId: sourceThread.id
+    });
+
+    if (sourceThread.provider !== "codex") {
+      return forked;
+    }
+
+    const sourceProviderThreadId = this.deps.repository.getProviderThreadId(sourceThread.id, "codex");
+    if (!sourceProviderThreadId) {
+      return forked;
+    }
+
+    const project = this.deps.repository.getProject(sourceThread.projectId);
+    if (!project) {
+      return forked;
+    }
+
+    const options = normalizeCodexThreadOptions(project.path, this.deps.repository.getSettings().codexDefaults);
+    const { env } = this.buildThreadEnv(forked.id, sourceThread.projectId, sourceThread.provider);
+    const appServer = new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: forked.id
+    });
+    await appServer.connect();
+    try {
+      const forkedProviderThreadId = await appServer.forkThread(sourceProviderThreadId, options);
+      this.deps.repository.setProviderThreadId(forked.id, "codex", forkedProviderThreadId);
+    } finally {
+      await appServer.close();
+    }
+
+    return forked;
+  }
+
+  async reviewCommit(threadId: string, sha: string, title?: string): Promise<boolean> {
+    const thread = this.deps.repository.getThread(threadId);
+    if (!thread || thread.provider !== "codex") {
+      return false;
+    }
+
+    const sessionRecord = this.deps.repository.getSession(threadId);
+    const project = this.deps.repository.getProject(thread.projectId);
+    const cwd = this.sessions.get(threadId)?.cwd ?? sessionRecord?.cwd ?? project?.path;
+    if (!cwd) {
+      return false;
+    }
+
+    const running = this.sessions.get(threadId) ?? (await this.startOrResumeRuntime(thread, cwd, undefined));
+    if (!running || running.kind !== "codex_app_server") {
+      return false;
+    }
+
+    running.runQueue = running.runQueue
+      .then(() =>
+        this.runCodexReview(
+          running,
+          {
+            type: "commit",
+            sha,
+            title: title ?? null
+          },
+          "inline"
+        )
+      )
+      .catch((error) => {
+        this.deps.repository.setThreadErrored(threadId);
+        this.emitSessionEvent(threadId, "stderr", `Codex review failed: ${describeRuntimeError(error)}`, {
+          provider: "codex",
+          phase: "failed"
+        });
+      });
+
+    return true;
+  }
+
+  async listSkills(projectId?: string): Promise<SkillRecord[]> {
+    const project = projectId ? this.deps.repository.getProject(projectId) : null;
+    const cwd = project?.path ?? process.cwd();
+    const env = Object.fromEntries(
+      Object.entries(
+        withBundledRipgrepInPath(
+          withRuntimePath({
+            ...process.env,
+            ...this.deps.repository.getSettings().envVars,
+            FORCE_COLOR: "0",
+            NO_COLOR: "1",
+            CLICOLOR: "0",
+            TERM: "dumb",
+            CODE_APP_PROVIDER: "codex"
+          })
+        )
+      ).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+
+    const appServer = new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: `skills-${Date.now()}`
+    });
+    await appServer.connect();
+    try {
+      const response = asRecord(await appServer.listSkills(cwd));
+      const entries = Array.isArray(response?.data) ? response.data : [];
+      const records: SkillRecord[] = [];
+      entries.forEach((entry) => {
+        const row = asRecord(entry);
+        const skills = Array.isArray(row?.skills) ? row.skills : [];
+        skills.forEach((skill) => {
+          const skillRow = asRecord(skill);
+          const name = asString(skillRow?.name);
+          const path = asString(skillRow?.path);
+          const description = asString(skillRow?.description) ?? "";
+          const scope = asString(skillRow?.scope);
+          if (!name || !path || !scope) {
+            return;
+          }
+          records.push({
+            name,
+            path,
+            description,
+            enabled: Boolean(skillRow?.enabled),
+            scope: scope as SkillRecord["scope"]
+          });
+        });
+      });
+      return records;
+    } finally {
+      await appServer.close();
+    }
+  }
+
+  async setSkillEnabled(projectId: string | undefined, path: string, enabled: boolean): Promise<boolean> {
+    const project = projectId ? this.deps.repository.getProject(projectId) : null;
+    const cwd = project?.path ?? process.cwd();
+    const env = Object.fromEntries(
+      Object.entries(
+        withBundledRipgrepInPath(
+          withRuntimePath({
+            ...process.env,
+            ...this.deps.repository.getSettings().envVars,
+            FORCE_COLOR: "0",
+            NO_COLOR: "1",
+            CLICOLOR: "0",
+            TERM: "dumb",
+            CODE_APP_PROVIDER: "codex"
+          })
+        )
+      ).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+
+    const appServer = new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: `skills-write-${Date.now()}`
+    });
+    await appServer.connect();
+    try {
+      await appServer.setSkillEnabled(path, enabled);
+      void cwd;
+      return true;
+    } finally {
+      await appServer.close();
+    }
   }
 
   async generateThreadMetadata(
@@ -760,14 +1057,15 @@ export class SessionManager {
     ].join("\n");
 
     const providerThreadId = await appServer.startOrResumeThread(null, threadOptions);
-    const chunks: string[] = [];
+    let latestDraft = "";
+    let finalText = "";
     await appServer.runTurn(
       providerThreadId,
       [{ type: "text", text: metadataPrompt }],
       threadOptions,
       (event) => {
         const eventType = asString((event as UnknownRecord).type) ?? "";
-        if (eventType !== "item.completed") {
+        if (eventType !== "item.updated" && eventType !== "item.completed") {
           return;
         }
         const item = asRecord((event as UnknownRecord).item);
@@ -775,14 +1073,22 @@ export class SessionManager {
           return;
         }
         const text = sanitizePtyOutput(asString(item.text) ?? "");
-        if (text) {
-          chunks.push(text);
+        if (!text) {
+          return;
         }
+        if (eventType === "item.completed") {
+          finalText = text;
+        } else {
+          latestDraft = text;
+        }
+      },
+      {
+        outputSchema: THREAD_METADATA_SCHEMA
       }
     );
     await appServer.close();
 
-    const text = chunks.join("\n\n").trim();
+    const text = (finalText || latestDraft).trim();
     if (!text) {
       return null;
     }
@@ -891,13 +1197,29 @@ export class SessionManager {
     return trimmed;
   }
 
-  private buildCodexInput(input: string, attachments: StoredAttachment[]): CodexInput {
+  private buildCodexInput(
+    input: string,
+    attachments: StoredAttachment[],
+    skills: Array<{ name: string; path: string }>
+  ): CodexInput {
     const trimmed = input.trim();
-    if (attachments.length === 0) {
+    if (attachments.length === 0 && skills.length === 0) {
       return trimmed;
     }
 
-    const parts: Array<{ type: "text"; text: string } | { type: "local_image"; path: string }> = [];
+    const parts: CodexInputItem[] = [];
+    skills.forEach((skill) => {
+      const name = asString(skill.name);
+      const skillPath = asString(skill.path);
+      if (!name || !skillPath) {
+        return;
+      }
+      parts.push({
+        type: "skill",
+        name,
+        path: skillPath
+      });
+    });
     parts.push({
       type: "text",
       text: trimmed || "Please analyze the attached image(s)."
@@ -1058,7 +1380,17 @@ export class SessionManager {
     const existingProviderThreadId = this.deps.repository.getProviderThreadId(thread.id, "codex");
     const threadOptions = normalizeCodexThreadOptions(projectPath, options);
     const optionsKey = codexThreadOptionsKey(threadOptions);
-    const providerThreadId = await appServer.startOrResumeThread(existingProviderThreadId, threadOptions);
+    let providerThreadId: string;
+    try {
+      providerThreadId = await appServer.startOrResumeThread(existingProviderThreadId, threadOptions);
+    } catch (error) {
+      const resumeFailed = Boolean(existingProviderThreadId) && isRecoverableCodexResumeError(error);
+      if (!resumeFailed) {
+        throw error;
+      }
+      this.deps.repository.clearProviderThreadId(thread.id, "codex");
+      providerThreadId = await appServer.startOrResumeThread(null, threadOptions);
+    }
     this.deps.repository.setProviderThreadId(thread.id, "codex", providerThreadId);
 
     const envHash = createHash("sha1").update(JSON.stringify(env)).digest("hex");
@@ -1076,10 +1408,33 @@ export class SessionManager {
       providerThreadId,
       runQueue: Promise.resolve(),
       cwd: projectPath,
+      threadOptions,
       optionsKey
     });
 
     return session;
+  }
+
+  private async runCodexPromptWithRecovery(session: RunningCodexSession, input: CodexInput): Promise<void> {
+    try {
+      await this.runCodexPrompt(session, input);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      const likelyContextOverflow =
+        message.includes("context window") || message.includes("context length") || message.includes("too long");
+      if (!likelyContextOverflow) {
+        throw error;
+      }
+    }
+
+    await session.appServer.compactThread(session.providerThreadId);
+    this.emitSessionEvent(session.threadId, "progress", "Context compacted, retrying your prompt...", {
+      provider: "codex",
+      phase: "running",
+      category: "context_compaction"
+    });
+    await this.runCodexPrompt(session, input);
   }
 
   private async runCodexPrompt(session: RunningCodexSession, input: CodexInput): Promise<void> {
@@ -1089,12 +1444,26 @@ export class SessionManager {
       category: "turn"
     });
 
-    const inputItems: Array<{ type: "text"; text: string } | { type: "local_image"; path: string }> =
-      typeof input === "string" ? [{ type: "text", text: input }] : input;
-    const threadOptions = normalizeCodexThreadOptions(session.cwd, this.deps.repository.getSettings().codexDefaults);
+    const inputItems: CodexInputItem[] = typeof input === "string" ? [{ type: "text", text: input }] : input;
     const agentDrafts = new Map<string, string>();
 
-    await session.appServer.runTurn(session.providerThreadId, inputItems, threadOptions, async (event) => {
+    await session.appServer.runTurn(session.providerThreadId, inputItems, session.threadOptions, async (event) => {
+      await this.handleCodexStreamEvent(session.threadId, event, agentDrafts);
+    });
+  }
+
+  private async runCodexReview(
+    session: RunningCodexSession,
+    target: Record<string, unknown>,
+    delivery: "inline" | "detached"
+  ): Promise<void> {
+    this.emitSessionEvent(session.threadId, "progress", "Starting code review...", {
+      provider: "codex",
+      phase: "running",
+      category: "review"
+    });
+    const agentDrafts = new Map<string, string>();
+    await session.appServer.startReview(session.providerThreadId, target, delivery, async (event) => {
       await this.handleCodexStreamEvent(session.threadId, event, agentDrafts);
     });
   }
@@ -1106,9 +1475,6 @@ export class SessionManager {
     switch (eventType) {
       case "thread.started": {
         const sdkThreadId = asString(event?.thread_id);
-        if (sdkThreadId) {
-          this.deps.repository.setProviderThreadId(threadId, "codex", sdkThreadId);
-        }
         this.emitSessionEvent(threadId, "progress", "Thinking...", {
           provider: "codex",
           category: "thread",
@@ -1118,7 +1484,12 @@ export class SessionManager {
         return;
       }
       case "turn.started": {
-        // Suppress noisy turn-start updates in renderer timeline.
+        this.emitSessionEvent(threadId, "progress", "Turn started", {
+          provider: "codex",
+          category: "turn",
+          eventType,
+          turnId: asString(event?.turn_id) ?? undefined
+        });
         return;
       }
       case "turn.completed": {
@@ -1154,6 +1525,18 @@ export class SessionManager {
         await this.handleCodexItemEvent(threadId, eventType, item, agentDrafts);
         return;
       }
+      case "user_input.requested": {
+        const requestId = asString(event?.request_id) ?? "";
+        const questions = Array.isArray(event?.questions) ? (event.questions as unknown[]) : [];
+        this.emitSessionEvent(threadId, "progress", "Waiting for your input", {
+          provider: "codex",
+          category: "user_input_request",
+          phase: "awaiting_user_input",
+          requestId: requestId || undefined,
+          questions
+        });
+        return;
+      }
       default: {
         this.emitSessionEvent(threadId, "progress", `Codex event: ${eventType}`, {
           provider: "codex",
@@ -1172,6 +1555,10 @@ export class SessionManager {
   ) {
     const itemType = asString(item.type) ?? "unknown";
     const itemId = asString(item.id) ?? `${itemType}-${Date.now()}`;
+
+    if (itemType === "user_message" || itemType === "userMessage") {
+      return;
+    }
 
     if (itemType === "agent_message") {
       const text = sanitizePtyOutput(asString(item.text) ?? "");

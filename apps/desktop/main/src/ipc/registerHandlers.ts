@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import {
   IPC_CHANNELS,
@@ -400,6 +400,15 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return deps.repository.archiveThread(input.id, input.archived);
   });
 
+  const threadsForkChannel = (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
+  ipcMain.handle(threadsForkChannel, async (_event, input: { id: string }) => {
+    const forked = await deps.sessionManager.forkThread(input.id);
+    if (!forked) {
+      throw new Error("Thread not found.");
+    }
+    return forked;
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.threadsEvents,
     async (_event, input: { threadId: string; beforeStreamSeq?: number; userPromptCount?: number }) => {
@@ -430,11 +439,70 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(
     IPC_CHANNELS.sessionsSendInput,
-    async (_event, input: { threadId: string; input: string; options?: CodexThreadOptions; attachments?: PromptAttachment[] }) => {
-      const ok = await deps.sessionManager.sendInput(input.threadId, input.input, input.options, input.attachments);
+    async (
+      _event,
+      input: {
+        threadId: string;
+        input: string;
+        options?: CodexThreadOptions;
+        attachments?: PromptAttachment[];
+        skills?: Array<{ name: string; path: string }>;
+      }
+    ) => {
+      const ok = await deps.sessionManager.sendInput(
+        input.threadId,
+        input.input,
+        input.options,
+        input.attachments,
+        input.skills
+      );
       return { ok };
     }
   );
+
+  const sessionsSteerChannel = (IPC_CHANNELS as Record<string, string>).sessionsSteer ?? "sessions:steer";
+  ipcMain.handle(
+    sessionsSteerChannel,
+    async (
+      _event,
+      input: {
+        threadId: string;
+        input: string;
+        attachments?: PromptAttachment[];
+        skills?: Array<{ name: string; path: string }>;
+      }
+    ) => {
+      const ok = await deps.sessionManager.steerInput(input.threadId, input.input, input.attachments, input.skills);
+      return { ok };
+    }
+  );
+
+  const sessionsSubmitUserInputChannel =
+    (IPC_CHANNELS as Record<string, string>).sessionsSubmitUserInput ?? "sessions:submitUserInput";
+  ipcMain.handle(
+    sessionsSubmitUserInputChannel,
+    async (_event, input: { threadId: string; requestId: string; answersByQuestionId: Record<string, string> }) => {
+      const ok = await deps.sessionManager.submitUserInputAnswers(
+        input.threadId,
+        input.requestId,
+        input.answersByQuestionId
+      );
+      return { ok };
+    }
+  );
+
+  const sessionsCompactChannel = (IPC_CHANNELS as Record<string, string>).sessionsCompact ?? "sessions:compact";
+  ipcMain.handle(sessionsCompactChannel, async (_event, input: { threadId: string }) => {
+    const ok = await deps.sessionManager.compactThread(input.threadId);
+    return { ok };
+  });
+
+  const sessionsReviewCommitChannel =
+    (IPC_CHANNELS as Record<string, string>).sessionsReviewCommit ?? "sessions:reviewCommit";
+  ipcMain.handle(sessionsReviewCommitChannel, async (_event, input: { threadId: string; sha: string; title?: string }) => {
+    const ok = await deps.sessionManager.reviewCommit(input.threadId, input.sha, input.title);
+    return { ok };
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.sessionsGenerateThreadMetadata,
@@ -593,6 +661,31 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(IPC_CHANNELS.gitClosePopout, async () => {
     return deps.gitPopout.close();
+  });
+
+  const skillsListChannel = (IPC_CHANNELS as Record<string, string>).skillsList ?? "skills:list";
+  ipcMain.handle(skillsListChannel, async (_event, input?: { projectId?: string }) => {
+    return deps.sessionManager.listSkills(input?.projectId);
+  });
+
+  const skillsSetEnabledChannel = (IPC_CHANNELS as Record<string, string>).skillsSetEnabled ?? "skills:setEnabled";
+  ipcMain.handle(skillsSetEnabledChannel, async (_event, input: { projectId?: string; path: string; enabled: boolean }) => {
+    const ok = await deps.sessionManager.setSkillEnabled(input.projectId, input.path, input.enabled);
+    return { ok };
+  });
+
+  const skillsReadDocumentChannel =
+    (IPC_CHANNELS as Record<string, string>).skillsReadDocument ?? "skills:readDocument";
+  ipcMain.handle(skillsReadDocumentChannel, async (_event, input: { path: string }) => {
+    const content = await readFile(input.path, "utf8");
+    return { content };
+  });
+
+  const skillsWriteDocumentChannel =
+    (IPC_CHANNELS as Record<string, string>).skillsWriteDocument ?? "skills:writeDocument";
+  ipcMain.handle(skillsWriteDocumentChannel, async (_event, input: { path: string; content: string }) => {
+    await writeFile(input.path, input.content, "utf8");
+    return { ok: true };
   });
 
   return {

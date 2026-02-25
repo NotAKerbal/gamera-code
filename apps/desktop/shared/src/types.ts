@@ -122,6 +122,7 @@ export interface PreviewEvent {
 export interface Thread {
   id: string;
   projectId: string;
+  parentThreadId?: string;
   title: string;
   provider: Provider;
   status: ThreadStatus;
@@ -290,4 +291,14 @@ export interface GitRepositoryCandidate {
   name: string;
   path: string;
   remoteUrl?: string;
+}
+
+export type SkillScope = "user" | "repo" | "system" | "admin";
+
+export interface SkillRecord {
+  name: string;
+  path: string;
+  description: string;
+  enabled: boolean;
+  scope: SkillScope;
 }

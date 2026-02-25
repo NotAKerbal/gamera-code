@@ -29,10 +29,15 @@ export const IPC_CHANNELS = {
   threadsCreate: "threads:create",
   threadsUpdate: "threads:update",
   threadsArchive: "threads:archive",
+  threadsFork: "threads:fork",
   threadsEvents: "threads:events",
   sessionsStart: "sessions:start",
   sessionsStop: "sessions:stop",
   sessionsSendInput: "sessions:sendInput",
+  sessionsSteer: "sessions:steer",
+  sessionsSubmitUserInput: "sessions:submitUserInput",
+  sessionsCompact: "sessions:compact",
+  sessionsReviewCommit: "sessions:reviewCommit",
   sessionsGenerateThreadMetadata: "sessions:generateThreadMetadata",
   sessionsResize: "sessions:resize",
   sessionsEvent: "sessions:event",
@@ -67,7 +72,11 @@ export const IPC_CHANNELS = {
   gitCheckoutBranch: "git:checkoutBranch",
   gitCreateBranch: "git:createBranch",
   gitOpenPopout: "git:openPopout",
-  gitClosePopout: "git:closePopout"
+  gitClosePopout: "git:closePopout",
+  skillsList: "skills:list",
+  skillsSetEnabled: "skills:setEnabled",
+  skillsReadDocument: "skills:readDocument",
+  skillsWriteDocument: "skills:writeDocument"
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

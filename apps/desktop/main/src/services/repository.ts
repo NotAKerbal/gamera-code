@@ -56,6 +56,7 @@ interface ProjectRow {
 interface ThreadRow {
   id: string;
   project_id: string;
+  parent_thread_id: string | null;
   title: string;
   provider: Provider;
   status: ThreadStatus;
@@ -116,6 +117,7 @@ const mapProject = (row: ProjectRow): Project => ({
 const mapThread = (row: ThreadRow): Thread => ({
   id: row.id,
   projectId: row.project_id,
+  parentThreadId: row.parent_thread_id ?? undefined,
   title: row.title,
   provider: row.provider,
   status: row.status,
@@ -548,11 +550,12 @@ export class Repository {
     return row ? mapThread(row) : null;
   }
 
-  createThread(input: { projectId: string; title: string; provider: Provider }): Thread {
+  createThread(input: { projectId: string; title: string; provider: Provider; parentThreadId?: string }): Thread {
     const now = new Date().toISOString();
     const thread: Thread = {
       id: randomUUID(),
       projectId: input.projectId,
+      parentThreadId: input.parentThreadId,
       title: input.title,
       provider: input.provider,
       status: "created",
@@ -562,8 +565,8 @@ export class Repository {
 
     this.db
       .prepare(
-        `INSERT INTO threads (id, project_id, title, provider, status, created_at, updated_at)
-         VALUES (@id, @projectId, @title, @provider, @status, @createdAt, @updatedAt)`
+        `INSERT INTO threads (id, project_id, parent_thread_id, title, provider, status, created_at, updated_at)
+         VALUES (@id, @projectId, @parentThreadId, @title, @provider, @status, @createdAt, @updatedAt)`
       )
       .run(thread);
 

@@ -24,7 +24,23 @@ interface PendingTurn {
   reject: (error: Error) => void;
 }
 
-type InputItem = { type: "text"; text: string } | { type: "local_image"; path: string };
+type InputItem =
+  | { type: "text"; text: string }
+  | { type: "local_image"; path: string }
+  | { type: "skill"; name: string; path: string }
+  | { type: "mention"; name: string; path: string };
+
+export interface UserInputQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface UserInputQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options: UserInputQuestionOption[];
+}
 
 export interface CodexAppServerThreadOptions {
   model?: string;
@@ -35,6 +51,14 @@ export interface CodexAppServerThreadOptions {
   approvalPolicy: "never" | "on-request" | "on-failure" | "untrusted";
   collaborationMode?: "coding" | "plan";
   workingDirectory: string;
+}
+
+interface CollaborationModeMaskRecord {
+  name?: string;
+  mode?: "default" | "plan" | null;
+  model?: string | null;
+  reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | null;
+  developer_instructions?: string | null;
 }
 
 export interface CodexAppServerClientOptions {
@@ -195,13 +219,29 @@ const mapSandboxPolicy = (options: CodexAppServerThreadOptions) => {
   };
 };
 
+const mapCollaborationMode = (mode: CodexAppServerThreadOptions["collaborationMode"]): "default" | "plan" =>
+  mode === "plan" ? "plan" : "default";
+
+const mapPersonality = (mode: CodexAppServerThreadOptions["collaborationMode"]) =>
+  mode === "plan" ? "pragmatic" : null;
+
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly env: Record<string, string>;
   private readonly executablePath: string;
   private readonly localThreadId: string;
   private readonly pending = new Map<JsonRpcId, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  private readonly pendingUserInput = new Map<
+    string,
+    {
+      resolve: (answers: Record<string, { answers: string[] }>) => void;
+      reject: (error: Error) => void;
+    }
+  >();
   private readonly agentMessageDrafts = new Map<string, string>();
+  private readonly reasoningDrafts = new Map<string, string>();
+  private collaborationModeMasks: CollaborationModeMaskRecord[] | null = null;
+  private fallbackModelId: string | null = null;
   private nextId = 1;
   private closed = false;
   private pendingTurn: PendingTurn | null = null;
@@ -270,11 +310,17 @@ export class CodexAppServerClient {
     existingProviderThreadId: string | null,
     options: CodexAppServerThreadOptions
   ): Promise<string> {
+    const personality = mapPersonality(options.collaborationMode);
     const common = {
       cwd: options.workingDirectory,
       model: options.model ?? null,
       sandbox: options.sandboxMode,
-      approvalPolicy: options.approvalPolicy
+      approvalPolicy: options.approvalPolicy,
+      config: {
+        features: {
+          collaboration_modes: true
+        }
+      }
     };
 
     if (existingProviderThreadId) {
@@ -282,7 +328,7 @@ export class CodexAppServerClient {
         await this.request("thread/resume", {
           ...common,
           threadId: existingProviderThreadId,
-          personality: options.collaborationMode === "plan" ? "pragmatic" : null
+          personality
         })
       );
       const resumedId = asString(asRecord(result?.thread)?.id);
@@ -295,7 +341,7 @@ export class CodexAppServerClient {
     const result = asRecord(
       await this.request("thread/start", {
         ...common,
-        personality: options.collaborationMode === "plan" ? "pragmatic" : null,
+        personality,
         ephemeral: false
       })
     );
@@ -310,29 +356,46 @@ export class CodexAppServerClient {
     providerThreadId: string,
     input: InputItem[],
     options: CodexAppServerThreadOptions,
-    onEvent: (event: NormalizedCodexEvent) => void
+    onEvent: (event: NormalizedCodexEvent) => void,
+    extras?: {
+      outputSchema?: unknown;
+    }
   ): Promise<void> {
     if (this.pendingTurn) {
       throw new Error("Cannot run a new turn while another turn is still in progress.");
     }
 
-    const response = asRecord(
-      await this.request("turn/start", {
-        threadId: providerThreadId,
-        input: input.map((entry) => {
-          if (entry.type === "text") {
-            return { type: "text", text: entry.text };
-          }
+    const payload: Record<string, unknown> = {
+      threadId: providerThreadId,
+      input: input.map((entry) => {
+        if (entry.type === "text") {
+          return { type: "text", text: entry.text };
+        }
+        if (entry.type === "local_image") {
           return { type: "localImage", path: entry.path };
-        }),
-        approvalPolicy: options.approvalPolicy,
-        model: options.model ?? null,
-        effort: options.modelReasoningEffort,
-        summary: "auto",
-        sandboxPolicy: mapSandboxPolicy(options),
-        cwd: options.workingDirectory
-      })
-    );
+        }
+        if (entry.type === "skill") {
+          return { type: "skill", name: entry.name, path: entry.path };
+        }
+        return { type: "mention", name: entry.name, path: entry.path };
+      }),
+      approvalPolicy: options.approvalPolicy,
+      model: options.model ?? null,
+      effort: options.modelReasoningEffort,
+      summary: "auto",
+      sandboxPolicy: mapSandboxPolicy(options),
+      personality: mapPersonality(options.collaborationMode),
+      cwd: options.workingDirectory
+    };
+    const collaborationMode = await this.resolveCollaborationModePayload(options);
+    if (collaborationMode) {
+      payload.collaborationMode = collaborationMode;
+    }
+    if (typeof extras?.outputSchema !== "undefined") {
+      payload.outputSchema = extras.outputSchema;
+    }
+
+    const response = asRecord(await this.request("turn/start", payload));
     const turnId = asString(asRecord(response?.turn)?.id);
     if (!turnId) {
       throw new Error("Codex app server did not return a turn id for turn/start.");
@@ -352,6 +415,127 @@ export class CodexAppServerClient {
           reject(error);
         }
       };
+    });
+  }
+
+  async steerTurn(input: InputItem[]): Promise<void> {
+    if (!this.pendingTurn) {
+      throw new Error("Cannot steer: no active turn.");
+    }
+
+    await this.request("turn/steer", {
+      threadId: this.pendingTurn.threadId,
+      expectedTurnId: this.pendingTurn.turnId,
+      input: input.map((entry) => {
+        if (entry.type === "text") {
+          return { type: "text", text: entry.text };
+        }
+        if (entry.type === "local_image") {
+          return { type: "localImage", path: entry.path };
+        }
+        if (entry.type === "skill") {
+          return { type: "skill", name: entry.name, path: entry.path };
+        }
+        return { type: "mention", name: entry.name, path: entry.path };
+      })
+    });
+  }
+
+  async submitUserInputAnswers(
+    requestId: string,
+    answers: Record<string, { answers: string[] }>
+  ): Promise<void> {
+    const pendingRequest = this.pendingUserInput.get(requestId);
+    if (!pendingRequest) {
+      throw new Error("Pending user-input request not found.");
+    }
+    this.pendingUserInput.delete(requestId);
+    pendingRequest.resolve(answers);
+  }
+
+  async forkThread(providerThreadId: string, options: CodexAppServerThreadOptions): Promise<string> {
+    const result = asRecord(
+      await this.request("thread/fork", {
+        threadId: providerThreadId,
+        cwd: options.workingDirectory,
+        model: options.model ?? null,
+        sandbox: options.sandboxMode,
+        approvalPolicy: options.approvalPolicy,
+        config: {
+          features: {
+            collaboration_modes: true
+          }
+        }
+      })
+    );
+    const forkedId = asString(asRecord(result?.thread)?.id);
+    if (!forkedId) {
+      throw new Error("Codex app server did not return a thread id for thread/fork.");
+    }
+    return forkedId;
+  }
+
+  async compactThread(providerThreadId: string): Promise<void> {
+    await this.request("thread/compact/start", {
+      threadId: providerThreadId
+    });
+  }
+
+  async startReview(
+    providerThreadId: string,
+    target: Record<string, unknown>,
+    delivery: "inline" | "detached" = "inline",
+    onEvent: (event: NormalizedCodexEvent) => void
+  ): Promise<{ reviewThreadId: string }> {
+    if (this.pendingTurn) {
+      throw new Error("Cannot start review while another turn is in progress.");
+    }
+
+    const response = asRecord(
+      await this.request("review/start", {
+        threadId: providerThreadId,
+        target,
+        delivery
+      })
+    );
+    const reviewThreadId = asString(response?.reviewThreadId);
+    const turnId = asString(asRecord(response?.turn)?.id);
+    if (!turnId) {
+      throw new Error("Codex app server did not return a turn id for review/start.");
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      this.pendingTurn = {
+        threadId: reviewThreadId ?? providerThreadId,
+        turnId,
+        onEvent,
+        resolve: () => {
+          this.pendingTurn = null;
+          resolve();
+        },
+        reject: (error) => {
+          this.pendingTurn = null;
+          reject(error);
+        }
+      };
+    });
+
+    return {
+      reviewThreadId: reviewThreadId ?? providerThreadId
+    };
+  }
+
+  async listSkills(cwd: string): Promise<unknown> {
+    return this.request("skills/list", {
+      cwds: [cwd],
+      forceReload: true
+    });
+  }
+
+  async setSkillEnabled(path: string, enabled: boolean): Promise<void> {
+    await this.request("skills/config/write", {
+      path,
+      enabled
     });
   }
 
@@ -457,9 +641,32 @@ export class CodexAppServerClient {
         return;
       }
 
-      if (method === "item/tool/requestUserInput") {
+      if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
+        const requestId = String(id);
         const questions = Array.isArray(paramsRecord.questions) ? paramsRecord.questions : [];
-        const answers = Object.fromEntries(
+        const normalizedQuestions: UserInputQuestion[] = questions
+          .map((question) => asRecord(question))
+          .filter((question): question is UnknownRecord => Boolean(question))
+          .map((question, index) => {
+            const questionId = asString(question.id) ?? `question_${index + 1}`;
+            const options = Array.isArray(question.options)
+              ? question.options
+                  .map((option) => asRecord(option))
+                  .filter((option): option is UnknownRecord => Boolean(option))
+                  .map((option) => ({
+                    label: asString(option.label) ?? "Continue",
+                    description: asString(option.description) ?? undefined
+                  }))
+              : [];
+            return {
+              id: questionId,
+              header: asString(question.header) ?? `Question ${index + 1}`,
+              question: asString(question.question) ?? "Please choose an option.",
+              options
+            };
+          });
+
+        const fallbackAnswers = Object.fromEntries(
           questions
             .map((question) => asRecord(question))
             .filter((question): question is UnknownRecord => Boolean(question))
@@ -471,6 +678,26 @@ export class CodexAppServerClient {
               return [questionId, { answers: [firstOptionLabel] }];
             })
         );
+
+        if (!this.pendingTurn) {
+          this.write({
+            id,
+            result: {
+              answers: fallbackAnswers
+            }
+          });
+          return;
+        }
+
+        this.pendingTurn.onEvent({
+          type: "user_input.requested",
+          request_id: requestId,
+          questions: normalizedQuestions
+        });
+
+        const answers = await new Promise<Record<string, { answers: string[] }>>((resolve, reject) => {
+          this.pendingUserInput.set(requestId, { resolve, reject });
+        }).catch(() => fallbackAnswers);
 
         this.write({
           id,
@@ -537,8 +764,13 @@ export class CodexAppServerClient {
     }
 
     if (method === "turn/started") {
+      const startedTurnId = asString(asRecord(paramsRecord.turn)?.id);
+      if (startedTurnId && turn.turnId !== startedTurnId) {
+        turn.turnId = startedTurnId;
+      }
       turn.onEvent({
-        type: "turn.started"
+        type: "turn.started",
+        turn_id: turn.turnId
       });
       return;
     }
@@ -574,15 +806,38 @@ export class CodexAppServerClient {
       return;
     }
 
-    if (method === "item/reasoning/textDelta") {
+    if (
+      method === "item/reasoning/textDelta" ||
+      method === "item/reasoningSummary/textDelta" ||
+      method === "reasoning/textDelta" ||
+      method === "reasoningSummary/textDelta"
+    ) {
       const itemId = asString(paramsRecord.itemId) ?? `reasoning-${Date.now()}`;
       const delta = asString(paramsRecord.delta) ?? "";
+      const next = `${this.reasoningDrafts.get(itemId) ?? ""}${delta}`;
+      this.reasoningDrafts.set(itemId, next);
       turn.onEvent({
         type: "item.updated",
         item: {
           id: itemId,
           type: "reasoning",
-          text: delta
+          text: next
+        }
+      });
+      return;
+    }
+
+    if (method === "item/reasoningSummary/partAdded" || method === "reasoningSummary/partAdded") {
+      const itemId = asString(paramsRecord.itemId) ?? `reasoning-summary-${Date.now()}`;
+      const partText = asString(asRecord(paramsRecord.part)?.text) ?? "";
+      const next = `${this.reasoningDrafts.get(itemId) ?? ""}${partText}`;
+      this.reasoningDrafts.set(itemId, next);
+      turn.onEvent({
+        type: "item.updated",
+        item: {
+          id: itemId,
+          type: "reasoning",
+          text: next
         }
       });
       return;
@@ -647,9 +902,80 @@ export class CodexAppServerClient {
     }
   }
 
+  private async loadCollaborationModeMasks(): Promise<CollaborationModeMaskRecord[]> {
+    if (this.collaborationModeMasks) {
+      return this.collaborationModeMasks;
+    }
+
+    const response = asRecord(await this.request("collaborationMode/list", {}));
+    const data = Array.isArray(response?.data) ? response.data : [];
+    this.collaborationModeMasks = data
+      .map((entry) => asRecord(entry))
+      .filter((entry): entry is UnknownRecord => Boolean(entry))
+      .map((entry) => ({
+        name: asString(entry.name) ?? undefined,
+        mode: asString(entry.mode) as CollaborationModeMaskRecord["mode"],
+        model: asString(entry.model),
+        reasoning_effort: asString(entry.reasoning_effort) as CollaborationModeMaskRecord["reasoning_effort"],
+        developer_instructions: typeof entry.developer_instructions === "string" ? entry.developer_instructions : null
+      }));
+    return this.collaborationModeMasks;
+  }
+
+  private async resolveCollaborationModePayload(options: CodexAppServerThreadOptions): Promise<UnknownRecord | null> {
+    const mode = mapCollaborationMode(options.collaborationMode);
+    let preset: CollaborationModeMaskRecord | null = null;
+    try {
+      const masks = await this.loadCollaborationModeMasks();
+      preset = masks.find((entry) => entry.mode === mode) ?? null;
+    } catch {
+      preset = null;
+    }
+
+    const model = options.model ?? preset?.model ?? (await this.resolveFallbackModelId());
+    if (!model) {
+      return null;
+    }
+
+    const reasoningEffort = options.modelReasoningEffort ?? preset?.reasoning_effort ?? null;
+    return {
+      mode,
+      settings: {
+        model,
+        reasoning_effort: reasoningEffort,
+        developer_instructions: null
+      }
+    };
+  }
+
+  private async resolveFallbackModelId(): Promise<string | null> {
+    if (this.fallbackModelId) {
+      return this.fallbackModelId;
+    }
+
+    try {
+      const response = asRecord(await this.request("model/list", { includeHidden: false }));
+      const data = Array.isArray(response?.data) ? response.data : [];
+      for (const entry of data) {
+        const row = asRecord(entry);
+        const candidate = asString(row?.id) ?? asString(row?.model) ?? asString(row?.name);
+        if (candidate) {
+          this.fallbackModelId = candidate;
+          return candidate;
+        }
+      }
+    } catch {
+      // Ignore lookup failures and let caller continue without collaboration mode payload.
+    }
+
+    return null;
+  }
+
   private failAllPending(error: Error) {
     this.pending.forEach(({ reject }) => reject(error));
     this.pending.clear();
+    this.pendingUserInput.forEach(({ reject }) => reject(error));
+    this.pendingUserInput.clear();
     if (this.pendingTurn) {
       this.pendingTurn.reject(error);
       this.pendingTurn = null;
