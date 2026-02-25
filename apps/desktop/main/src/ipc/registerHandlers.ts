@@ -47,6 +47,9 @@ export interface HandlerDeps {
 }
 
 export const registerIpcHandlers = (deps: HandlerDeps) => {
+  const gitDiscardChannel = (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
+  const gitGetOutgoingCommitsChannel =
+    (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
   const normalizePath = (path: string) => resolve(path);
   const findProjectByPath = (path: string) => {
     const normalized = normalizePath(path);
@@ -350,6 +353,13 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.sessionsGenerateThreadMetadata,
+    async (_event, input: { threadId: string; input: string; options?: CodexThreadOptions }) => {
+      return deps.sessionManager.generateThreadMetadata(input.threadId, input.input, input.options);
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.sessionsResize,
     async (_event, input: { threadId: string; cols: number; rows: number }) => {
       const ok = deps.sessionManager.resize(input.threadId, input.cols, input.rows);
@@ -399,12 +409,55 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(IPC_CHANNELS.updatesApply, async () => deps.updaterService.applyUpdate());
 
+  ipcMain.handle(IPC_CHANNELS.windowMinimize, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return { ok: false };
+    }
+    window.minimize();
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowToggleMaximize, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return { ok: false, maximized: false };
+    }
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+    return { ok: true, maximized: window.isMaximized() };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowClose, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return { ok: false };
+    }
+    window.close();
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowIsMaximized, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) {
+      return { ok: false, maximized: false };
+    }
+    return { ok: true, maximized: window.isMaximized() };
+  });
+
   ipcMain.handle(IPC_CHANNELS.gitGetState, async (_event, input: { projectId: string }) => {
     return deps.gitService.getState(getProjectPath(input.projectId));
   });
 
   ipcMain.handle(IPC_CHANNELS.gitGetDiff, async (_event, input: { projectId: string; path?: string }) => {
     return deps.gitService.getDiff(getProjectPath(input.projectId), input.path);
+  });
+
+  ipcMain.handle(gitGetOutgoingCommitsChannel, async (_event, input: { projectId: string }) => {
+    return deps.gitService.getOutgoingCommits(getProjectPath(input.projectId));
   });
 
   ipcMain.handle(IPC_CHANNELS.gitFetch, async (_event, input: { projectId: string }) => {
@@ -429,6 +482,10 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(IPC_CHANNELS.gitUnstage, async (_event, input: { projectId: string; path?: string }) => {
     return deps.gitService.unstage(getProjectPath(input.projectId), input.path);
+  });
+
+  ipcMain.handle(gitDiscardChannel, async (_event, input: { projectId: string; path?: string }) => {
+    return deps.gitService.discard(getProjectPath(input.projectId), input.path);
   });
 
   ipcMain.handle(IPC_CHANNELS.gitCommit, async (_event, input: { projectId: string; message?: string }) => {

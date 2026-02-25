@@ -5,14 +5,10 @@
  * can mutate the shared root node_modules tree. We skip that step by returning
  * false and package the currently-installed workspace dependencies as-is.
  *
- * Workspace packages (like @code-app/shared) are symlinked by npm into the
- * root node_modules. Symlinks pointing outside the app directory are NOT
- * followed by asar packaging, so we physically copy workspace packages into
- * the app's local node_modules before the build.
- *
- * All production dependencies (including transitive ones) that are hoisted
- * to the root node_modules are recursively copied into the app's local
- * node_modules so they resolve correctly inside the asar.
+ * npm workspaces hoists most packages to the repo root node_modules. Symlinks
+ * and packages outside the app directory are NOT followed by asar packaging,
+ * so we physically copy every production dependency (and its transitive deps)
+ * into the app's local node_modules before the build.
  */
 
 import {
@@ -20,53 +16,106 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   lstatSync,
+  rmSync,
 } from "node:fs";
-import { join } from "node:path";
-
-const WORKSPACE_SCOPES = new Set(["@code-app"]);
+import { join, dirname } from "node:path";
 
 /**
- * Recursively copy a production dependency and all of its transitive
- * production dependencies from rootNodeModules into localNodeModules.
- * Tracks already-copied packages in `visited` to avoid cycles.
+ * Resolve the real directory for a package, checking the app's local
+ * node_modules first, then falling back to the root node_modules.
  */
-function copyDependencyTree(name, rootNodeModules, localNodeModules, visited) {
-  if (visited.has(name)) return;
-  visited.add(name);
-
-  const src = join(rootNodeModules, ...name.split("/"));
-  const dst = join(localNodeModules, ...name.split("/"));
-
-  if (!existsSync(src)) {
-    // May be an optional dependency not installed on this platform
-    console.warn(`  - WARNING: ${name} not found in root node_modules (optional?)`);
-    return;
-  }
-  if (existsSync(dst)) return;
-
-  // For scoped packages, ensure the scope directory exists
-  if (name.startsWith("@")) {
-    const scope = name.split("/")[0];
-    mkdirSync(join(localNodeModules, scope), { recursive: true });
-  }
-
-  cpSync(src, dst, { recursive: true });
-  console.log(`  - copied ${name}`);
-
-  // Recurse into this package's production dependencies
-  const pkgJsonPath = join(src, "package.json");
-  if (existsSync(pkgJsonPath)) {
-    try {
-      const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
-      for (const dep of Object.keys(pkg.dependencies || {})) {
-        copyDependencyTree(dep, rootNodeModules, localNodeModules, visited);
-      }
-    } catch {
-      // non-fatal: skip unreadable package.json
+function findPackageDir(name, localNodeModules, rootNodeModules) {
+  const localPath = join(localNodeModules, name);
+  if (existsSync(localPath)) {
+    const stat = lstatSync(localPath);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
+      return null; // already a real directory locally
     }
   }
+
+  const rootPath = join(rootNodeModules, name);
+  if (existsSync(rootPath)) {
+    const stat = lstatSync(rootPath);
+    // Follow symlinks (workspace packages are junctions in root node_modules)
+    if (stat.isDirectory() || stat.isSymbolicLink()) {
+      return rootPath;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Read a package.json and return its production dependency names
+ * (dependencies + optionalDependencies).
+ */
+function readProdDeps(packageJsonPath) {
+  if (!existsSync(packageJsonPath)) return [];
+  const raw = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  return [
+    ...Object.keys(raw.dependencies ?? {}),
+    ...Object.keys(raw.optionalDependencies ?? {}),
+  ];
+}
+
+/**
+ * Recursively collect all production dependencies starting from the app's
+ * package.json, walking transitive deps.
+ */
+function collectAllDeps(appDir, localNodeModules, rootNodeModules) {
+  const visited = new Set();
+  const toCopy = new Map(); // name -> source dir
+
+  const walk = (depName) => {
+    if (visited.has(depName)) return;
+    visited.add(depName);
+
+    const src = findPackageDir(depName, localNodeModules, rootNodeModules);
+    if (src) {
+      toCopy.set(depName, src);
+    }
+
+    // Resolve the actual location to read transitive deps from
+    const resolvedDir = src ?? join(localNodeModules, depName);
+    const pkgJson = join(resolvedDir, "package.json");
+    for (const child of readProdDeps(pkgJson)) {
+      walk(child);
+    }
+  };
+
+  const appPkgJson = join(appDir, "package.json");
+  for (const dep of readProdDeps(appPkgJson)) {
+    walk(dep);
+  }
+
+  return toCopy;
+}
+
+/**
+ * Special handling for workspace packages: copy source package.json + dist
+ * rather than the root node_modules symlink target.
+ */
+function copyWorkspacePackage(name, repoRoot, localNodeModules) {
+  if (name === "@code-app/shared") {
+    const sharedSrc = join(repoRoot, "apps", "desktop", "shared");
+    const sharedDst = join(localNodeModules, "@code-app", "shared");
+
+    if (!existsSync(sharedSrc)) {
+      throw new Error("Cannot find @code-app/shared source at " + sharedSrc);
+    }
+
+    mkdirSync(sharedDst, { recursive: true });
+    cpSync(join(sharedSrc, "package.json"), join(sharedDst, "package.json"));
+    if (existsSync(join(sharedSrc, "dist"))) {
+      cpSync(join(sharedSrc, "dist"), join(sharedDst, "dist"), {
+        recursive: true,
+      });
+    }
+    console.log(`  - copied ${name} (workspace) into app node_modules`);
+    return true;
+  }
+  return false;
 }
 
 export default async function beforeBuild(context) {
@@ -80,43 +129,36 @@ export default async function beforeBuild(context) {
     mkdirSync(localNodeModules, { recursive: true });
   }
 
-  // --- workspace package: @code-app/shared ---
-  // Copy only package.json + dist (skip source/tests/configs)
-  const sharedSrc = join(repoRoot, "apps", "desktop", "shared");
-  const sharedDst = join(localNodeModules, "@code-app", "shared");
+  // Collect every production dependency (direct + transitive) that's hoisted
+  const toCopy = collectAllDeps(appDir, localNodeModules, rootNodeModules);
 
-  if (existsSync(sharedSrc)) {
-    mkdirSync(sharedDst, { recursive: true });
-    cpSync(join(sharedSrc, "package.json"), join(sharedDst, "package.json"));
-    if (existsSync(join(sharedSrc, "dist"))) {
-      cpSync(join(sharedSrc, "dist"), join(sharedDst, "dist"), {
-        recursive: true,
-      });
+  // Handle workspace packages specially
+  const workspacePackages = ["@code-app/shared"];
+  for (const wp of workspacePackages) {
+    copyWorkspacePackage(wp, repoRoot, localNodeModules);
+    toCopy.delete(wp);
+  }
+
+  // Copy all remaining hoisted packages into local node_modules
+  for (const [name, src] of toCopy) {
+    const dst = join(localNodeModules, name);
+
+    // Remove stale symlinks/junctions/old copies
+    try {
+      const stat = lstatSync(dst);
+      if (stat) rmSync(dst, { recursive: true, force: true });
+    } catch {
+      // doesn't exist, that's fine
     }
-    console.log("  - copied @code-app/shared (workspace)");
-  } else {
-    throw new Error("Cannot find @code-app/shared source at " + sharedSrc);
+
+    mkdirSync(dirname(dst), { recursive: true });
+    cpSync(src, dst, { recursive: true });
+    console.log(`  - copied ${name} into app node_modules`);
   }
 
-  // --- all production dependencies (+ transitive) ---
-  const appPkgJson = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8"));
-  const visited = new Set();
-
-  // Mark workspace packages as already visited so we don't overwrite them
-  for (const scope of WORKSPACE_SCOPES) {
-    const scopeDir = join(rootNodeModules, scope);
-    if (existsSync(scopeDir)) {
-      for (const entry of readdirSync(scopeDir)) {
-        visited.add(`${scope}/${entry}`);
-      }
-    }
-  }
-
-  for (const dep of Object.keys(appPkgJson.dependencies || {})) {
-    copyDependencyTree(dep, rootNodeModules, localNodeModules, visited);
-  }
-
-  console.log("  - using existing workspace dependencies");
+  console.log(
+    `  - ensured ${toCopy.size + workspacePackages.length} packages in app node_modules`
+  );
   console.log("  - skipping electron-builder dependency reinstall");
 
   return false;

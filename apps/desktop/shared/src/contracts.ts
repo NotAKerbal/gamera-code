@@ -4,6 +4,7 @@ import type {
   GitCommitResult,
   GitCommandResult,
   GitDiffResult,
+  GitOutgoingCommit,
   GitRepositoryCandidate,
   GitState,
   InstallDependenciesResult,
@@ -22,6 +23,7 @@ import type {
   RiskCheck,
   Session,
   SessionEvent,
+  ThreadMetadataSuggestion,
   Thread,
   UpdateCheckResult
 } from "./types";
@@ -90,6 +92,11 @@ export interface DesktopApi {
       options?: CodexThreadOptions;
       attachments?: PromptAttachment[];
     }) => Promise<{ ok: boolean }>;
+    generateThreadMetadata: (input: {
+      threadId: string;
+      input: string;
+      options?: CodexThreadOptions;
+    }) => Promise<ThreadMetadataSuggestion | null>;
     resize: (input: { threadId: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
     onEvent: (listener: (event: SessionEvent) => void) => () => void;
   };
@@ -114,15 +121,23 @@ export interface DesktopApi {
     check: () => Promise<UpdateCheckResult>;
     apply: () => Promise<{ ok: boolean }>;
   };
+  windowControls: {
+    minimize: () => Promise<{ ok: boolean }>;
+    toggleMaximize: () => Promise<{ ok: boolean; maximized: boolean }>;
+    close: () => Promise<{ ok: boolean }>;
+    isMaximized: () => Promise<{ ok: boolean; maximized: boolean }>;
+  };
   git: {
     getState: (input: { projectId: string }) => Promise<GitState>;
     getDiff: (input: { projectId: string; path?: string }) => Promise<GitDiffResult>;
+    getOutgoingCommits: (input: { projectId: string }) => Promise<GitOutgoingCommit[]>;
     fetch: (input: { projectId: string }) => Promise<GitCommandResult>;
     pull: (input: { projectId: string }) => Promise<GitCommandResult>;
     push: (input: { projectId: string }) => Promise<GitCommandResult>;
     sync: (input: { projectId: string }) => Promise<GitCommandResult>;
     stage: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
     unstage: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
+    discard: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
     commit: (input: { projectId: string; message?: string }) => Promise<GitCommitResult>;
     checkoutBranch: (input: { projectId: string; branch: string }) => Promise<GitCommandResult>;
     createBranch: (input: { projectId: string; branch: string; checkout?: boolean }) => Promise<GitCommandResult>;

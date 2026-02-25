@@ -1,8 +1,8 @@
 {
   "name": "@code-app/main",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
-  "description": "Main process for Code App desktop client",
+  "description": "Main process for GameraCode desktop client",
   "author": "Isaac Cochran",
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@openai/codex-sdk": "^0.104.0",
-    "@code-app/shared": "0.1.0",
+    "@code-app/shared": "0.1.2",
     "better-sqlite3": "^12.6.2",
     "electron-log": "^5.3.0",
     "electron-updater": "^6.3.9",
@@ -46,7 +46,8 @@
   },
   "build": {
     "appId": "com.codeapp.desktop",
-    "productName": "Code App",
+    "productName": "GameraCode",
+    "icon": "../resources/icon_dark.png",
     "npmRebuild": true,
     "beforeBuild": "./scripts/before-build.mjs",
     "files": [
@@ -66,23 +67,30 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../resources/icon_dark.png",
+        "to": "assets/icon_dark.png"
       }
     ],
     "directories": {
       "buildResources": "../resources"
     },
     "mac": {
+      "icon": "../resources/icon_dark.png",
       "category": "public.app-category.developer-tools",
       "target": [
         "dmg"
       ]
     },
     "win": {
+      "icon": "../resources/icon_dark.png",
       "target": [
         "nsis"
       ]
     },
     "linux": {
+      "icon": "../resources/icon_dark.png",
       "target": [
         "AppImage"
       ],

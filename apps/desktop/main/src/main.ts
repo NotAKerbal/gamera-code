@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { app, BrowserWindow } from "electron";
+import { pathToFileURL } from "node:url";
+import { app, BrowserWindow, nativeImage } from "electron";
 import log from "electron-log";
 import { IPC_CHANNELS, type ProjectTerminalEvent, type SessionEvent } from "@code-app/shared";
 import { initializeDatabase } from "./services/database";
@@ -22,6 +24,47 @@ let settingsWindow: BrowserWindow | null = null;
 let webLinkCurrentUrl: string | null = null;
 const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
 const PREVIEW_LOAD_BASE_DELAY_MS = 350;
+const APP_ICON_FILENAME = "icon_dark.png";
+
+const resolveAppIconPath = (): string | undefined => {
+  const devPath = resolve(__dirname, "../../resources", APP_ICON_FILENAME);
+  const packagedPath = join(process.resourcesPath, "assets", APP_ICON_FILENAME);
+  const candidates = app.isPackaged ? [packagedPath, devPath] : [devPath, packagedPath];
+  return candidates.find((candidate) => existsSync(candidate));
+};
+
+const getBrowserWindowIcon = () => {
+  const iconPath = resolveAppIconPath();
+  return iconPath ? { icon: iconPath } : {};
+};
+
+const getAppIconDataUrl = (size = 26): string => {
+  const iconPath = resolveAppIconPath();
+  if (!iconPath) {
+    return "";
+  }
+  try {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      return icon.resize({ width: size, height: size, quality: "best" }).toDataURL();
+    }
+    return `data:image/png;base64,${readFileSync(iconPath).toString("base64")}`;
+  } catch {
+    return "";
+  }
+};
+
+const getAppIconFileUrl = (): string => {
+  const iconPath = resolveAppIconPath();
+  if (!iconPath) {
+    return "";
+  }
+  try {
+    return pathToFileURL(iconPath).toString();
+  } catch {
+    return "";
+  }
+};
 
 const isAllowedPreviewUrl = (value: string): boolean => {
   try {
@@ -59,13 +102,25 @@ const escapeJsString = (value: string) =>
     .replace(/\n/g, "\\n");
 
 const createWindow = () => {
+  const isMac = process.platform === "darwin";
+  const isWindows = process.platform === "win32";
+
   mainWindow = new BrowserWindow({
     width: 1520,
     height: 980,
     minWidth: 1100,
     minHeight: 700,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    frame: !isWindows,
+    titleBarStyle: isMac ? "hiddenInset" : "default",
+    titleBarOverlay: false,
+    trafficLightPosition: isMac
+      ? {
+          x: 14,
+          y: 14
+        }
+      : undefined,
     backgroundColor: "#0b0d10",
+    ...getBrowserWindowIcon(),
     webPreferences: {
       preload: join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -73,6 +128,29 @@ const createWindow = () => {
       sandbox: false,
       webviewTag: true
     }
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ frameName }) => {
+    if (!frameName.startsWith("codeapp-terminal-")) {
+      return { action: "allow" };
+    }
+    return {
+      action: "allow",
+      overrideBrowserWindowOptions: {
+        autoHideMenuBar: true,
+        frame: process.platform !== "win32",
+        titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+        titleBarOverlay: false,
+        backgroundColor: "#0b0d10",
+        ...getBrowserWindowIcon(),
+        webPreferences: {
+          preload: join(__dirname, "preload.js"),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: false
+        }
+      }
+    };
   });
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
@@ -135,8 +213,9 @@ const loadPreviewUrlWithRetry = async (window: BrowserWindow, url: string) => {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 };
 
-const buildPreviewPopoutHtml = (initialUrl: string) => {
+const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
   const safeUrl = escapeHtml(initialUrl);
+  const safeIconSrc = escapeHtml(getAppIconFileUrl());
   return `<!doctype html>
 <html>
   <head>
@@ -156,15 +235,69 @@ const buildPreviewPopoutHtml = (initialUrl: string) => {
         display: flex;
         flex-direction: column;
       }
+      .app-header {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 10px;
+        border-bottom: 1px solid #2f2f2f;
+        background: #0f1013;
+        -webkit-app-region: drag;
+      }
+      .app-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .app-icon {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+      }
+      .app-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #e2e8f0;
+        white-space: nowrap;
+      }
+      .window-controls {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        -webkit-app-region: no-drag;
+      }
+      .window-btn {
+        width: 34px;
+        height: 28px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: #cbd5e1;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .window-btn:hover {
+        background: #1f2937;
+        color: #fff;
+      }
+      .window-btn.close:hover {
+        background: rgba(239, 68, 68, 0.2);
+        color: #fee2e2;
+      }
       .toolbar {
-        display: grid;
-        grid-template-columns: 1fr auto auto;
+        display: flex;
+        align-items: center;
         gap: 8px;
         padding: 10px;
         border-bottom: 1px solid #2f2f2f;
         background: #111;
       }
       .url {
+        flex: 1;
+        min-width: 0;
         height: 34px;
         border: 1px solid #3a3a3a;
         border-radius: 8px;
@@ -215,6 +348,17 @@ const buildPreviewPopoutHtml = (initialUrl: string) => {
     </style>
   </head>
   <body>
+    <div class="app-header">
+      <div class="app-brand">
+        <img src="${safeIconSrc}" class="app-icon" alt="" />
+        <div class="app-title">GameraCode - Browser</div>
+      </div>
+      <div class="window-controls">
+        <button id="windowMinBtn" class="window-btn" title="Minimize">-</button>
+        <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">□</button>
+        <button id="windowCloseBtn" class="window-btn close" title="Close">×</button>
+      </div>
+    </div>
     <div class="toolbar">
       <input id="urlInput" class="url" value="${safeUrl}" />
       <button id="goBtn" class="btn">Go</button>
@@ -227,10 +371,15 @@ const buildPreviewPopoutHtml = (initialUrl: string) => {
       </div>
     </div>
     <script>
+      const allowLocalOnly = ${allowLocalOnly ? "true" : "false"};
+      const api = window.desktopAPI;
       const allowedHosts = new Set(["localhost", "127.0.0.1"]);
       const statusEl = document.getElementById("status");
       const urlInput = document.getElementById("urlInput");
       const frame = document.getElementById("previewFrame");
+      const windowMinBtn = document.getElementById("windowMinBtn");
+      const windowMaxBtn = document.getElementById("windowMaxBtn");
+      const windowCloseBtn = document.getElementById("windowCloseBtn");
       const setStatus = (text) => {
         if (statusEl) statusEl.textContent = text;
       };
@@ -238,7 +387,7 @@ const buildPreviewPopoutHtml = (initialUrl: string) => {
         try {
           const parsed = new URL(value);
           if (!["http:", "https:"].includes(parsed.protocol)) return null;
-          if (!allowedHosts.has(parsed.hostname)) return null;
+          if (allowLocalOnly && !allowedHosts.has(parsed.hostname)) return null;
           return parsed.toString();
         } catch {
           return null;
@@ -247,7 +396,7 @@ const buildPreviewPopoutHtml = (initialUrl: string) => {
       const tryNavigate = (nextUrl, attempts = 0) => {
         const normalized = normalizeUrl(nextUrl);
         if (!normalized) {
-          setStatus("Invalid preview URL. Use localhost/127.0.0.1.");
+          setStatus(allowLocalOnly ? "Invalid preview URL. Use localhost/127.0.0.1." : "Invalid URL.");
           return false;
         }
         if (urlInput) urlInput.value = normalized;
@@ -258,6 +407,41 @@ const buildPreviewPopoutHtml = (initialUrl: string) => {
       window.__codeappNavigate = (nextUrl) => {
         tryNavigate(nextUrl);
       };
+      const syncWindowState = async () => {
+        if (!api?.windowControls || !windowMaxBtn) {
+          return;
+        }
+        const state = await api.windowControls.isMaximized();
+        if (state?.ok) {
+          windowMaxBtn.textContent = state.maximized ? "❐" : "□";
+        }
+      };
+      if (windowMinBtn) {
+        windowMinBtn.addEventListener("click", () => {
+          if (api?.windowControls) {
+            api.windowControls.minimize().catch(() => undefined);
+            return;
+          }
+          window.close();
+        });
+      }
+      if (windowMaxBtn && api?.windowControls) {
+        windowMaxBtn.addEventListener("click", async () => {
+          const state = await api.windowControls.toggleMaximize();
+          if (state?.ok) {
+            windowMaxBtn.textContent = state.maximized ? "❐" : "□";
+          }
+        });
+      }
+      if (windowCloseBtn) {
+        windowCloseBtn.addEventListener("click", () => {
+          if (api?.windowControls) {
+            api.windowControls.close().catch(() => undefined);
+            return;
+          }
+          window.close();
+        });
+      }
       frame.addEventListener("load", () => {
         let href = "";
         try {
@@ -292,6 +476,7 @@ const buildPreviewPopoutHtml = (initialUrl: string) => {
         }
       });
       tryNavigate("${safeUrl}");
+      syncWindowState().catch(() => undefined);
     </script>
   </body>
 </html>`;
@@ -303,6 +488,8 @@ const formatPreviewWindowTitle = (projectName?: string) => {
 };
 
 const ensurePreviewPopout = async (url: string, projectName?: string) => {
+  const isMac = process.platform === "darwin";
+  const isWindows = process.platform === "win32";
   if (!isAllowedPreviewUrl(url)) {
     throw new Error("Preview URL must target localhost or 127.0.0.1 over http/https.");
   }
@@ -313,10 +500,16 @@ const ensurePreviewPopout = async (url: string, projectName?: string) => {
       minWidth: 320,
       minHeight: 480,
       title: formatPreviewWindowTitle(projectName),
+      frame: !isWindows,
+      titleBarStyle: isMac ? "hiddenInset" : "default",
+      titleBarOverlay: false,
+      autoHideMenuBar: true,
       backgroundColor: "#0b0d10",
+      ...getBrowserWindowIcon(),
       webPreferences: {
+        preload: join(__dirname, "preload.js"),
         contextIsolation: true,
-        sandbox: true,
+        sandbox: false,
         nodeIntegration: false
       }
     });
@@ -330,7 +523,7 @@ const ensurePreviewPopout = async (url: string, projectName?: string) => {
     });
   }
   previewPopoutWindow.setTitle(formatPreviewWindowTitle(projectName));
-  await loadPreviewUrlWithRetry(previewPopoutWindow, url);
+  await loadEmbeddedBrowserWindow(previewPopoutWindow, url, true);
   previewPopoutWindow.show();
   previewPopoutWindow.focus();
 };
@@ -344,8 +537,11 @@ const navigatePreviewPopout = async (url: string, projectName?: string) => {
     return;
   }
   previewPopoutWindow.setTitle(formatPreviewWindowTitle(projectName));
-
-  await loadPreviewUrlWithRetry(previewPopoutWindow, url);
+  try {
+    await navigateEmbeddedBrowserWindow(previewPopoutWindow, url);
+  } catch {
+    await loadEmbeddedBrowserWindow(previewPopoutWindow, url, true);
+  }
   previewPopoutWindow.show();
   previewPopoutWindow.focus();
 };
@@ -353,6 +549,8 @@ const navigatePreviewPopout = async (url: string, projectName?: string) => {
 const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
   const safeProjectId = escapeJsString(projectId);
   const safeProjectName = escapeJsString(projectName?.trim() || "Project");
+  const safeIconSrc = escapeHtml(getAppIconDataUrl(26));
+  const isWindows = process.platform === "win32";
   return `<!doctype html>
 <html>
   <head>
@@ -366,20 +564,87 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       }
       body {
         margin: 0;
-        background: #0d0d0d;
+        background: #0b0d10;
         color: #e5e7eb;
         height: 100vh;
       }
+      .app-header {
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 0 10px;
+        border-bottom: 1px solid #24272d;
+        background: #0b0d10;
+        -webkit-app-region: drag;
+      }
+      .app-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #e2e8f0;
+      }
+      .app-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .app-icon {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+      }
+      .window-controls {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        -webkit-app-region: no-drag;
+      }
+      .window-btn {
+        width: 34px;
+        height: 28px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: #cbd5e1;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .window-btn:hover {
+        background: #1f2937;
+        color: #fff;
+      }
+      .window-btn.close:hover {
+        background: rgba(239, 68, 68, 0.2);
+        color: #fee2e2;
+      }
+      .window-btn-icon {
+        width: 12px;
+        height: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .window-btn-icon svg {
+        width: 12px;
+        height: 12px;
+        fill: currentColor;
+      }
+      .window-btn-icon.min svg {
+        transform: translateY(2px);
+      }
       .shell {
-        height: 100vh;
+        height: calc(100vh - 48px);
         display: grid;
         grid-template-columns: 360px minmax(0, 1fr);
+        background: radial-gradient(circle at top left, #1b1b1b 0%, #111 40%, #0a0a0a 100%);
       }
       .sidebar {
         display: flex;
         flex-direction: column;
-        border-right: 1px solid #2f2f2f;
-        background: #111;
+        border-right: 1px solid #2a2a2a;
+        background: linear-gradient(180deg, #151515 0%, #121212 100%);
         min-height: 0;
         overflow-y: auto;
       }
@@ -388,10 +653,11 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         min-height: 0;
         display: flex;
         flex-direction: column;
+        background: #0b0d10;
       }
       .section {
         padding: 10px;
-        border-bottom: 1px solid #2f2f2f;
+        border-bottom: 1px solid #2a2a2a;
       }
       .section-title {
         font-size: 11px;
@@ -407,31 +673,31 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       }
       .btn {
         min-height: 30px;
-        border: 1px solid #3a3a3a;
+        border: 1px solid #2f3640;
         border-radius: 8px;
-        background: #191919;
-        color: #e5e7eb;
+        background: #12151b;
+        color: #dbe3ee;
         padding: 0 10px;
         font-size: 12px;
         cursor: pointer;
       }
       .btn:hover {
-        background: #222;
+        background: #1a202a;
       }
       .btn[disabled] {
         opacity: 0.5;
         cursor: default;
       }
       .btn.secondary {
-        background: #151515;
+        background: #11151b;
       }
       .branch-input {
         flex: 1;
         min-width: 120px;
         height: 30px;
-        border: 1px solid #3a3a3a;
+        border: 1px solid #2f3640;
         border-radius: 8px;
-        background: #161616;
+        background: #10141a;
         color: #e5e7eb;
         padding: 0 10px;
         font-size: 12px;
@@ -440,9 +706,9 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         width: 100%;
         min-height: 48px;
         resize: vertical;
-        border: 1px solid #3a3a3a;
+        border: 1px solid #2f3640;
         border-radius: 8px;
-        background: #161616;
+        background: #10141a;
         color: #e5e7eb;
         padding: 8px 10px;
         font-size: 12px;
@@ -478,10 +744,10 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         cursor: pointer;
       }
       .file:hover {
-        background: #1f1f1f;
+        background: #1a202a;
       }
       .file.active {
-        background: #27272a;
+        background: #1f2937;
         color: #fff;
       }
       .status {
@@ -511,8 +777,8 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         flex: 1;
         min-height: 0;
         overflow: auto;
-        background: #111217;
-        border: 1px solid #2f2f2f;
+        background: #0d1424;
+        border: 1px solid #2a2a2a;
         border-radius: 8px;
         padding: 10px;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -559,6 +825,27 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
     </style>
   </head>
   <body>
+    <div class="app-header">
+      <div class="app-brand">
+        <img src="${safeIconSrc}" class="app-icon" alt="" />
+        <div class="app-title">GameraCode - Git (${safeProjectName})</div>
+      </div>
+      ${
+        isWindows
+          ? `<div class="window-controls">
+        <button id="windowMinBtn" class="window-btn" title="Minimize">
+          <span class="window-btn-icon min"><svg viewBox="0 0 448 512" aria-hidden="true"><path d="M32 288c-17.7 0-32-14.3-32-32s14.3-32 32-32l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 288z"/></svg></span>
+        </button>
+        <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">
+          <span id="windowMaxIcon" class="window-btn-icon"><svg viewBox="0 0 512 512" aria-hidden="true"><path d="M32 32C14.3 32 0 46.3 0 64L0 352c0 17.7 14.3 32 32 32l128 0 0-64L64 320 64 96l288 0 0 96 64 0L416 64c0-17.7-14.3-32-32-32L32 32zM224 160c-17.7 0-32 14.3-32 32l0 256c0 17.7 14.3 32 32 32l256 0c17.7 0 32-14.3 32-32l0-256c0-17.7-14.3-32-32-32l-256 0zm32 64l192 0 0 192-192 0 0-192z"/></svg></span>
+        </button>
+        <button id="windowCloseBtn" class="window-btn close" title="Close">
+          <span class="window-btn-icon"><svg viewBox="0 0 384 512" aria-hidden="true"><path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/></svg></span>
+        </button>
+      </div>`
+          : ""
+      }
+    </div>
     <div class="shell">
       <aside class="sidebar">
         <div class="section">
@@ -615,6 +902,46 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       const commitBtn = document.getElementById("commitBtn");
       const commitInput = document.getElementById("commitInput");
       const actionStatus = document.getElementById("actionStatus");
+      const windowMinBtn = document.getElementById("windowMinBtn");
+      const windowMaxBtn = document.getElementById("windowMaxBtn");
+      const windowMaxIcon = document.getElementById("windowMaxIcon");
+      const windowCloseBtn = document.getElementById("windowCloseBtn");
+
+      const maximizeIconSvg = '<svg viewBox="0 0 512 512" aria-hidden="true"><path d="M32 32C14.3 32 0 46.3 0 64L0 352c0 17.7 14.3 32 32 32l128 0 0-64L64 320 64 96l288 0 0 96 64 0L416 64c0-17.7-14.3-32-32-32L32 32zM224 160c-17.7 0-32 14.3-32 32l0 256c0 17.7 14.3 32 32 32l256 0c17.7 0 32-14.3 32-32l0-256c0-17.7-14.3-32-32-32l-256 0zm32 64l192 0 0 192-192 0 0-192z"/></svg>';
+      const restoreIconSvg = '<svg viewBox="0 0 512 512" aria-hidden="true"><path d="M48 96c0-26.5 21.5-48 48-48l224 0c26.5 0 48 21.5 48 48l0 48 48 0c26.5 0 48 21.5 48 48l0 224c0 26.5-21.5 48-48 48l-224 0c-26.5 0-48-21.5-48-48l0-48-48 0c-26.5 0-48-21.5-48-48L48 96zm64 0l0 224 32 0 0-128c0-26.5 21.5-48 48-48l112 0 0-32L112 112zm96 112l0 192 192 0 0-192-192 0z"/></svg>';
+
+      const syncWindowState = async () => {
+        if (!windowMaxBtn || !api?.windowControls) {
+          return;
+        }
+        const state = await api.windowControls.isMaximized();
+        if (state?.ok) {
+          if (windowMaxIcon) {
+            windowMaxIcon.innerHTML = state.maximized ? restoreIconSvg : maximizeIconSvg;
+          }
+        }
+      };
+
+      if (windowMinBtn && api?.windowControls) {
+        windowMinBtn.addEventListener("click", () => {
+          api.windowControls.minimize().catch(() => undefined);
+        });
+      }
+      if (windowMaxBtn && api?.windowControls) {
+        windowMaxBtn.addEventListener("click", async () => {
+          const state = await api.windowControls.toggleMaximize();
+          if (state?.ok) {
+            if (windowMaxIcon) {
+              windowMaxIcon.innerHTML = state.maximized ? restoreIconSvg : maximizeIconSvg;
+            }
+          }
+        });
+      }
+      if (windowCloseBtn && api?.windowControls) {
+        windowCloseBtn.addEventListener("click", () => {
+          api.windowControls.close().catch(() => undefined);
+        });
+      }
 
       const setBusy = (busy) => {
         const buttons = Array.from(document.querySelectorAll("button"));
@@ -834,9 +1161,23 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       };
 
       loadState();
+      syncWindowState().catch(() => undefined);
     </script>
   </body>
 </html>`;
+};
+
+const loadEmbeddedBrowserWindow = async (window: BrowserWindow, url: string, allowLocalOnly: boolean) => {
+  const html = buildPreviewPopoutHtml(url, allowLocalOnly);
+  const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  await window.loadURL(dataUrl);
+};
+
+const navigateEmbeddedBrowserWindow = async (window: BrowserWindow, url: string) => {
+  await window.webContents.executeJavaScript(
+    `window.__codeappNavigate && window.__codeappNavigate("${escapeJsString(url)}");`,
+    true
+  );
 };
 
 const formatGitWindowTitle = (projectName?: string) => {
@@ -851,6 +1192,8 @@ const formatWebLinkWindowTitle = (name?: string, projectName?: string) => {
 };
 
 const ensureWebLinkWindow = async (url: string, name?: string, projectName?: string, focus = true) => {
+  const isMac = process.platform === "darwin";
+  const isWindows = process.platform === "win32";
   if (!isAllowedWebLinkUrl(url)) {
     throw new Error("Website URL must use http/https.");
   }
@@ -862,10 +1205,16 @@ const ensureWebLinkWindow = async (url: string, name?: string, projectName?: str
       minWidth: 720,
       minHeight: 520,
       title: formatWebLinkWindowTitle(name, projectName),
+      frame: !isWindows,
+      titleBarStyle: isMac ? "hiddenInset" : "default",
+      titleBarOverlay: false,
+      autoHideMenuBar: true,
       backgroundColor: "#0b0d10",
+      ...getBrowserWindowIcon(),
       webPreferences: {
+        preload: join(__dirname, "preload.js"),
         contextIsolation: true,
-        sandbox: true,
+        sandbox: false,
         nodeIntegration: false
       }
     });
@@ -877,7 +1226,11 @@ const ensureWebLinkWindow = async (url: string, name?: string, projectName?: str
   }
 
   webLinkWindow.setTitle(formatWebLinkWindowTitle(name, projectName));
-  await loadPreviewUrlWithRetry(webLinkWindow, url);
+  try {
+    await navigateEmbeddedBrowserWindow(webLinkWindow, url);
+  } catch {
+    await loadEmbeddedBrowserWindow(webLinkWindow, url, false);
+  }
   webLinkCurrentUrl = url;
   webLinkWindow.show();
   if (focus) {
@@ -886,6 +1239,8 @@ const ensureWebLinkWindow = async (url: string, name?: string, projectName?: str
 };
 
 const ensureGitPopout = async (projectId: string, projectName?: string) => {
+  const isMac = process.platform === "darwin";
+  const isWindows = process.platform === "win32";
   if (!gitPopoutWindow || gitPopoutWindow.isDestroyed()) {
     gitPopoutWindow = new BrowserWindow({
       width: 1320,
@@ -893,7 +1248,12 @@ const ensureGitPopout = async (projectId: string, projectName?: string) => {
       minWidth: 980,
       minHeight: 520,
       title: formatGitWindowTitle(projectName),
+      frame: !isWindows,
+      titleBarStyle: isMac ? "hiddenInset" : "default",
+      titleBarOverlay: false,
+      autoHideMenuBar: true,
       backgroundColor: "#0b0d10",
+      ...getBrowserWindowIcon(),
       webPreferences: {
         preload: join(__dirname, "preload.js"),
         contextIsolation: true,
@@ -933,14 +1293,20 @@ const navigateGitPopout = async (projectId: string, projectName?: string) => {
 };
 
 const ensureSettingsWindow = async () => {
+  const isMac = process.platform === "darwin";
+  const isWindows = process.platform === "win32";
   if (!settingsWindow || settingsWindow.isDestroyed()) {
     settingsWindow = new BrowserWindow({
       width: 1040,
       height: 820,
       minWidth: 860,
       minHeight: 620,
-      title: "App Settings",
+      title: "GameraCode Settings",
+      frame: !isWindows,
+      titleBarStyle: isMac ? "hiddenInset" : "default",
+      titleBarOverlay: false,
       backgroundColor: "#0b0d10",
+      ...getBrowserWindowIcon(),
       webPreferences: {
         preload: join(__dirname, "preload.js"),
         contextIsolation: true,
@@ -961,6 +1327,13 @@ const ensureSettingsWindow = async () => {
 const bootstrap = async () => {
   await app.whenReady();
   applyRuntimePathToProcessEnv();
+  app.setName("GameraCode");
+  if (process.platform === "darwin") {
+    const iconPath = resolveAppIconPath();
+    if (iconPath) {
+      app.dock?.setIcon(iconPath);
+    }
+  }
 
   const paths = createAppPaths(app.getPath("userData"));
   const db = initializeDatabase(paths.dbPath);
@@ -1087,3 +1460,4 @@ bootstrap().catch((error) => {
   log.error("App bootstrap failed", error);
   app.quit();
 });
+

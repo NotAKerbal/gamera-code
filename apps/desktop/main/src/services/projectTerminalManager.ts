@@ -166,7 +166,7 @@ export class ProjectTerminalManager {
 
     const settings = this.deps.repository.getProjectSettings(projectId);
     const behavior = this.resolveSwitchBehavior(settings);
-    const shouldAutoStart = settings.autoStartDevTerminal && (behavior === "start_stop" || behavior === "start_only");
+    const shouldAutoStart = behavior === "start_stop" || behavior === "start_only";
     if (shouldAutoStart) {
       this.start(projectId, undefined, true);
     }
@@ -219,7 +219,11 @@ export class ProjectTerminalManager {
       ? pickAutoStartCommands(settings)
       : normalizeDevCommands(settings);
 
-    targets.forEach((command) => this.startCommand(project, settings, command));
+    const commandsToStart = autoStartOnly
+      ? targets.filter((command) => !this.running.has(toRunningKey(projectId, command.id)))
+      : targets;
+
+    commandsToStart.forEach((command) => this.startCommand(project, settings, command));
     return this.getState(projectId);
   }
 

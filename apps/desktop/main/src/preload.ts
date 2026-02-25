@@ -3,8 +3,18 @@ import { IPC_CHANNELS, type DesktopApi, type PreviewEvent, type ProjectTerminalE
 
 const settingsOpenWindowChannel =
   (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
+const gitDiscardChannel =
+  (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
+const gitGetOutgoingCommitsChannel =
+  (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
+type DesktopApiWithGitExtras = DesktopApi & {
+  git: DesktopApi["git"] & {
+    discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
+    getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
+  };
+};
 
-const api: DesktopApi = {
+const api: DesktopApiWithGitExtras = {
   projects: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.projectsList),
     create: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreate, input),
@@ -57,6 +67,7 @@ const api: DesktopApi = {
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsStart, input),
     stop: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsStop, input),
     sendInput: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsSendInput, input),
+    generateThreadMetadata: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsGenerateThreadMetadata, input),
     resize: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsResize, input),
     onEvent: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: SessionEvent) => listener(payload);
@@ -89,15 +100,23 @@ const api: DesktopApi = {
     check: () => ipcRenderer.invoke(IPC_CHANNELS.updatesCheck),
     apply: () => ipcRenderer.invoke(IPC_CHANNELS.updatesApply)
   },
+  windowControls: {
+    minimize: () => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize),
+    toggleMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.windowToggleMaximize),
+    close: () => ipcRenderer.invoke(IPC_CHANNELS.windowClose),
+    isMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.windowIsMaximized)
+  },
   git: {
     getState: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetState, input),
     getDiff: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetDiff, input),
+    getOutgoingCommits: (input: { projectId: string }) => ipcRenderer.invoke(gitGetOutgoingCommitsChannel, input),
     fetch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitFetch, input),
     pull: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitPull, input),
     push: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitPush, input),
     sync: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitSync, input),
     stage: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitStage, input),
     unstage: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitUnstage, input),
+    discard: (input) => ipcRenderer.invoke(gitDiscardChannel, input),
     commit: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCommit, input),
     checkoutBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCheckoutBranch, input),
     createBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCreateBranch, input),

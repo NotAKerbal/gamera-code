@@ -41,6 +41,7 @@ export const initializeDatabase = (dbPath: string) => {
       thread_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      attachments_json TEXT,
       ts TEXT NOT NULL,
       stream_seq INTEGER NOT NULL,
       FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
@@ -124,6 +125,13 @@ export const initializeDatabase = (dbPath: string) => {
   const hasWebLinksColumn = projectSettingsColumns.some((column) => column.name === "web_links_json");
   if (!hasWebLinksColumn) {
     db.exec("ALTER TABLE project_settings ADD COLUMN web_links_json TEXT NOT NULL DEFAULT '[]';");
+  }
+  const messageEventColumns = db
+    .prepare("PRAGMA table_info(message_events)")
+    .all() as Array<{ name: string }>;
+  const hasAttachmentsJsonColumn = messageEventColumns.some((column) => column.name === "attachments_json");
+  if (!hasAttachmentsJsonColumn) {
+    db.exec("ALTER TABLE message_events ADD COLUMN attachments_json TEXT;");
   }
 
   return db;

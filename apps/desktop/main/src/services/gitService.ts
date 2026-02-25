@@ -93,6 +93,11 @@ const parseShortStat = (value: string): { addedLines: number; removedLines: numb
   };
 };
 
+type GitOutgoingCommitItem = {
+  hash: string;
+  summary: string;
+};
+
 export class GitService {
   private toProjectDirName(value: string): string {
     return value
@@ -329,6 +334,36 @@ export class GitService {
     };
   }
 
+  async getOutgoingCommits(cwd: string, limit = 30): Promise<GitOutgoingCommitItem[]> {
+    const insideRepo = await this.isInsideRepo(cwd);
+    if (!insideRepo) {
+      return [];
+    }
+
+    const upstream = await this.runGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+    if (!upstream.ok) {
+      return [];
+    }
+
+    const result = await this.runGit(cwd, ["log", "--oneline", `@{u}..HEAD`, "-n", String(limit)]);
+    if (!result.ok || !result.stdout) {
+      return [];
+    }
+
+    return result.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [hash, ...summaryParts] = line.split(" ");
+        return {
+          hash: hash ?? "",
+          summary: summaryParts.join(" ").trim()
+        };
+      })
+      .filter((commit) => Boolean(commit.hash) && Boolean(commit.summary));
+  }
+
   async fetch(cwd: string): Promise<GitCommandResult> {
     const result = await this.runGit(cwd, ["fetch", "--all", "--prune"]);
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
@@ -379,6 +414,27 @@ export class GitService {
       ? await this.runGit(cwd, ["reset", "HEAD", "--", path.trim()])
       : await this.runGit(cwd, ["reset"]);
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  async discard(cwd: string, path?: string): Promise<GitCommandResult> {
+    const trimmedPath = path?.trim();
+    if (trimmedPath) {
+      const restore = await this.runGit(cwd, ["restore", "--worktree", "--", trimmedPath]);
+      const clean = await this.runGit(cwd, ["clean", "-fd", "--", trimmedPath]);
+      return {
+        ok: restore.ok && clean.ok,
+        stdout: [restore.stdout, clean.stdout].filter(Boolean).join("\n"),
+        stderr: [restore.stderr, clean.stderr].filter(Boolean).join("\n")
+      };
+    }
+
+    const restore = await this.runGit(cwd, ["restore", "--worktree", "--", "."]);
+    const clean = await this.runGit(cwd, ["clean", "-fd"]);
+    return {
+      ok: restore.ok && clean.ok,
+      stdout: [restore.stdout, clean.stdout].filter(Boolean).join("\n"),
+      stderr: [restore.stderr, clean.stderr].filter(Boolean).join("\n")
+    };
   }
 
   private async buildAutoCommitMessage(cwd: string): Promise<string> {

@@ -78,6 +78,7 @@ interface MessageRow {
   thread_id: string;
   role: MessageEvent["role"];
   content: string;
+  attachments_json: string | null;
   ts: string;
   stream_seq: number;
 }
@@ -131,11 +132,53 @@ const mapSession = (row: SessionRow): Session => ({
   stoppedAt: row.stopped_at ?? undefined
 });
 
+const parseMessageAttachments = (value: unknown): MessageEvent["attachments"] => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const attachments = value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const row = entry as Record<string, unknown>;
+      const name = typeof row.name === "string" ? row.name.trim() : "";
+      const mimeType = typeof row.mimeType === "string" ? row.mimeType.trim() : "";
+      const dataUrl = typeof row.dataUrl === "string" ? row.dataUrl.trim() : "";
+      const size = typeof row.size === "number" && Number.isFinite(row.size) ? Math.max(0, row.size) : 0;
+      if (!name || !mimeType || !dataUrl) {
+        return null;
+      }
+      if (!/^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(dataUrl)) {
+        return null;
+      }
+      return {
+        name,
+        mimeType,
+        dataUrl,
+        size
+      };
+    })
+    .filter((entry): entry is NonNullable<MessageEvent["attachments"]>[number] => Boolean(entry));
+
+  return attachments.length > 0 ? attachments : undefined;
+};
+
 const mapMessage = (row: MessageRow): MessageEvent => ({
   id: row.id,
   threadId: row.thread_id,
   role: row.role,
   content: row.content,
+  attachments: row.attachments_json
+    ? parseMessageAttachments((() => {
+        try {
+          return JSON.parse(row.attachments_json);
+        } catch {
+          return null;
+        }
+      })())
+    : undefined,
   ts: row.ts,
   streamSeq: row.stream_seq
 });
@@ -612,16 +655,20 @@ export class Repository {
       threadId: input.threadId,
       role: input.role,
       content: input.content,
+      attachments: parseMessageAttachments(input.attachments ?? []),
       ts,
       streamSeq: nextStreamSeq
     };
 
     this.db
       .prepare(
-        `INSERT INTO message_events (id, thread_id, role, content, ts, stream_seq)
-         VALUES (@id, @threadId, @role, @content, @ts, @streamSeq)`
+        `INSERT INTO message_events (id, thread_id, role, content, attachments_json, ts, stream_seq)
+         VALUES (@id, @threadId, @role, @content, @attachmentsJson, @ts, @streamSeq)`
       )
-      .run(event);
+      .run({
+        ...event,
+        attachmentsJson: event.attachments ? JSON.stringify(event.attachments) : null
+      });
 
     const filePath = getThreadDataPath(this.paths.threadsDir, event.threadId).eventsPath;
     appendFileSync(filePath, `${JSON.stringify(event)}\n`, "utf8");

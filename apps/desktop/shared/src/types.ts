@@ -139,6 +139,7 @@ export interface MessageEvent {
   threadId: string;
   role: "system" | "user" | "assistant";
   content: string;
+  attachments?: PromptAttachment[];
   ts: string;
   streamSeq: number;
 }
@@ -198,6 +199,11 @@ export interface SessionEvent {
   payload: string;
   ts: string;
   data?: Record<string, unknown>;
+}
+
+export interface ThreadMetadataSuggestion {
+  title: string;
+  description: string;
 }
 
 export interface AppSettings {
@@ -261,6 +267,11 @@ export interface GitCommandResult {
   ok: boolean;
   stdout: string;
   stderr: string;
+}
+
+export interface GitOutgoingCommit {
+  hash: string;
+  summary: string;
 }
 
 export interface GitCommitResult extends GitCommandResult {
