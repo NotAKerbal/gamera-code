@@ -216,6 +216,8 @@ const loadPreviewUrlWithRetry = async (window: BrowserWindow, url: string) => {
 const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
   const safeUrl = escapeHtml(initialUrl);
   const safeIconSrc = escapeHtml(getAppIconFileUrl());
+  const isMac = process.platform === "darwin";
+  const isWindows = process.platform === "win32";
   return `<!doctype html>
 <html>
   <head>
@@ -245,6 +247,9 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
         border-bottom: 1px solid #2f2f2f;
         background: #0f1013;
         -webkit-app-region: drag;
+      }
+      .app-header.macos {
+        padding-left: 5rem;
       }
       .app-brand {
         display: flex;
@@ -348,16 +353,16 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
     </style>
   </head>
   <body>
-    <div class="app-header">
+    <div class="app-header${isMac ? " macos" : ""}">
       <div class="app-brand">
         <img src="${safeIconSrc}" class="app-icon" alt="" />
         <div class="app-title">GameraCode - Browser</div>
       </div>
-      <div class="window-controls">
+      ${isWindows ? `<div class="window-controls">
         <button id="windowMinBtn" class="window-btn" title="Minimize">-</button>
         <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">□</button>
         <button id="windowCloseBtn" class="window-btn close" title="Close">×</button>
-      </div>
+      </div>` : ""}
     </div>
     <div class="toolbar">
       <input id="urlInput" class="url" value="${safeUrl}" />
@@ -550,6 +555,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
   const safeProjectId = escapeJsString(projectId);
   const safeProjectName = escapeJsString(projectName?.trim() || "Project");
   const safeIconSrc = escapeHtml(getAppIconDataUrl(26));
+  const isMac = process.platform === "darwin";
   const isWindows = process.platform === "win32";
   return `<!doctype html>
 <html>
@@ -578,6 +584,9 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         border-bottom: 1px solid #24272d;
         background: #0b0d10;
         -webkit-app-region: drag;
+      }
+      .app-header.macos {
+        padding-left: 5rem;
       }
       .app-title {
         font-size: 13px;
@@ -825,7 +834,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
     </style>
   </head>
   <body>
-    <div class="app-header">
+    <div class="app-header${isMac ? " macos" : ""}">
       <div class="app-brand">
         <img src="${safeIconSrc}" class="app-icon" alt="" />
         <div class="app-title">GameraCode - Git (${safeProjectName})</div>
@@ -1460,4 +1469,3 @@ bootstrap().catch((error) => {
   log.error("App bootstrap failed", error);
   app.quit();
 });
-

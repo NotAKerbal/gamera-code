@@ -125,9 +125,8 @@ export default async function beforeBuild(context) {
   const rootNodeModules = join(repoRoot, "node_modules");
 
   if (!existsSync(localNodeModules)) {
-    throw new Error(
-      "Missing app node_modules. Run npm install (repo root) before packaging."
-    );
+    console.log("  - app node_modules not found (hoisted by npm workspaces), creating it");
+    mkdirSync(localNodeModules, { recursive: true });
   }
 
   // Collect every production dependency (direct + transitive) that's hoisted
