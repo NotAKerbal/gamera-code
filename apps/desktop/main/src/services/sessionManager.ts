@@ -615,7 +615,15 @@ export class SessionManager {
 
     const sdkModule = await loadCodexSdk();
     const CodexCtor = sdkModule.Codex;
-    const codex = new CodexCtor({ executable: resolveCodexBinaryPath() });
+    const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
+    const codexPathOverride = resolveCodexBinaryPath();
+    const codex = new CodexCtor({
+      env,
+      config: {
+        show_raw_agent_reasoning: true
+      },
+      ...(codexPathOverride ? { codexPathOverride } : {})
+    });
     const startThread = (codex as UnknownRecord).startThread as ((options?: UnknownRecord) => Promise<unknown>) | undefined;
     if (!startThread) {
       return null;

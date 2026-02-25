@@ -47,6 +47,9 @@ export interface HandlerDeps {
 }
 
 export const registerIpcHandlers = (deps: HandlerDeps) => {
+  const gitDiscardChannel = (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
+  const gitGetOutgoingCommitsChannel =
+    (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
   const normalizePath = (path: string) => resolve(path);
   const findProjectByPath = (path: string) => {
     const normalized = normalizePath(path);
@@ -453,6 +456,10 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return deps.gitService.getDiff(getProjectPath(input.projectId), input.path);
   });
 
+  ipcMain.handle(gitGetOutgoingCommitsChannel, async (_event, input: { projectId: string }) => {
+    return deps.gitService.getOutgoingCommits(getProjectPath(input.projectId));
+  });
+
   ipcMain.handle(IPC_CHANNELS.gitFetch, async (_event, input: { projectId: string }) => {
     return deps.gitService.fetch(getProjectPath(input.projectId));
   });
@@ -475,6 +482,10 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(IPC_CHANNELS.gitUnstage, async (_event, input: { projectId: string; path?: string }) => {
     return deps.gitService.unstage(getProjectPath(input.projectId), input.path);
+  });
+
+  ipcMain.handle(gitDiscardChannel, async (_event, input: { projectId: string; path?: string }) => {
+    return deps.gitService.discard(getProjectPath(input.projectId), input.path);
   });
 
   ipcMain.handle(IPC_CHANNELS.gitCommit, async (_event, input: { projectId: string; message?: string }) => {

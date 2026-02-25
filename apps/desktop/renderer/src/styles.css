@@ -38,6 +38,18 @@ webview {
   @apply rounded-lg bg-transparent px-2.5 py-1.5 text-xs text-slate-300 transition hover:bg-zinc-900 hover:text-white;
 }
 
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-ghost:disabled {
+  @apply cursor-not-allowed border-zinc-700 bg-transparent text-slate-500 opacity-100;
+}
+
+.btn-primary:disabled:hover,
+.btn-secondary:disabled:hover,
+.btn-ghost:disabled:hover {
+  @apply border-zinc-700 bg-transparent text-slate-500;
+}
+
 .terminal-menu-pop {
   @apply absolute right-0 top-9 z-30 flex max-h-[24rem] min-w-[21rem] flex-col gap-1.5 overflow-y-auto rounded-md border border-border bg-zinc-950 p-2 shadow-lg;
   animation: dropdown-fade 120ms ease-out;

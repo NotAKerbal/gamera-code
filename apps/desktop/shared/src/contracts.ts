@@ -4,6 +4,7 @@ import type {
   GitCommitResult,
   GitCommandResult,
   GitDiffResult,
+  GitOutgoingCommit,
   GitRepositoryCandidate,
   GitState,
   InstallDependenciesResult,
@@ -129,12 +130,14 @@ export interface DesktopApi {
   git: {
     getState: (input: { projectId: string }) => Promise<GitState>;
     getDiff: (input: { projectId: string; path?: string }) => Promise<GitDiffResult>;
+    getOutgoingCommits: (input: { projectId: string }) => Promise<GitOutgoingCommit[]>;
     fetch: (input: { projectId: string }) => Promise<GitCommandResult>;
     pull: (input: { projectId: string }) => Promise<GitCommandResult>;
     push: (input: { projectId: string }) => Promise<GitCommandResult>;
     sync: (input: { projectId: string }) => Promise<GitCommandResult>;
     stage: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
     unstage: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
+    discard: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
     commit: (input: { projectId: string; message?: string }) => Promise<GitCommitResult>;
     checkoutBranch: (input: { projectId: string; branch: string }) => Promise<GitCommandResult>;
     createBranch: (input: { projectId: string; branch: string; checkout?: boolean }) => Promise<GitCommandResult>;
