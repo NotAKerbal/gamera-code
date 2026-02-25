@@ -10,39 +10,62 @@
  * followed by asar packaging, so we physically copy workspace packages into
  * the app's local node_modules before the build.
  *
- * Hoisted packages (like @openai/codex-sdk) that live only in the root
- * node_modules must also be copied so they resolve inside the asar.
+ * All production dependencies (including transitive ones) that are hoisted
+ * to the root node_modules are recursively copied into the app's local
+ * node_modules so they resolve correctly inside the asar.
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, lstatSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  lstatSync,
+} from "node:fs";
 import { join } from "node:path";
 
-function copyPackage(src, dst) {
-  mkdirSync(dst, { recursive: true });
-  cpSync(src, dst, { recursive: true });
-}
+const WORKSPACE_SCOPES = new Set(["@code-app"]);
 
 /**
- * Copy all @openai/* packages from root node_modules into the app's local
- * node_modules. This covers codex-sdk, codex, and the platform-specific
- * optional binary packages (e.g. codex-win32-x64).
+ * Recursively copy a production dependency and all of its transitive
+ * production dependencies from rootNodeModules into localNodeModules.
+ * Tracks already-copied packages in `visited` to avoid cycles.
  */
-function copyHoistedOpenAiPackages(rootNodeModules, localNodeModules) {
-  const scopeDir = join(rootNodeModules, "@openai");
-  if (!existsSync(scopeDir)) {
-    console.warn("  - WARNING: @openai scope not found in root node_modules");
+function copyDependencyTree(name, rootNodeModules, localNodeModules, visited) {
+  if (visited.has(name)) return;
+  visited.add(name);
+
+  const src = join(rootNodeModules, ...name.split("/"));
+  const dst = join(localNodeModules, ...name.split("/"));
+
+  if (!existsSync(src)) {
+    // May be an optional dependency not installed on this platform
+    console.warn(`  - WARNING: ${name} not found in root node_modules (optional?)`);
     return;
   }
+  if (existsSync(dst)) return;
 
-  const localScope = join(localNodeModules, "@openai");
-  mkdirSync(localScope, { recursive: true });
+  // For scoped packages, ensure the scope directory exists
+  if (name.startsWith("@")) {
+    const scope = name.split("/")[0];
+    mkdirSync(join(localNodeModules, scope), { recursive: true });
+  }
 
-  for (const entry of readdirSync(scopeDir)) {
-    const src = join(scopeDir, entry);
-    if (!lstatSync(src).isDirectory()) continue;
-    const dst = join(localScope, entry);
-    copyPackage(src, dst);
-    console.log(`  - copied @openai/${entry} into app node_modules`);
+  cpSync(src, dst, { recursive: true });
+  console.log(`  - copied ${name}`);
+
+  // Recurse into this package's production dependencies
+  const pkgJsonPath = join(src, "package.json");
+  if (existsSync(pkgJsonPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+      for (const dep of Object.keys(pkg.dependencies || {})) {
+        copyDependencyTree(dep, rootNodeModules, localNodeModules, visited);
+      }
+    } catch {
+      // non-fatal: skip unreadable package.json
+    }
   }
 }
 
@@ -53,13 +76,12 @@ export default async function beforeBuild(context) {
   const rootNodeModules = join(repoRoot, "node_modules");
 
   if (!existsSync(localNodeModules)) {
-    throw new Error(
-      "Missing app node_modules. Run npm install (repo root) before packaging."
-    );
+    console.log("  - app node_modules not found (hoisted by npm workspaces), creating it");
+    mkdirSync(localNodeModules, { recursive: true });
   }
 
-  // Copy workspace package @code-app/shared so it's physically present
-  // in the asar archive (symlinks to outside the app dir are not followed).
+  // --- workspace package: @code-app/shared ---
+  // Copy only package.json + dist (skip source/tests/configs)
   const sharedSrc = join(repoRoot, "apps", "desktop", "shared");
   const sharedDst = join(localNodeModules, "@code-app", "shared");
 
@@ -71,14 +93,28 @@ export default async function beforeBuild(context) {
         recursive: true,
       });
     }
-    console.log("  - copied @code-app/shared into app node_modules");
+    console.log("  - copied @code-app/shared (workspace)");
   } else {
     throw new Error("Cannot find @code-app/shared source at " + sharedSrc);
   }
 
-  // Copy hoisted @openai/* packages (codex-sdk, codex, platform binaries)
-  // so dynamic import("@openai/codex-sdk") resolves inside the asar.
-  copyHoistedOpenAiPackages(rootNodeModules, localNodeModules);
+  // --- all production dependencies (+ transitive) ---
+  const appPkgJson = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8"));
+  const visited = new Set();
+
+  // Mark workspace packages as already visited so we don't overwrite them
+  for (const scope of WORKSPACE_SCOPES) {
+    const scopeDir = join(rootNodeModules, scope);
+    if (existsSync(scopeDir)) {
+      for (const entry of readdirSync(scopeDir)) {
+        visited.add(`${scope}/${entry}`);
+      }
+    }
+  }
+
+  for (const dep of Object.keys(appPkgJson.dependencies || {})) {
+    copyDependencyTree(dep, rootNodeModules, localNodeModules, visited);
+  }
 
   console.log("  - using existing workspace dependencies");
   console.log("  - skipping electron-builder dependency reinstall");
