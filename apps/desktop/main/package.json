@@ -52,8 +52,16 @@
     "beforeBuild": "./scripts/before-build.mjs",
     "files": [
       "dist/**/*",
+      "!dist/**/*.app/**/*",
+      "!dist/mac*/**/*",
+      "!dist/*.dmg",
+      "!dist/*.dmg.blockmap",
+      "!dist/latest*.yml",
+      "!dist/builder-*.yml",
+      "!dist/.icon-icns/**/*",
       "package.json",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!node_modules/@openai/codex-*/vendor/**/*"
     ],
     "asarUnpack": [
       "**/node_modules/**/*.node",
@@ -80,6 +88,9 @@
     "mac": {
       "icon": "../resources/icon_rounded.png",
       "category": "public.app-category.developer-tools",
+      "additionalArguments": [
+        "--timestamp=none"
+      ],
       "target": [
         "dmg"
       ]
