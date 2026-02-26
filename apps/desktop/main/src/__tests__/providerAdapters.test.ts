@@ -7,7 +7,7 @@ describe("provider adapters", () => {
     const gemini = PROVIDER_ADAPTERS.gemini.getInstallCommand();
 
     expect(codex.command).toBe("npm");
-    expect(codex.args).toContain("@openai/codex-sdk");
+    expect(codex.args).toContain("@openai/codex");
     expect(gemini.args).toContain("@google/gemini-cli");
   });
 

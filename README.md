@@ -1,16 +1,16 @@
 # Code App
 
-Cross-platform Electron wrapper focused on Codex SDK with a Codex-inspired project/thread UI.
+Cross-platform Electron wrapper focused on Codex app server with a Codex-inspired project/thread UI.
 
 ## Features
 
 - Project sidebar with grouped thread lists
-- Codex SDK threads with live streaming activity
+- Codex app-server threads with live streaming activity
 - One isolated session per thread
 - Local persistence with SQLite + JSONL thread logs
-- Install doctor for Node/npm + Codex SDK health
+- Install doctor for Node/npm + Codex app-server health
 - Permission modes (`prompt_on_risk`, `always_ask`, `auto_allow`)
-- Environment variable settings for Codex SDK sessions
+- Environment variable settings for Codex sessions
 - Electron auto-update integration
 
 ## Workspace Layout
@@ -107,9 +107,9 @@ npm run test
 
 - Node.js 20+
 - npm available on PATH
-- Codex SDK authentication flow
+- Codex authentication flow
 
 ## Current Focus
 
-- Gemini is temporarily disabled while the Codex SDK flow is being finalized.
+- Gemini is temporarily disabled while the Codex app-server flow is being finalized.
 - The UI now prioritizes Codex-first workflows with a live activity feed (commands, file changes, reasoning, and tool calls).

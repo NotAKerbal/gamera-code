@@ -17,6 +17,7 @@ import { registerIpcHandlers } from "./ipc/registerHandlers";
 import { applyRuntimePathToProcessEnv } from "./utils/runtimeEnv";
 
 let mainWindow: BrowserWindow | null = null;
+let startupSplashWindow: BrowserWindow | null = null;
 let previewPopoutWindow: BrowserWindow | null = null;
 let gitPopoutWindow: BrowserWindow | null = null;
 let webLinkWindow: BrowserWindow | null = null;
@@ -25,6 +26,7 @@ let webLinkCurrentUrl: string | null = null;
 const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
 const PREVIEW_LOAD_BASE_DELAY_MS = 350;
 const APP_ICON_FILENAME = "icon_rounded.png";
+const MAIN_WINDOW_SPLASH_QUERY_KEY = "bootSplash";
 
 const resolveAppIconPath = (): string | undefined => {
   const devPath = resolve(__dirname, "../../resources", APP_ICON_FILENAME);
@@ -101,15 +103,101 @@ const escapeJsString = (value: string) =>
     .replace(/"/g, "\\\"")
     .replace(/\n/g, "\\n");
 
+const closeStartupSplashWindow = () => {
+  if (!startupSplashWindow || startupSplashWindow.isDestroyed()) {
+    startupSplashWindow = null;
+    return;
+  }
+  startupSplashWindow.close();
+  startupSplashWindow = null;
+};
+
+const ensureStartupSplashWindow = () => {
+  if (startupSplashWindow && !startupSplashWindow.isDestroyed()) {
+    return;
+  }
+
+  const iconDataUrl = getAppIconDataUrl(112);
+  startupSplashWindow = new BrowserWindow({
+    width: 340,
+    height: 300,
+    frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    movable: true,
+    show: false,
+    center: true,
+    backgroundColor: "#0b0d10",
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    transparent: false,
+    ...getBrowserWindowIcon(),
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false
+    }
+  });
+
+  const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #0b0d10;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        background: radial-gradient(circle at 50% 42%, #14181d 0%, #0b0d10 60%);
+      }
+      img {
+        width: 112px;
+        height: 112px;
+        border-radius: 24%;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+      }
+    </style>
+  </head>
+  <body>
+    <img src="${escapeHtml(iconDataUrl)}" alt="" />
+  </body>
+</html>`;
+
+  startupSplashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {
+    closeStartupSplashWindow();
+  });
+  startupSplashWindow.once("ready-to-show", () => {
+    if (!startupSplashWindow || startupSplashWindow.isDestroyed()) {
+      return;
+    }
+    startupSplashWindow.showInactive();
+  });
+  startupSplashWindow.on("closed", () => {
+    startupSplashWindow = null;
+  });
+};
+
 const createWindow = () => {
   const isMac = process.platform === "darwin";
   const isWindows = process.platform === "win32";
+
+  ensureStartupSplashWindow();
 
   mainWindow = new BrowserWindow({
     width: 1520,
     height: 980,
     minWidth: 1100,
     minHeight: 700,
+    show: false,
     frame: !isWindows,
     titleBarStyle: isMac ? "hiddenInset" : "default",
     titleBarOverlay: false,
@@ -129,6 +217,16 @@ const createWindow = () => {
       webviewTag: true
     }
   });
+
+  const revealMainWindow = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      closeStartupSplashWindow();
+      mainWindow.show();
+    }
+  };
+  mainWindow.once("ready-to-show", revealMainWindow);
+  mainWindow.webContents.once("did-finish-load", revealMainWindow);
+  mainWindow.webContents.once("did-fail-load", revealMainWindow);
 
   mainWindow.webContents.setWindowOpenHandler(({ frameName }) => {
     if (!frameName.startsWith("codeapp-terminal-")) {
@@ -155,8 +253,11 @@ const createWindow = () => {
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   if (devServerUrl) {
-    mainWindow.loadURL(devServerUrl).catch((error) => {
+    const nextUrl = new URL(devServerUrl);
+    nextUrl.searchParams.set(MAIN_WINDOW_SPLASH_QUERY_KEY, "1");
+    mainWindow.loadURL(nextUrl.toString()).catch((error) => {
       log.error("Failed to load dev server", error);
+      revealMainWindow();
     });
     mainWindow.webContents.openDevTools({ mode: "detach" });
     return;
@@ -165,8 +266,9 @@ const createWindow = () => {
   // In production, __dirname points to ".../Resources/app.asar/dist".
   // Renderer assets are copied to ".../Resources/app.asar/dist/renderer" at build time.
   const indexPath = resolve(__dirname, "./renderer/index.html");
-  mainWindow.loadFile(indexPath).catch((error) => {
+  mainWindow.loadFile(indexPath, { query: { [MAIN_WINDOW_SPLASH_QUERY_KEY]: "1" } }).catch((error) => {
     log.error("Failed to load renderer build", error);
+    revealMainWindow();
   });
 };
 

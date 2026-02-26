@@ -9,7 +9,6 @@ import type {
 } from "@code-app/shared";
 import { Repository } from "./repository";
 import { createCommandRunner, type CommandRunner } from "../utils/commandRunner";
-import { loadCodexSdk } from "./codexSdk";
 import { resolveCodexBinaryPath } from "../utils/codexBinary";
 import { resolveBundledRipgrepBinaryPath } from "../utils/ripgrepBinary";
 
@@ -65,7 +64,7 @@ export class InstallerManager {
     const npm = await existsInPath(this.runner, "npm", ["--version"]);
     const git = await existsInPath(this.runner, "git", ["--version"]);
     const rg = await existsInPath(this.runner, "rg", ["--version"]);
-    const codex = await this.checkCodexSdk();
+    const codex = await this.checkCodexAppServer();
     const bundledRg = resolveBundledRipgrepBinaryPath();
     const rgOk = rg.ok || Boolean(bundledRg);
 
@@ -106,8 +105,8 @@ export class InstallerManager {
       return {
         ok: true,
         logs: [
-          "Codex SDK is bundled with the desktop app. No Codex CLI installation is required.",
-          "If authentication is needed, the SDK will prompt on your first Codex thread prompt."
+          "Codex app server is bundled with the desktop app. No extra Codex CLI installation is required.",
+          "If authentication is needed, Codex will prompt during your first Codex thread prompt."
         ]
       };
     }
@@ -116,7 +115,7 @@ export class InstallerManager {
       return {
         ok: false,
         logs: [
-          "Gemini support is temporarily disabled while Codex SDK flow is being finalized.",
+          "Gemini support is temporarily disabled while Codex app-server flow is being finalized.",
           "Gemini will return as an SDK-backed provider in a follow-up update."
         ]
       };
@@ -380,53 +379,29 @@ export class InstallerManager {
     return [];
   }
 
-  private async checkCodexSdk(): Promise<{ ok: boolean; version?: string; message: string }> {
-    const version = this.readCodexSdkVersion();
-
-    try {
-      const { Codex } = await loadCodexSdk();
-      const codexPathOverride = resolveCodexBinaryPath();
-      const codex = new Codex(codexPathOverride ? { codexPathOverride } : {});
-      const authStatusMethod = (codex as Record<string, unknown>).authStatus as (() => Promise<unknown>) | undefined;
-
-      if (!authStatusMethod) {
-        return {
-          ok: true,
-          version,
-          message: "Codex SDK ready"
-        };
-      }
-
-      try {
-        const auth = await authStatusMethod.call(codex);
-        const record = auth && typeof auth === "object" ? (auth as Record<string, unknown>) : {};
-        const authenticated = typeof record.authenticated === "boolean" ? record.authenticated : undefined;
-
-        return {
-          ok: true,
-          version,
-          message: authenticated === false ? "Codex SDK ready (auth required)" : "Codex SDK ready"
-        };
-      } catch {
-        return {
-          ok: true,
-          version,
-          message: "Codex SDK ready (auth status unavailable)"
-        };
-      }
-    } catch (error) {
+  private async checkCodexAppServer(): Promise<{ ok: boolean; version?: string; message: string }> {
+    const version = this.readCodexVersion();
+    const binary = resolveCodexBinaryPath() || "codex";
+    const result = await this.runner.run(binary, ["app-server", "--help"]);
+    if (result.code !== 0) {
       return {
         ok: false,
         version,
-        message: error instanceof Error ? error.message : "Failed to load Codex SDK"
+        message: result.stderr || "Failed to start Codex app server"
       };
     }
+
+    return {
+      ok: true,
+      version,
+      message: "Codex app server ready"
+    };
   }
 
-  private readCodexSdkVersion(): string | undefined {
+  private readCodexVersion(): string | undefined {
     try {
-      const sdkEntry = require.resolve("@openai/codex-sdk");
-      const packageJsonPath = join(dirname(dirname(sdkEntry)), "package.json");
+      const codexEntry = require.resolve("@openai/codex/package.json");
+      const packageJsonPath = join(dirname(codexEntry), "package.json");
       const raw = readFileSync(packageJsonPath, "utf8");
       const parsed = JSON.parse(raw) as { version?: string };
       return parsed.version;

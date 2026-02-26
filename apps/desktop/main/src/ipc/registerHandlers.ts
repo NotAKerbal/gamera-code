@@ -1,7 +1,8 @@
 import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { basename, join, relative, resolve } from "node:path";
 import {
   IPC_CHANNELS,
   type CodexThreadOptions,
@@ -47,7 +48,22 @@ export interface HandlerDeps {
 }
 
 export const registerIpcHandlers = (deps: HandlerDeps) => {
+  const FILE_INDEX_DEFAULT_LIMIT = 3000;
+  const FILE_INDEX_MAX_LIMIT = 8000;
+  const FILE_INDEX_IGNORED_DIRS = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "out",
+    "coverage",
+    ".next",
+    ".turbo",
+    ".cache"
+  ]);
   const gitDiscardChannel = (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
+  const projectsListFilesChannel =
+    (IPC_CHANNELS as Record<string, string>).projectsListFiles ?? "projects:listFiles";
   const gitGetOutgoingCommitsChannel =
     (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
   const normalizePath = (path: string) => resolve(path);
@@ -62,6 +78,69 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
       throw new Error("Project not found");
     }
     return project.path;
+  };
+
+  const listProjectFiles = async (projectPath: string, requestedLimit?: number) => {
+    const limit =
+      typeof requestedLimit === "number" && Number.isFinite(requestedLimit)
+        ? Math.max(1, Math.min(FILE_INDEX_MAX_LIMIT, Math.floor(requestedLimit)))
+        : FILE_INDEX_DEFAULT_LIMIT;
+    const paths = [projectPath];
+    const files: Array<{ path: string; updatedAtMs: number }> = [];
+
+    while (paths.length > 0 && files.length < limit) {
+      const currentDir = paths.pop();
+      if (!currentDir) {
+        continue;
+      }
+
+      let entries: Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }>;
+      try {
+        entries = await readdir(currentDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (FILE_INDEX_IGNORED_DIRS.has(entry.name)) {
+            continue;
+          }
+          paths.push(join(currentDir, entry.name));
+          continue;
+        }
+
+        if (!entry.isFile()) {
+          continue;
+        }
+
+        const absolutePath = join(currentDir, entry.name);
+        const relativePath = relative(projectPath, absolutePath).replace(/\\/g, "/");
+        if (!relativePath || relativePath.startsWith("../")) {
+          continue;
+        }
+
+        let updatedAtMs = 0;
+        try {
+          const fileStats = await stat(absolutePath);
+          updatedAtMs = Number.isFinite(fileStats.mtimeMs) ? fileStats.mtimeMs : 0;
+        } catch {
+          // Ignore stat errors for files that disappear during indexing.
+        }
+
+        files.push({
+          path: relativePath,
+          updatedAtMs
+        });
+
+        if (files.length >= limit) {
+          break;
+        }
+      }
+    }
+
+    files.sort((left, right) => right.updatedAtMs - left.updatedAtMs || left.path.localeCompare(right.path));
+    return files;
   };
 
   const openNativeTerminal = (cwd: string) => {
@@ -223,6 +302,11 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return { ok: true };
   });
 
+  ipcMain.handle(projectsListFilesChannel, async (_event, input: { projectId: string; limit?: number }) => {
+    const projectPath = getProjectPath(input.projectId);
+    return listProjectFiles(projectPath, input.limit);
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.projectsOpenWebLink,
     async (_event, input: { url: string; name?: string; projectName?: string; focus?: boolean }) => {
@@ -316,6 +400,15 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return deps.repository.archiveThread(input.id, input.archived);
   });
 
+  const threadsForkChannel = (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
+  ipcMain.handle(threadsForkChannel, async (_event, input: { id: string }) => {
+    const forked = await deps.sessionManager.forkThread(input.id);
+    if (!forked) {
+      throw new Error("Thread not found.");
+    }
+    return forked;
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.threadsEvents,
     async (_event, input: { threadId: string; beforeStreamSeq?: number; userPromptCount?: number }) => {
@@ -346,11 +439,70 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(
     IPC_CHANNELS.sessionsSendInput,
-    async (_event, input: { threadId: string; input: string; options?: CodexThreadOptions; attachments?: PromptAttachment[] }) => {
-      const ok = await deps.sessionManager.sendInput(input.threadId, input.input, input.options, input.attachments);
+    async (
+      _event,
+      input: {
+        threadId: string;
+        input: string;
+        options?: CodexThreadOptions;
+        attachments?: PromptAttachment[];
+        skills?: Array<{ name: string; path: string }>;
+      }
+    ) => {
+      const ok = await deps.sessionManager.sendInput(
+        input.threadId,
+        input.input,
+        input.options,
+        input.attachments,
+        input.skills
+      );
       return { ok };
     }
   );
+
+  const sessionsSteerChannel = (IPC_CHANNELS as Record<string, string>).sessionsSteer ?? "sessions:steer";
+  ipcMain.handle(
+    sessionsSteerChannel,
+    async (
+      _event,
+      input: {
+        threadId: string;
+        input: string;
+        attachments?: PromptAttachment[];
+        skills?: Array<{ name: string; path: string }>;
+      }
+    ) => {
+      const ok = await deps.sessionManager.steerInput(input.threadId, input.input, input.attachments, input.skills);
+      return { ok };
+    }
+  );
+
+  const sessionsSubmitUserInputChannel =
+    (IPC_CHANNELS as Record<string, string>).sessionsSubmitUserInput ?? "sessions:submitUserInput";
+  ipcMain.handle(
+    sessionsSubmitUserInputChannel,
+    async (_event, input: { threadId: string; requestId: string; answersByQuestionId: Record<string, string> }) => {
+      const ok = await deps.sessionManager.submitUserInputAnswers(
+        input.threadId,
+        input.requestId,
+        input.answersByQuestionId
+      );
+      return { ok };
+    }
+  );
+
+  const sessionsCompactChannel = (IPC_CHANNELS as Record<string, string>).sessionsCompact ?? "sessions:compact";
+  ipcMain.handle(sessionsCompactChannel, async (_event, input: { threadId: string }) => {
+    const ok = await deps.sessionManager.compactThread(input.threadId);
+    return { ok };
+  });
+
+  const sessionsReviewCommitChannel =
+    (IPC_CHANNELS as Record<string, string>).sessionsReviewCommit ?? "sessions:reviewCommit";
+  ipcMain.handle(sessionsReviewCommitChannel, async (_event, input: { threadId: string; sha: string; title?: string }) => {
+    const ok = await deps.sessionManager.reviewCommit(input.threadId, input.sha, input.title);
+    return { ok };
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.sessionsGenerateThreadMetadata,
@@ -509,6 +661,31 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(IPC_CHANNELS.gitClosePopout, async () => {
     return deps.gitPopout.close();
+  });
+
+  const skillsListChannel = (IPC_CHANNELS as Record<string, string>).skillsList ?? "skills:list";
+  ipcMain.handle(skillsListChannel, async (_event, input?: { projectId?: string }) => {
+    return deps.sessionManager.listSkills(input?.projectId);
+  });
+
+  const skillsSetEnabledChannel = (IPC_CHANNELS as Record<string, string>).skillsSetEnabled ?? "skills:setEnabled";
+  ipcMain.handle(skillsSetEnabledChannel, async (_event, input: { projectId?: string; path: string; enabled: boolean }) => {
+    const ok = await deps.sessionManager.setSkillEnabled(input.projectId, input.path, input.enabled);
+    return { ok };
+  });
+
+  const skillsReadDocumentChannel =
+    (IPC_CHANNELS as Record<string, string>).skillsReadDocument ?? "skills:readDocument";
+  ipcMain.handle(skillsReadDocumentChannel, async (_event, input: { path: string }) => {
+    const content = await readFile(input.path, "utf8");
+    return { content };
+  });
+
+  const skillsWriteDocumentChannel =
+    (IPC_CHANNELS as Record<string, string>).skillsWriteDocument ?? "skills:writeDocument";
+  ipcMain.handle(skillsWriteDocumentChannel, async (_event, input: { path: string; content: string }) => {
+    await writeFile(input.path, input.content, "utf8");
+    return { ok: true };
   });
 
   return {

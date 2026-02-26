@@ -17,6 +17,7 @@ export const initializeDatabase = (dbPath: string) => {
     CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
+      parent_thread_id TEXT,
       title TEXT NOT NULL,
       provider TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -132,6 +133,14 @@ export const initializeDatabase = (dbPath: string) => {
   const hasAttachmentsJsonColumn = messageEventColumns.some((column) => column.name === "attachments_json");
   if (!hasAttachmentsJsonColumn) {
     db.exec("ALTER TABLE message_events ADD COLUMN attachments_json TEXT;");
+  }
+
+  const threadColumns = db
+    .prepare("PRAGMA table_info(threads)")
+    .all() as Array<{ name: string }>;
+  const hasParentThreadIdColumn = threadColumns.some((column) => column.name === "parent_thread_id");
+  if (!hasParentThreadIdColumn) {
+    db.exec("ALTER TABLE threads ADD COLUMN parent_thread_id TEXT;");
   }
 
   return db;

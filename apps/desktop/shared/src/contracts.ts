@@ -11,6 +11,7 @@ import type {
   InstallDependencyKey,
   InstallStatus,
   MessageEvent,
+  ProjectFileEntry,
   PreviewEvent,
   ThreadEventsPage,
   PermissionMode,
@@ -23,6 +24,7 @@ import type {
   RiskCheck,
   Session,
   SessionEvent,
+  SkillRecord,
   ThreadMetadataSuggestion,
   Thread,
   UpdateCheckResult
@@ -41,6 +43,7 @@ export interface DesktopApi {
     pickPath: () => Promise<string | null>;
     openTerminal: (input: { projectId: string }) => Promise<{ ok: boolean }>;
     openFiles: (input: { projectId: string }) => Promise<{ ok: boolean }>;
+    listFiles: (input: { projectId: string; limit?: number }) => Promise<ProjectFileEntry[]>;
     openWebLink: (input: { url: string; name?: string; projectName?: string; focus?: boolean }) => Promise<{ ok: boolean }>;
     getWebLinkState: () => Promise<{ open: boolean; url?: string }>;
   };
@@ -77,6 +80,7 @@ export interface DesktopApi {
     create: (input: { projectId: string; title: string; provider: Provider }) => Promise<Thread>;
     update: (input: { id: string; title?: string; provider?: Provider; status?: Thread["status"] }) => Promise<Thread>;
     archive: (input: { id: string; archived: boolean }) => Promise<Thread>;
+    fork: (input: { id: string }) => Promise<Thread>;
     events: (input: {
       threadId: string;
       beforeStreamSeq?: number;
@@ -91,7 +95,21 @@ export interface DesktopApi {
       input: string;
       options?: CodexThreadOptions;
       attachments?: PromptAttachment[];
+      skills?: Array<{ name: string; path: string }>;
     }) => Promise<{ ok: boolean }>;
+    steer: (input: {
+      threadId: string;
+      input: string;
+      attachments?: PromptAttachment[];
+      skills?: Array<{ name: string; path: string }>;
+    }) => Promise<{ ok: boolean }>;
+    submitUserInput: (input: {
+      threadId: string;
+      requestId: string;
+      answersByQuestionId: Record<string, string>;
+    }) => Promise<{ ok: boolean }>;
+    compact: (input: { threadId: string }) => Promise<{ ok: boolean }>;
+    reviewCommit: (input: { threadId: string; sha: string; title?: string }) => Promise<{ ok: boolean }>;
     generateThreadMetadata: (input: {
       threadId: string;
       input: string;
@@ -143,5 +161,11 @@ export interface DesktopApi {
     createBranch: (input: { projectId: string; branch: string; checkout?: boolean }) => Promise<GitCommandResult>;
     openPopout: (input: { projectId: string; projectName?: string }) => Promise<{ ok: boolean }>;
     closePopout: () => Promise<{ ok: boolean }>;
+  };
+  skills: {
+    list: (input?: { projectId?: string }) => Promise<SkillRecord[]>;
+    setEnabled: (input: { projectId?: string; path: string; enabled: boolean }) => Promise<{ ok: boolean }>;
+    readDocument: (input: { path: string }) => Promise<{ content: string }>;
+    writeDocument: (input: { path: string; content: string }) => Promise<{ ok: boolean }>;
   };
 }

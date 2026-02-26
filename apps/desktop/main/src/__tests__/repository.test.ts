@@ -110,6 +110,43 @@ describeRepository("Repository", () => {
     expect(listed[1]?.id).toBe(older.id);
   });
 
+  it("assigns stream sequence numbers without querying max on every append", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-stream-seq-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-stream-seq" });
+    const thread = repo.createThread({ projectId: project.id, title: "seq", provider: "codex" });
+
+    const first = repo.appendMessage({
+      threadId: thread.id,
+      role: "user",
+      content: "first"
+    });
+    const second = repo.appendMessage({
+      threadId: thread.id,
+      role: "assistant",
+      content: "second"
+    });
+    const manual = repo.appendMessage({
+      threadId: thread.id,
+      role: "system",
+      content: "manual",
+      streamSeq: 10
+    });
+    const afterManual = repo.appendMessage({
+      threadId: thread.id,
+      role: "assistant",
+      content: "after manual"
+    });
+
+    expect(first.streamSeq).toBe(1);
+    expect(second.streamSeq).toBe(2);
+    expect(manual.streamSeq).toBe(10);
+    expect(afterManual.streamSeq).toBe(11);
+  });
+
   it("seeds and updates project settings", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-app-project-settings-"));
     const paths = createAppPaths(dir);

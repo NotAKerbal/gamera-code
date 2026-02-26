@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   useTurtleSpinners: false,
   projectTerminalSwitchBehaviorDefault: "start_stop",
   codexDefaults: {
-    collaborationMode: "coding",
+    collaborationMode: "plan",
     sandboxMode: "workspace-write",
     modelReasoningEffort: "medium",
     webSearchMode: "cached",
@@ -56,6 +56,7 @@ interface ProjectRow {
 interface ThreadRow {
   id: string;
   project_id: string;
+  parent_thread_id: string | null;
   title: string;
   provider: Provider;
   status: ThreadStatus;
@@ -116,6 +117,7 @@ const mapProject = (row: ProjectRow): Project => ({
 const mapThread = (row: ThreadRow): Thread => ({
   id: row.id,
   projectId: row.project_id,
+  parentThreadId: row.parent_thread_id ?? undefined,
   title: row.title,
   provider: row.provider,
   status: row.status,
@@ -304,6 +306,8 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
 };
 
 export class Repository {
+  private readonly streamSequenceCache = new Map<string, number>();
+
   constructor(
     private readonly db: Database.Database,
     private readonly paths: AppPaths
@@ -546,11 +550,12 @@ export class Repository {
     return row ? mapThread(row) : null;
   }
 
-  createThread(input: { projectId: string; title: string; provider: Provider }): Thread {
+  createThread(input: { projectId: string; title: string; provider: Provider; parentThreadId?: string }): Thread {
     const now = new Date().toISOString();
     const thread: Thread = {
       id: randomUUID(),
       projectId: input.projectId,
+      parentThreadId: input.parentThreadId,
       title: input.title,
       provider: input.provider,
       status: "created",
@@ -560,8 +565,8 @@ export class Repository {
 
     this.db
       .prepare(
-        `INSERT INTO threads (id, project_id, title, provider, status, created_at, updated_at)
-         VALUES (@id, @projectId, @title, @provider, @status, @createdAt, @updatedAt)`
+        `INSERT INTO threads (id, project_id, parent_thread_id, title, provider, status, created_at, updated_at)
+         VALUES (@id, @projectId, @parentThreadId, @title, @provider, @status, @createdAt, @updatedAt)`
       )
       .run(thread);
 
@@ -650,6 +655,10 @@ export class Repository {
   appendMessage(input: Omit<MessageEvent, "id" | "streamSeq" | "ts"> & { ts?: string; streamSeq?: number }): MessageEvent {
     const ts = input.ts ?? new Date().toISOString();
     const nextStreamSeq = input.streamSeq ?? this.nextStreamSequence(input.threadId);
+    const cachedMax = this.streamSequenceCache.get(input.threadId) ?? 0;
+    if (nextStreamSeq > cachedMax) {
+      this.streamSequenceCache.set(input.threadId, nextStreamSeq);
+    }
 
     const event: MessageEvent = {
       id: randomUUID(),
@@ -773,9 +782,15 @@ export class Repository {
   }
 
   nextStreamSequence(threadId: string): number {
+    const cached = this.streamSequenceCache.get(threadId);
+    if (cached !== undefined) {
+      return cached + 1;
+    }
+
     const row = this.db
       .prepare("SELECT COALESCE(MAX(stream_seq), 0) AS max_seq FROM message_events WHERE thread_id = ?")
       .get(threadId) as { max_seq: number };
+    this.streamSequenceCache.set(threadId, row.max_seq);
 
     return row.max_seq + 1;
   }

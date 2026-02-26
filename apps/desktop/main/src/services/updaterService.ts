@@ -6,7 +6,7 @@ export class UpdaterService {
   private readonly enabled: boolean;
 
   constructor() {
-    this.enabled = !app.isPackaged ? false : true;
+    this.enabled = app.isPackaged;
     autoUpdater.autoDownload = false;
   }
 

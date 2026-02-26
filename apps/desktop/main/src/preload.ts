@@ -3,11 +3,34 @@ import { IPC_CHANNELS, type DesktopApi, type PreviewEvent, type ProjectTerminalE
 
 const settingsOpenWindowChannel =
   (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
+const projectsListFilesChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsListFiles ?? "projects:listFiles";
 const gitDiscardChannel =
   (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
 const gitGetOutgoingCommitsChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
+const threadsForkChannel =
+  (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
+const sessionsSteerChannel =
+  (IPC_CHANNELS as Record<string, string>).sessionsSteer ?? "sessions:steer";
+const sessionsSubmitUserInputChannel =
+  (IPC_CHANNELS as Record<string, string>).sessionsSubmitUserInput ?? "sessions:submitUserInput";
+const sessionsCompactChannel =
+  (IPC_CHANNELS as Record<string, string>).sessionsCompact ?? "sessions:compact";
+const sessionsReviewCommitChannel =
+  (IPC_CHANNELS as Record<string, string>).sessionsReviewCommit ?? "sessions:reviewCommit";
+const skillsListChannel =
+  (IPC_CHANNELS as Record<string, string>).skillsList ?? "skills:list";
+const skillsSetEnabledChannel =
+  (IPC_CHANNELS as Record<string, string>).skillsSetEnabled ?? "skills:setEnabled";
+const skillsReadDocumentChannel =
+  (IPC_CHANNELS as Record<string, string>).skillsReadDocument ?? "skills:readDocument";
+const skillsWriteDocumentChannel =
+  (IPC_CHANNELS as Record<string, string>).skillsWriteDocument ?? "skills:writeDocument";
 type DesktopApiWithGitExtras = DesktopApi & {
+  projects: DesktopApi["projects"] & {
+    listFiles: (input: { projectId: string; limit?: number }) => Promise<Array<{ path: string; updatedAtMs: number }>>;
+  };
   git: DesktopApi["git"] & {
     discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
@@ -27,6 +50,7 @@ const api: DesktopApiWithGitExtras = {
     pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath),
     openTerminal: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenTerminal, input),
     openFiles: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenFiles, input),
+    listFiles: (input: { projectId: string; limit?: number }) => ipcRenderer.invoke(projectsListFilesChannel, input),
     openWebLink: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenWebLink, input),
     getWebLinkState: () => ipcRenderer.invoke(IPC_CHANNELS.projectsGetWebLinkState)
   },
@@ -61,12 +85,17 @@ const api: DesktopApiWithGitExtras = {
     create: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsCreate, input),
     update: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsUpdate, input),
     archive: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsArchive, input),
+    fork: (input) => ipcRenderer.invoke(threadsForkChannel, input),
     events: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsEvents, input)
   },
   sessions: {
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsStart, input),
     stop: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsStop, input),
     sendInput: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsSendInput, input),
+    steer: (input) => ipcRenderer.invoke(sessionsSteerChannel, input),
+    submitUserInput: (input) => ipcRenderer.invoke(sessionsSubmitUserInputChannel, input),
+    compact: (input) => ipcRenderer.invoke(sessionsCompactChannel, input),
+    reviewCommit: (input) => ipcRenderer.invoke(sessionsReviewCommitChannel, input),
     generateThreadMetadata: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsGenerateThreadMetadata, input),
     resize: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsResize, input),
     onEvent: (listener) => {
@@ -122,6 +151,12 @@ const api: DesktopApiWithGitExtras = {
     createBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCreateBranch, input),
     openPopout: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitOpenPopout, input),
     closePopout: () => ipcRenderer.invoke(IPC_CHANNELS.gitClosePopout)
+  },
+  skills: {
+    list: (input) => ipcRenderer.invoke(skillsListChannel, input),
+    setEnabled: (input) => ipcRenderer.invoke(skillsSetEnabledChannel, input),
+    readDocument: (input) => ipcRenderer.invoke(skillsReadDocumentChannel, input),
+    writeDocument: (input) => ipcRenderer.invoke(skillsWriteDocumentChannel, input)
   }
 };
 

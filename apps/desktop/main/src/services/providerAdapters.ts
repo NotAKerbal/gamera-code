@@ -54,6 +54,6 @@ const createAdapter = (
 });
 
 export const PROVIDER_ADAPTERS: Record<Provider, ProviderAdapter> = {
-  codex: createAdapter("codex", "@openai/codex-sdk", "codex"),
+  codex: createAdapter("codex", "@openai/codex", "codex"),
   gemini: createAdapter("gemini", "@google/gemini-cli", "gemini")
 };

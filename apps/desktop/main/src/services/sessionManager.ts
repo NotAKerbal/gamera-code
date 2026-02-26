@@ -9,13 +9,14 @@ import type {
   Session,
   SessionEvent,
   SessionEventType,
+  SkillRecord,
   Thread,
   ThreadMetadataSuggestion
 } from "@code-app/shared";
 import { PROVIDER_ADAPTERS } from "./providerAdapters";
 import { Repository } from "./repository";
 import { PermissionEngine } from "./permissionEngine";
-import { loadCodexSdk, extractCodexResponseText } from "./codexSdk";
+import { CodexAppServerClient } from "./codexAppServer";
 import { sanitizePtyOutput } from "../utils/stripAnsi";
 import { createCommandRunner } from "../utils/commandRunner";
 import { withRuntimePath } from "../utils/runtimeEnv";
@@ -33,11 +34,13 @@ interface RunningPtySession {
 }
 
 interface RunningCodexSession {
-  kind: "codex_sdk";
+  kind: "codex_app_server";
   threadId: string;
-  sdkThread: UnknownRecord;
+  appServer: CodexAppServerClient;
+  providerThreadId: string;
   runQueue: Promise<void>;
   cwd: string;
+  threadOptions: ReturnType<typeof normalizeCodexThreadOptions>;
   optionsKey: string;
 }
 
@@ -48,7 +51,12 @@ interface StoredAttachment {
   path: string;
 }
 
-type CodexInput = string | Array<{ type: "text"; text: string } | { type: "local_image"; path: string }>;
+type CodexInputItem =
+  | { type: "text"; text: string }
+  | { type: "local_image"; path: string }
+  | { type: "skill"; name: string; path: string }
+  | { type: "mention"; name: string; path: string };
+type CodexInput = string | CodexInputItem[];
 
 type RunningSession = RunningPtySession | RunningCodexSession;
 
@@ -73,10 +81,6 @@ const asString = (value: unknown): string | null => {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-};
-
-const hasAsyncIterator = (value: unknown): value is AsyncIterable<unknown> => {
-  return Boolean(value && typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function");
 };
 
 const isCodexModelReasoningEffort = (value: unknown): value is NonNullable<CodexThreadOptions["modelReasoningEffort"]> =>
@@ -119,7 +123,7 @@ const normalizeCodexThreadOptions = (
     skipGitRepoCheck: true;
   } => {
   const model = normalizeCodexModel(asString(options?.model));
-  const collaborationMode = isCodexCollaborationMode(options?.collaborationMode) ? options.collaborationMode : "coding";
+  const collaborationMode = isCodexCollaborationMode(options?.collaborationMode) ? options.collaborationMode : "plan";
   const sandboxMode = isCodexSandboxMode(options?.sandboxMode) ? options.sandboxMode : "workspace-write";
   const modelReasoningEffort = isCodexModelReasoningEffort(options?.modelReasoningEffort)
     ? options.modelReasoningEffort
@@ -270,6 +274,16 @@ const describeRuntimeError = (error: unknown) => {
   return `${error.message} (${details.join(", ")})`;
 };
 
+const isRecoverableCodexResumeError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("no rollout found for thread id") ||
+    message.includes("failed to load rollout") ||
+    message.includes("empty session file") ||
+    message.includes("session file")
+  );
+};
+
 const extractCommandText = (item: UnknownRecord): string => {
   const direct = asString(item.command);
   if (direct) {
@@ -418,6 +432,14 @@ const classifyToolIntent = (tool: string): "read" | "write" | "other" => {
   return "other";
 };
 
+const isUserInputRequestTool = (tool: string | null) => {
+  if (!tool) {
+    return false;
+  }
+  const normalized = tool.trim().toLowerCase();
+  return normalized === "request_user_input" || normalized.endsWith(".request_user_input");
+};
+
 const ACTIVITY_EVENT_PREFIX = "__codeapp_activity__:";
 
 const shouldPersistActivityEvent = (type: SessionEventType, data?: Record<string, unknown>) => {
@@ -471,6 +493,104 @@ interface ChangedFile extends DiffData {
   kind: string;
 }
 
+interface UserInputOption {
+  label: string;
+  description?: string;
+}
+
+interface UserInputQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options: UserInputOption[];
+}
+
+const parseJsonRecord = (value: string): UnknownRecord | null => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return asRecord(parsed);
+  } catch {
+    return null;
+  }
+};
+
+const readToolInputRecord = (item: UnknownRecord): UnknownRecord | null => {
+  const candidates = [item.input, item.arguments, item.params, item.parameters];
+  for (const candidate of candidates) {
+    const fromRecord = asRecord(candidate);
+    if (fromRecord) {
+      return fromRecord;
+    }
+
+    const fromString = asString(candidate);
+    if (!fromString) {
+      continue;
+    }
+    const parsed = parseJsonRecord(fromString);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const extractUserInputQuestions = (item: UnknownRecord): UserInputQuestion[] => {
+  const input = readToolInputRecord(item);
+  const itemIdPrefix = asString(item.id) ?? "request";
+  const questionsRaw = Array.isArray(input?.questions)
+    ? input.questions
+    : Array.isArray(item.questions)
+      ? item.questions
+      : [];
+  const questions: UserInputQuestion[] = [];
+
+  questionsRaw.forEach((question, index) => {
+    const row = asRecord(question);
+    if (!row) {
+      return;
+    }
+
+    const prompt = asString(row.question);
+    if (!prompt) {
+      return;
+    }
+
+    const header = asString(row.header) ?? `Question ${index + 1}`;
+    const id = asString(row.id) ?? `${itemIdPrefix}_question_${index + 1}`;
+    const optionsRaw = Array.isArray(row.options) ? row.options : [];
+    const options: UserInputOption[] = [];
+
+    optionsRaw.forEach((option) => {
+      const optionRow = asRecord(option);
+      if (!optionRow) {
+        return;
+      }
+      const label = asString(optionRow.label);
+      if (!label) {
+        return;
+      }
+      options.push({
+        label,
+        description: asString(optionRow.description) ?? undefined
+      });
+    });
+
+    questions.push({
+      id,
+      header,
+      question: prompt,
+      options
+    });
+  });
+
+  return questions;
+};
+
 export class SessionManager {
   private readonly sessions = new Map<string, RunningSession>();
   private readonly gitRepoCache = new Map<string, boolean>();
@@ -487,10 +607,15 @@ export class SessionManager {
 
       const normalizedOptions = normalizeCodexThreadOptions(projectPath, options ?? this.deps.repository.getSettings().codexDefaults);
       const nextOptionsKey = codexThreadOptionsKey(normalizedOptions);
-      if (existingRuntime.kind === "codex_sdk" && existingRuntime.optionsKey === nextOptionsKey) {
+      if (existingRuntime.kind === "codex_app_server" && existingRuntime.optionsKey === nextOptionsKey) {
         return existing;
       }
 
+      if (existingRuntime.kind === "codex_app_server") {
+        void existingRuntime.appServer.close();
+      }
+      this.deps.repository.stopSession(thread.id);
+      this.deps.permissionEngine.clearThreadApprovals(thread.id);
       this.sessions.delete(thread.id);
     }
 
@@ -512,11 +637,12 @@ export class SessionManager {
       return false;
     }
 
-    if (running.kind === "codex_sdk") {
+    if (running.kind === "codex_app_server") {
+      void running.appServer.close();
       this.deps.repository.stopSession(threadId);
       this.deps.permissionEngine.clearThreadApprovals(threadId);
       this.sessions.delete(threadId);
-      this.emitSessionEvent(threadId, "status", "Codex SDK session stopped", {
+      this.emitSessionEvent(threadId, "status", "Codex app server session stopped", {
         provider: "codex",
         phase: "stopped"
       });
@@ -555,7 +681,8 @@ export class SessionManager {
     threadId: string,
     input: string,
     options?: CodexThreadOptions,
-    attachments?: PromptAttachment[]
+    attachments?: PromptAttachment[],
+    skills?: Array<{ name: string; path: string }>
   ): Promise<boolean> {
     const thread = this.deps.repository.getThread(threadId);
     if (!thread) {
@@ -569,7 +696,13 @@ export class SessionManager {
       return false;
     }
 
-    const running = this.sessions.get(threadId) ?? (await this.startOrResumeRuntime(thread, cwd, options));
+    let running = this.sessions.get(threadId);
+    if (thread.provider === "codex") {
+      await this.start(thread, cwd, options);
+      running = this.sessions.get(threadId);
+    } else {
+      running = running ?? ((await this.startOrResumeRuntime(thread, cwd, options)) ?? undefined);
+    }
     if (!running) {
       return false;
     }
@@ -590,15 +723,15 @@ export class SessionManager {
       return true;
     }
 
-    const codexInput = this.buildCodexInput(input, savedAttachments);
+    const codexInput = this.buildCodexInput(input, savedAttachments, skills ?? []);
     running.runQueue = running.runQueue
-      .then(() => this.runCodexPrompt(running, codexInput))
+      .then(() => this.runCodexPromptWithRecovery(running, codexInput))
       .catch((error) => {
         this.deps.repository.setThreadErrored(threadId);
         this.emitSessionEvent(
           threadId,
           "stderr",
-          `Codex SDK run failed: ${describeRuntimeError(error)}`,
+          `Codex run failed: ${describeRuntimeError(error)}`,
           {
             provider: "codex",
             phase: "failed"
@@ -607,6 +740,274 @@ export class SessionManager {
       });
 
     return true;
+  }
+
+  async steerInput(
+    threadId: string,
+    input: string,
+    attachments?: PromptAttachment[],
+    skills?: Array<{ name: string; path: string }>
+  ): Promise<boolean> {
+    const thread = this.deps.repository.getThread(threadId);
+    if (!thread || thread.provider !== "codex") {
+      return false;
+    }
+
+    const running = this.sessions.get(threadId);
+    if (!running || running.kind !== "codex_app_server") {
+      return false;
+    }
+
+    const savedAttachments = this.persistPromptAttachments(threadId, attachments ?? []);
+    const codexInput = this.buildCodexInput(input, savedAttachments, skills ?? []);
+    const inputItems: CodexInputItem[] =
+      typeof codexInput === "string" ? [{ type: "text", text: codexInput }] : codexInput;
+    await running.appServer.steerTurn(inputItems);
+
+    this.deps.repository.appendMessage({
+      threadId,
+      role: "user",
+      content: input.trim(),
+      attachments: this.normalizePromptAttachmentsForMessage(attachments ?? []),
+      ts: new Date().toISOString()
+    });
+    this.emitSessionEvent(threadId, "progress", "Steering active turn...", {
+      provider: "codex",
+      phase: "running",
+      category: "turn"
+    });
+
+    return true;
+  }
+
+  async submitUserInputAnswers(
+    threadId: string,
+    requestId: string,
+    answersByQuestionId: Record<string, string>
+  ): Promise<boolean> {
+    const running = this.sessions.get(threadId);
+    if (!running || running.kind !== "codex_app_server") {
+      return false;
+    }
+
+    const answers = Object.fromEntries(
+      Object.entries(answersByQuestionId).map(([questionId, answer]) => [questionId, { answers: [answer] }])
+    );
+    await running.appServer.submitUserInputAnswers(requestId, answers);
+    return true;
+  }
+
+  async compactThread(threadId: string): Promise<boolean> {
+    const thread = this.deps.repository.getThread(threadId);
+    if (!thread || thread.provider !== "codex") {
+      return false;
+    }
+
+    const providerThreadId = this.deps.repository.getProviderThreadId(threadId, "codex");
+    if (!providerThreadId) {
+      return false;
+    }
+
+    const running = this.sessions.get(threadId);
+    if (running && running.kind === "codex_app_server") {
+      await running.appServer.compactThread(providerThreadId);
+    } else {
+      const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
+      const appServer = new CodexAppServerClient({
+        executablePath: resolveCodexBinaryPath(),
+        env,
+        threadId: thread.id
+      });
+      await appServer.connect();
+      try {
+        await appServer.compactThread(providerThreadId);
+      } finally {
+        await appServer.close();
+      }
+    }
+
+    this.emitSessionEvent(threadId, "progress", "Context compaction started", {
+      provider: "codex",
+      phase: "running",
+      category: "context_compaction"
+    });
+    return true;
+  }
+
+  async forkThread(threadId: string): Promise<Thread | null> {
+    const sourceThread = this.deps.repository.getThread(threadId);
+    if (!sourceThread) {
+      return null;
+    }
+
+    const forked = this.deps.repository.createThread({
+      projectId: sourceThread.projectId,
+      title: `${sourceThread.title} (fork)`,
+      provider: sourceThread.provider,
+      parentThreadId: sourceThread.id
+    });
+
+    if (sourceThread.provider !== "codex") {
+      return forked;
+    }
+
+    const sourceProviderThreadId = this.deps.repository.getProviderThreadId(sourceThread.id, "codex");
+    if (!sourceProviderThreadId) {
+      return forked;
+    }
+
+    const project = this.deps.repository.getProject(sourceThread.projectId);
+    if (!project) {
+      return forked;
+    }
+
+    const options = normalizeCodexThreadOptions(project.path, this.deps.repository.getSettings().codexDefaults);
+    const { env } = this.buildThreadEnv(forked.id, sourceThread.projectId, sourceThread.provider);
+    const appServer = new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: forked.id
+    });
+    await appServer.connect();
+    try {
+      const forkedProviderThreadId = await appServer.forkThread(sourceProviderThreadId, options);
+      this.deps.repository.setProviderThreadId(forked.id, "codex", forkedProviderThreadId);
+    } finally {
+      await appServer.close();
+    }
+
+    return forked;
+  }
+
+  async reviewCommit(threadId: string, sha: string, title?: string): Promise<boolean> {
+    const thread = this.deps.repository.getThread(threadId);
+    if (!thread || thread.provider !== "codex") {
+      return false;
+    }
+
+    const sessionRecord = this.deps.repository.getSession(threadId);
+    const project = this.deps.repository.getProject(thread.projectId);
+    const cwd = this.sessions.get(threadId)?.cwd ?? sessionRecord?.cwd ?? project?.path;
+    if (!cwd) {
+      return false;
+    }
+
+    const running = this.sessions.get(threadId) ?? (await this.startOrResumeRuntime(thread, cwd, undefined));
+    if (!running || running.kind !== "codex_app_server") {
+      return false;
+    }
+
+    running.runQueue = running.runQueue
+      .then(() =>
+        this.runCodexReview(
+          running,
+          {
+            type: "commit",
+            sha,
+            title: title ?? null
+          },
+          "inline"
+        )
+      )
+      .catch((error) => {
+        this.deps.repository.setThreadErrored(threadId);
+        this.emitSessionEvent(threadId, "stderr", `Codex review failed: ${describeRuntimeError(error)}`, {
+          provider: "codex",
+          phase: "failed"
+        });
+      });
+
+    return true;
+  }
+
+  async listSkills(projectId?: string): Promise<SkillRecord[]> {
+    const project = projectId ? this.deps.repository.getProject(projectId) : null;
+    const cwd = project?.path ?? process.cwd();
+    const env = Object.fromEntries(
+      Object.entries(
+        withBundledRipgrepInPath(
+          withRuntimePath({
+            ...process.env,
+            ...this.deps.repository.getSettings().envVars,
+            FORCE_COLOR: "0",
+            NO_COLOR: "1",
+            CLICOLOR: "0",
+            TERM: "dumb",
+            CODE_APP_PROVIDER: "codex"
+          })
+        )
+      ).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+
+    const appServer = new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: `skills-${Date.now()}`
+    });
+    await appServer.connect();
+    try {
+      const response = asRecord(await appServer.listSkills(cwd));
+      const entries = Array.isArray(response?.data) ? response.data : [];
+      const records: SkillRecord[] = [];
+      entries.forEach((entry) => {
+        const row = asRecord(entry);
+        const skills = Array.isArray(row?.skills) ? row.skills : [];
+        skills.forEach((skill) => {
+          const skillRow = asRecord(skill);
+          const name = asString(skillRow?.name);
+          const path = asString(skillRow?.path);
+          const description = asString(skillRow?.description) ?? "";
+          const scope = asString(skillRow?.scope);
+          if (!name || !path || !scope) {
+            return;
+          }
+          records.push({
+            name,
+            path,
+            description,
+            enabled: Boolean(skillRow?.enabled),
+            scope: scope as SkillRecord["scope"]
+          });
+        });
+      });
+      return records;
+    } finally {
+      await appServer.close();
+    }
+  }
+
+  async setSkillEnabled(projectId: string | undefined, path: string, enabled: boolean): Promise<boolean> {
+    const project = projectId ? this.deps.repository.getProject(projectId) : null;
+    const cwd = project?.path ?? process.cwd();
+    const env = Object.fromEntries(
+      Object.entries(
+        withBundledRipgrepInPath(
+          withRuntimePath({
+            ...process.env,
+            ...this.deps.repository.getSettings().envVars,
+            FORCE_COLOR: "0",
+            NO_COLOR: "1",
+            CLICOLOR: "0",
+            TERM: "dumb",
+            CODE_APP_PROVIDER: "codex"
+          })
+        )
+      ).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+
+    const appServer = new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: `skills-write-${Date.now()}`
+    });
+    await appServer.connect();
+    try {
+      await appServer.setSkillEnabled(path, enabled);
+      void cwd;
+      return true;
+    } finally {
+      await appServer.close();
+    }
   }
 
   async generateThreadMetadata(
@@ -629,38 +1030,20 @@ export class SessionManager {
       return null;
     }
 
-    const sdkModule = await loadCodexSdk();
-    const CodexCtor = sdkModule.Codex;
     const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
     const codexPathOverride = resolveCodexBinaryPath();
-    const codex = new CodexCtor({
-      env,
-      config: {
-        show_raw_agent_reasoning: true
-      },
-      ...(codexPathOverride ? { codexPathOverride } : {})
-    });
-    const startThread = (codex as UnknownRecord).startThread as ((options?: UnknownRecord) => Promise<unknown>) | undefined;
-    if (!startThread) {
-      return null;
-    }
-
     const mergedOptions: CodexThreadOptions = {
       ...this.deps.repository.getSettings().codexDefaults,
       ...options,
       collaborationMode: "plan"
     };
     const threadOptions = normalizeCodexThreadOptions(project.path, mergedOptions);
-    const sdkThreadRaw = await startThread.call(codex, threadOptions);
-    const sdkThread = asRecord(sdkThreadRaw);
-    if (!sdkThread) {
-      return null;
-    }
-
-    const run = sdkThread.run as ((prompt: string, options?: UnknownRecord) => Promise<unknown>) | undefined;
-    if (!run) {
-      return null;
-    }
+    const appServer = new CodexAppServerClient({
+      executablePath: codexPathOverride,
+      env,
+      threadId
+    });
+    await appServer.connect();
 
     const metadataPrompt = [
       "Generate metadata for a new chat thread based on this first user prompt.",
@@ -673,8 +1056,56 @@ export class SessionManager {
       prompt
     ].join("\n");
 
-    const runResult = await run.call(sdkThread, metadataPrompt, { outputSchema: THREAD_METADATA_SCHEMA });
-    return this.readThreadMetadataSuggestion(runResult);
+    const providerThreadId = await appServer.startOrResumeThread(null, threadOptions);
+    let latestDraft = "";
+    let finalText = "";
+    await appServer.runTurn(
+      providerThreadId,
+      [{ type: "text", text: metadataPrompt }],
+      threadOptions,
+      (event) => {
+        const eventType = asString((event as UnknownRecord).type) ?? "";
+        if (eventType !== "item.updated" && eventType !== "item.completed") {
+          return;
+        }
+        const item = asRecord((event as UnknownRecord).item);
+        if (!item || asString(item.type) !== "agent_message") {
+          return;
+        }
+        const text = sanitizePtyOutput(asString(item.text) ?? "");
+        if (!text) {
+          return;
+        }
+        if (eventType === "item.completed") {
+          finalText = text;
+        } else {
+          latestDraft = text;
+        }
+      },
+      {
+        outputSchema: THREAD_METADATA_SCHEMA
+      }
+    );
+    await appServer.close();
+
+    const text = (finalText || latestDraft).trim();
+    if (!text) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return this.readThreadMetadataSuggestion(parsed);
+    } catch {
+      const match = /\{[\s\S]*\}/.exec(text);
+      if (!match) {
+        return null;
+      }
+      try {
+        return this.readThreadMetadataSuggestion(JSON.parse(match[0]));
+      } catch {
+        return null;
+      }
+    }
   }
 
   private async startOrResumeRuntime(
@@ -755,22 +1186,7 @@ export class SessionManager {
       });
     }
 
-    const text = extractCodexResponseText(runResult);
-    if (!text) {
-      return null;
-    }
-    try {
-      const parsed = JSON.parse(text);
-      const record = asRecord(parsed);
-      const title = asString(record?.title);
-      const description = asString(record?.description) ?? asString(record?.summary);
-      if (!title || !description) {
-        return null;
-      }
-      return { title, description };
-    } catch {
-      return null;
-    }
+    return null;
   }
 
   private formatUserMessage(input: string, attachments: StoredAttachment[]) {
@@ -781,13 +1197,29 @@ export class SessionManager {
     return trimmed;
   }
 
-  private buildCodexInput(input: string, attachments: StoredAttachment[]): CodexInput {
+  private buildCodexInput(
+    input: string,
+    attachments: StoredAttachment[],
+    skills: Array<{ name: string; path: string }>
+  ): CodexInput {
     const trimmed = input.trim();
-    if (attachments.length === 0) {
+    if (attachments.length === 0 && skills.length === 0) {
       return trimmed;
     }
 
-    const parts: Array<{ type: "text"; text: string } | { type: "local_image"; path: string }> = [];
+    const parts: CodexInputItem[] = [];
+    skills.forEach((skill) => {
+      const name = asString(skill.name);
+      const skillPath = asString(skill.path);
+      if (!name || !skillPath) {
+        return;
+      }
+      parts.push({
+        type: "skill",
+        name,
+        path: skillPath
+      });
+    });
     parts.push({
       type: "text",
       text: trimmed || "Please analyze the attached image(s)."
@@ -858,7 +1290,7 @@ export class SessionManager {
   private buildThreadEnv(threadId: string, projectId: string, provider: Thread["provider"]) {
     const settings = this.deps.repository.getSettings();
     const projectSettings = this.deps.repository.getProjectSettings(projectId);
-    const env = withBundledRipgrepInPath(
+    const merged = withBundledRipgrepInPath(
       withRuntimePath({
         ...process.env,
         ...projectSettings.envVars,
@@ -868,7 +1300,10 @@ export class SessionManager {
         TERM: "dumb",
         CODE_APP_THREAD_ID: threadId,
         CODE_APP_PROVIDER: provider
-      } as Record<string, string>)
+      })
+    );
+    const env = Object.fromEntries(
+      Object.entries(merged).filter((entry): entry is [string, string] => typeof entry[1] === "string")
     );
 
     return { settings, env };
@@ -934,46 +1369,29 @@ export class SessionManager {
     options?: CodexThreadOptions
   ): Promise<Session> {
     const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
-    const { Codex } = await loadCodexSdk();
     const codexPathOverride = resolveCodexBinaryPath();
-    const codex = new Codex({
+    const appServer = new CodexAppServerClient({
+      executablePath: codexPathOverride,
       env,
-      config: {
-        show_raw_agent_reasoning: true
-      },
-      ...(codexPathOverride ? { codexPathOverride } : {})
+      threadId: thread.id
     });
+    await appServer.connect();
 
     const existingProviderThreadId = this.deps.repository.getProviderThreadId(thread.id, "codex");
-
-    const startThread = (codex as UnknownRecord).startThread as
-      | ((options?: UnknownRecord) => UnknownRecord | Promise<UnknownRecord>)
-      | undefined;
-    const resumeThread = (codex as UnknownRecord).resumeThread as
-      | ((threadId: string, options?: UnknownRecord) => UnknownRecord | Promise<UnknownRecord>)
-      | undefined;
-
-    if (!startThread || !resumeThread) {
-      throw new Error("Codex SDK methods startThread/resumeThread are unavailable.");
-    }
-
     const threadOptions = normalizeCodexThreadOptions(projectPath, options);
     const optionsKey = codexThreadOptionsKey(threadOptions);
-
-    const resumeOptions = existingProviderThreadId ? { ...threadOptions, model: undefined } : undefined;
-    const sdkThread = existingProviderThreadId
-      ? await resumeThread.call(codex, existingProviderThreadId, resumeOptions)
-      : await startThread.call(codex, threadOptions);
-
-    const sdkThreadRecord = asRecord(sdkThread);
-    if (!sdkThreadRecord) {
-      throw new Error("Codex SDK failed to create thread.");
+    let providerThreadId: string;
+    try {
+      providerThreadId = await appServer.startOrResumeThread(existingProviderThreadId, threadOptions);
+    } catch (error) {
+      const resumeFailed = Boolean(existingProviderThreadId) && isRecoverableCodexResumeError(error);
+      if (!resumeFailed) {
+        throw error;
+      }
+      this.deps.repository.clearProviderThreadId(thread.id, "codex");
+      providerThreadId = await appServer.startOrResumeThread(null, threadOptions);
     }
-
-    const sdkThreadId = this.readSdkThreadId(sdkThreadRecord);
-    if (sdkThreadId) {
-      this.deps.repository.setProviderThreadId(thread.id, "codex", sdkThreadId);
-    }
+    this.deps.repository.setProviderThreadId(thread.id, "codex", providerThreadId);
 
     const envHash = createHash("sha1").update(JSON.stringify(env)).digest("hex");
     const session = this.deps.repository.startSession({
@@ -984,79 +1402,70 @@ export class SessionManager {
     });
 
     this.sessions.set(thread.id, {
-      kind: "codex_sdk",
+      kind: "codex_app_server",
       threadId: thread.id,
-      sdkThread: sdkThreadRecord,
+      appServer,
+      providerThreadId,
       runQueue: Promise.resolve(),
       cwd: projectPath,
+      threadOptions,
       optionsKey
     });
 
     return session;
   }
 
-  private async runCodexPrompt(session: RunningCodexSession, input: CodexInput): Promise<void> {
-    const runStreamed = session.sdkThread.runStreamed as
-      | ((prompt: CodexInput) => Promise<{ events: AsyncIterable<unknown> }>)
-      | undefined;
-    const runMethod = session.sdkThread.run as ((prompt: CodexInput) => Promise<unknown>) | undefined;
-
-    if (runStreamed) {
-      await this.runCodexPromptStreamed(session, input, runStreamed);
+  private async runCodexPromptWithRecovery(session: RunningCodexSession, input: CodexInput): Promise<void> {
+    try {
+      await this.runCodexPrompt(session, input);
       return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      const likelyContextOverflow =
+        message.includes("context window") || message.includes("context length") || message.includes("too long");
+      if (!likelyContextOverflow) {
+        throw error;
+      }
     }
 
-    if (!runMethod) {
-      throw new Error("Codex SDK thread does not expose run() or runStreamed().");
-    }
-
-    this.emitSessionEvent(session.threadId, "progress", "Running Codex SDK...", {
+    await session.appServer.compactThread(session.providerThreadId);
+    this.emitSessionEvent(session.threadId, "progress", "Context compacted, retrying your prompt...", {
       provider: "codex",
-      phase: "running"
+      phase: "running",
+      category: "context_compaction"
     });
-
-    const runResult = await runMethod.call(session.sdkThread, input);
-    const providerThreadId = this.readSdkThreadId(session.sdkThread);
-    if (providerThreadId) {
-      this.deps.repository.setProviderThreadId(session.threadId, "codex", providerThreadId);
-    }
-
-    const content = sanitizePtyOutput(extractCodexResponseText(runResult));
-    if (content) {
-      this.persistAssistantChunk(session.threadId, content, {
-        provider: "codex",
-        category: "assistant_message",
-        final: true
-      });
-    } else {
-      this.emitSessionEvent(session.threadId, "status", "Codex SDK returned no text output.", {
-        provider: "codex",
-        phase: "completed"
-      });
-    }
+    await this.runCodexPrompt(session, input);
   }
 
-  private async runCodexPromptStreamed(
-    session: RunningCodexSession,
-    input: CodexInput,
-    runStreamed: (prompt: CodexInput) => Promise<{ events: AsyncIterable<unknown> }>
-  ): Promise<void> {
+  private async runCodexPrompt(session: RunningCodexSession, input: CodexInput): Promise<void> {
     this.emitSessionEvent(session.threadId, "progress", "Thinking...", {
       provider: "codex",
       phase: "running",
       category: "turn"
     });
 
-    const streamedTurn = await runStreamed.call(session.sdkThread, input);
-    const events = asRecord(streamedTurn)?.events;
-    if (!hasAsyncIterator(events)) {
-      throw new Error("Codex SDK runStreamed() did not return an async event stream.");
-    }
-
+    const inputItems: CodexInputItem[] = typeof input === "string" ? [{ type: "text", text: input }] : input;
     const agentDrafts = new Map<string, string>();
-    for await (const rawEvent of events) {
-      await this.handleCodexStreamEvent(session.threadId, rawEvent, agentDrafts);
-    }
+
+    await session.appServer.runTurn(session.providerThreadId, inputItems, session.threadOptions, async (event) => {
+      await this.handleCodexStreamEvent(session.threadId, event, agentDrafts);
+    });
+  }
+
+  private async runCodexReview(
+    session: RunningCodexSession,
+    target: Record<string, unknown>,
+    delivery: "inline" | "detached"
+  ): Promise<void> {
+    this.emitSessionEvent(session.threadId, "progress", "Starting code review...", {
+      provider: "codex",
+      phase: "running",
+      category: "review"
+    });
+    const agentDrafts = new Map<string, string>();
+    await session.appServer.startReview(session.providerThreadId, target, delivery, async (event) => {
+      await this.handleCodexStreamEvent(session.threadId, event, agentDrafts);
+    });
   }
 
   private async handleCodexStreamEvent(threadId: string, rawEvent: unknown, agentDrafts: Map<string, string>) {
@@ -1066,9 +1475,6 @@ export class SessionManager {
     switch (eventType) {
       case "thread.started": {
         const sdkThreadId = asString(event?.thread_id);
-        if (sdkThreadId) {
-          this.deps.repository.setProviderThreadId(threadId, "codex", sdkThreadId);
-        }
         this.emitSessionEvent(threadId, "progress", "Thinking...", {
           provider: "codex",
           category: "thread",
@@ -1078,7 +1484,12 @@ export class SessionManager {
         return;
       }
       case "turn.started": {
-        // Suppress noisy turn-start updates in renderer timeline.
+        this.emitSessionEvent(threadId, "progress", "Turn started", {
+          provider: "codex",
+          category: "turn",
+          eventType,
+          turnId: asString(event?.turn_id) ?? undefined
+        });
         return;
       }
       case "turn.completed": {
@@ -1114,6 +1525,18 @@ export class SessionManager {
         await this.handleCodexItemEvent(threadId, eventType, item, agentDrafts);
         return;
       }
+      case "user_input.requested": {
+        const requestId = asString(event?.request_id) ?? "";
+        const questions = Array.isArray(event?.questions) ? (event.questions as unknown[]) : [];
+        this.emitSessionEvent(threadId, "progress", "Waiting for your input", {
+          provider: "codex",
+          category: "user_input_request",
+          phase: "awaiting_user_input",
+          requestId: requestId || undefined,
+          questions
+        });
+        return;
+      }
       default: {
         this.emitSessionEvent(threadId, "progress", `Codex event: ${eventType}`, {
           provider: "codex",
@@ -1132,6 +1555,10 @@ export class SessionManager {
   ) {
     const itemType = asString(item.type) ?? "unknown";
     const itemId = asString(item.id) ?? `${itemType}-${Date.now()}`;
+
+    if (itemType === "user_message" || itemType === "userMessage") {
+      return;
+    }
 
     if (itemType === "agent_message") {
       const text = sanitizePtyOutput(asString(item.text) ?? "");
@@ -1241,6 +1668,31 @@ export class SessionManager {
     if (itemType === "mcp_tool_call") {
       const server = asString(item.server);
       const tool = asString(item.tool);
+      if (isUserInputRequestTool(tool)) {
+        const status = asString(item.status) ?? "in_progress";
+        const isWaiting = status !== "completed" && status !== "failed";
+        const questions = extractUserInputQuestions(item);
+        const payload = isWaiting
+          ? `Waiting for your input${questions.length > 0 ? ` (${countLabel(questions.length, "question", "questions")})` : ""}`
+          : "User input received";
+
+        this.emitSessionEvent(threadId, "progress", payload, {
+          provider: "codex",
+          category: "user_input_request",
+          itemType,
+          itemId,
+          eventType,
+          status,
+          phase: isWaiting ? "awaiting_user_input" : "completed",
+          server: server ?? undefined,
+          tool,
+          command: tool,
+          questions: questions.length > 0 ? questions : undefined,
+          allowCustomOption: true
+        });
+        return;
+      }
+
       const intent = tool ? classifyToolIntent(tool) : "other";
       const status = asString(item.status) ?? "in_progress";
       const payload = `${status === "completed" ? "Tool completed" : "Tool call"}${tool ? `: ${tool}` : ""}`;
@@ -1458,10 +1910,5 @@ export class SessionManager {
     });
 
     this.emitSessionEvent(threadId, "stdout", chunk, data);
-  }
-
-  private readSdkThreadId(sdkThread: UnknownRecord): string | null {
-    const maybeId = sdkThread.id ?? sdkThread.threadId;
-    return typeof maybeId === "string" && maybeId.trim() ? maybeId : null;
   }
 }
