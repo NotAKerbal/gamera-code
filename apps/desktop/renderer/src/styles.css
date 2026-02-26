@@ -616,6 +616,18 @@ webview {
   @apply mt-1 space-y-1;
 }
 
+.activity-bundle-collapse {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.24s ease, opacity 0.2s ease;
+}
+
+.activity-bundle-collapse.open {
+  max-height: 2600px;
+  opacity: 1;
+}
+
 .activity-command {
   @apply p-0;
   transition: color 0.2s ease;
@@ -723,17 +735,6 @@ webview {
 .trace-child-content {
   position: relative;
   overflow: hidden;
-}
-
-.trace-child:not(.expanded) .trace-child-content::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1.8rem;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(24, 24, 27, 0), rgba(24, 24, 27, 0.92));
 }
 
 .trace-child-expand {

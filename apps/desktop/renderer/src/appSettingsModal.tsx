@@ -216,6 +216,23 @@ export const SettingsModal = ({
                     Enabled
                   </label>
                 </div>
+                <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Condense activity trace</div>
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
+                    <input
+                      type="checkbox"
+                      checked={settings.condenseActivityTimeline ?? true}
+                      onChange={(event) =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          condenseActivityTimeline: event.target.checked
+                        }))
+                      }
+                    />
+                    Enabled
+                  </label>
+                </div>
               </section>
 
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">

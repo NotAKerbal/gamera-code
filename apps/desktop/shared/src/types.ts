@@ -221,6 +221,7 @@ export interface AppSettings {
   autoRenameThreadTitles?: boolean;
   showThreadSummaries?: boolean;
   useTurtleSpinners?: boolean;
+  condenseActivityTimeline?: boolean;
   projectTerminalSwitchBehaviorDefault?: ProjectTerminalSwitchBehavior;
 }
 
