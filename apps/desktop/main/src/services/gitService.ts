@@ -98,6 +98,21 @@ type GitOutgoingCommitItem = {
   summary: string;
 };
 
+const parseOnelineCommits = (value: string): GitOutgoingCommitItem[] => {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [hash, ...summaryParts] = line.split(" ");
+      return {
+        hash: hash ?? "",
+        summary: summaryParts.join(" ").trim()
+      };
+    })
+    .filter((commit) => Boolean(commit.hash) && Boolean(commit.summary));
+};
+
 export class GitService {
   private toProjectDirName(value: string): string {
     return value
@@ -349,19 +364,25 @@ export class GitService {
     if (!result.ok || !result.stdout) {
       return [];
     }
+    return parseOnelineCommits(result.stdout);
+  }
 
-    return result.stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [hash, ...summaryParts] = line.split(" ");
-        return {
-          hash: hash ?? "",
-          summary: summaryParts.join(" ").trim()
-        };
-      })
-      .filter((commit) => Boolean(commit.hash) && Boolean(commit.summary));
+  async getIncomingCommits(cwd: string, limit = 30): Promise<GitOutgoingCommitItem[]> {
+    const insideRepo = await this.isInsideRepo(cwd);
+    if (!insideRepo) {
+      return [];
+    }
+
+    const upstream = await this.runGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+    if (!upstream.ok) {
+      return [];
+    }
+
+    const result = await this.runGit(cwd, ["log", "--oneline", "HEAD..@{u}", "-n", String(limit)]);
+    if (!result.ok || !result.stdout) {
+      return [];
+    }
+    return parseOnelineCommits(result.stdout);
   }
 
   async fetch(cwd: string): Promise<GitCommandResult> {

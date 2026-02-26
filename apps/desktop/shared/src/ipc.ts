@@ -61,6 +61,7 @@ export const IPC_CHANNELS = {
   gitGetState: "git:getState",
   gitGetDiff: "git:getDiff",
   gitGetOutgoingCommits: "git:getOutgoingCommits",
+  gitGetIncomingCommits: "git:getIncomingCommits",
   gitFetch: "git:fetch",
   gitPull: "git:pull",
   gitPush: "git:push",

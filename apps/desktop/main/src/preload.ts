@@ -9,6 +9,8 @@ const gitDiscardChannel =
   (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
 const gitGetOutgoingCommitsChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
+const gitGetIncomingCommitsChannel =
+  (IPC_CHANNELS as Record<string, string>).gitGetIncomingCommits ?? "git:getIncomingCommits";
 const threadsForkChannel =
   (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
 const sessionsSteerChannel =
@@ -34,6 +36,7 @@ type DesktopApiWithGitExtras = DesktopApi & {
   git: DesktopApi["git"] & {
     discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
+    getIncomingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
   };
 };
 
@@ -139,6 +142,7 @@ const api: DesktopApiWithGitExtras = {
     getState: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetState, input),
     getDiff: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetDiff, input),
     getOutgoingCommits: (input: { projectId: string }) => ipcRenderer.invoke(gitGetOutgoingCommitsChannel, input),
+    getIncomingCommits: (input: { projectId: string }) => ipcRenderer.invoke(gitGetIncomingCommitsChannel, input),
     fetch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitFetch, input),
     pull: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitPull, input),
     push: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitPush, input),

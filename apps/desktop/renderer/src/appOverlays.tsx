@@ -10,6 +10,7 @@ import type {
 import { PROJECT_SWITCH_BEHAVIOR_OPTIONS, type RenameDialogState } from "./appCore";
 
 type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean };
+type ProjectSettingsTab = "general" | "env" | "commands" | "links" | "skills";
 
 type ProjectSettingsModalProps = {
   activeProjectId: string;
@@ -32,6 +33,8 @@ type ProjectSettingsModalProps = {
   skillEditorSaving: boolean;
   saveSkillEditor: () => Promise<void>;
   removingProject: boolean;
+  projectSettingsTab: ProjectSettingsTab;
+  setProjectSettingsTab: Dispatch<SetStateAction<ProjectSettingsTab>>;
   onClose: () => void;
   onRemoveProject: () => Promise<void>;
   onSaveProjectSettings: () => Promise<void>;
@@ -61,6 +64,8 @@ export const ProjectSettingsModal = ({
   skillEditorSaving,
   saveSkillEditor,
   removingProject,
+  projectSettingsTab,
+  setProjectSettingsTab,
   onClose,
   onRemoveProject,
   onSaveProjectSettings,
@@ -69,7 +74,7 @@ export const ProjectSettingsModal = ({
   appendLog
 }: ProjectSettingsModalProps) => (
   <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-    <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon">
+    <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon">
       <div className="mb-4 flex shrink-0 items-center justify-between">
         <h3 className="text-lg font-semibold">Project Settings</h3>
         <button className="btn-secondary" onClick={onClose}>
@@ -77,270 +82,319 @@ export const ProjectSettingsModal = ({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-        <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-          <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Project</div>
-          <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-            <div className="text-sm text-muted">Project name</div>
-            <input
-              className="input text-xs"
-              value={projectSettingsProjectName}
-              onChange={(event) => setProjectSettingsProjectName(event.target.value)}
-              placeholder="Project name"
-            />
-          </div>
-          <div className="mx-2 border-t border-border/70" />
-          <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-            <div className="text-sm text-muted">Switch behavior override</div>
-            <select
-              className="input text-xs"
-              value={projectSwitchBehaviorOverride}
-              onChange={(event) => setProjectSwitchBehaviorOverride(event.target.value as ProjectTerminalSwitchBehavior | "")}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
+        <aside className="shrink-0 md:w-52">
+          <div className="rounded-xl border border-border bg-black/20 p-2">
+            <button
+              className={projectSettingsTab === "general" ? "btn-secondary w-full justify-start text-left text-xs" : "btn-ghost w-full justify-start text-left text-xs"}
+              onClick={() => setProjectSettingsTab("general")}
             >
-              <option value="">Use app default</option>
-              {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              General
+            </button>
+            <button
+              className={projectSettingsTab === "env" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              onClick={() => setProjectSettingsTab("env")}
+            >
+              Environment
+            </button>
+            <button
+              className={projectSettingsTab === "commands" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              onClick={() => setProjectSettingsTab("commands")}
+            >
+              Dev Commands
+            </button>
+            <button
+              className={projectSettingsTab === "links" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              onClick={() => setProjectSettingsTab("links")}
+            >
+              Web Links
+            </button>
+            <button
+              className={projectSettingsTab === "skills" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              onClick={() => setProjectSettingsTab("skills")}
+            >
+              Skills
+            </button>
           </div>
-          <div className="mx-2 border-t border-border/70" />
-          <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-            <div className="text-sm text-muted">In-app browser</div>
-            <label className="project-settings-toggle md:justify-self-end">
-              <input
-                type="checkbox"
-                checked={projectSettingsBrowserEnabled}
-                onChange={(event) => setProjectSettingsBrowserEnabled(event.target.checked)}
-              />
-              <span>Enable in-app browser/preview for this project</span>
-            </label>
-          </div>
-        </section>
+        </aside>
 
-        <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-          <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Environment Variables</div>
-          <div className="mx-2 px-2 py-3">
-            <textarea
-              className="input h-32 font-mono text-xs"
-              value={projectSettingsEnvText}
-              onChange={(event) => setProjectSettingsEnvText(event.target.value)}
-              placeholder={`VITE_API_BASE=https://api.example.com\nLOG_LEVEL=debug`}
-            />
-          </div>
-        </section>
-
-        <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-          <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Dev Commands</div>
-          <div className="mx-2 space-y-2 px-2 py-3">
-            {projectSettingsCommands.map((command, index) => (
-              <div key={command.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_96px_96px_28px]">
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {projectSettingsTab === "general" && (
+            <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+              <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Project</div>
+              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="text-sm text-muted">Project name</div>
                 <input
                   className="input text-xs"
-                  value={command.name}
-                  placeholder="Name"
-                  onChange={(event) =>
-                    setProjectSettingsCommands((prev) =>
-                      prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
-                    )
-                  }
+                  value={projectSettingsProjectName}
+                  onChange={(event) => setProjectSettingsProjectName(event.target.value)}
+                  placeholder="Project name"
                 />
-                <input
+              </div>
+              <div className="mx-2 border-t border-border/70" />
+              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="text-sm text-muted">Switch behavior override</div>
+                <select
                   className="input text-xs"
-                  value={command.command}
-                  placeholder="Command"
-                  onChange={(event) =>
-                    setProjectSettingsCommands((prev) =>
-                      prev.map((item, idx) => (idx === index ? { ...item, command: event.target.value } : item))
-                    )
-                  }
-                />
-                <label className="project-settings-toggle project-settings-toggle-inline">
+                  value={projectSwitchBehaviorOverride}
+                  onChange={(event) => setProjectSwitchBehaviorOverride(event.target.value as ProjectTerminalSwitchBehavior | "")}
+                >
+                  <option value="">Use app default</option>
+                  {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mx-2 border-t border-border/70" />
+              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="text-sm text-muted">In-app browser</div>
+                <label className="project-settings-toggle md:justify-self-end">
                   <input
                     type="checkbox"
-                    checked={command.autoStart}
-                    onChange={(event) =>
-                      setProjectSettingsCommands((prev) =>
-                        prev.map((item, idx) => (idx === index ? { ...item, autoStart: event.target.checked } : item))
-                      )
-                    }
+                    checked={projectSettingsBrowserEnabled}
+                    onChange={(event) => setProjectSettingsBrowserEnabled(event.target.checked)}
                   />
-                  <span>Auto</span>
+                  <span>Enable in-app browser/preview for this project</span>
                 </label>
-                {projectSettingsBrowserEnabled ? (
-                  <label className="project-settings-toggle project-settings-toggle-inline">
+              </div>
+            </section>
+          )}
+
+          {projectSettingsTab === "env" && (
+            <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+              <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Environment Variables</div>
+              <div className="mx-2 px-2 py-3">
+                <textarea
+                  className="input h-44 font-mono text-xs"
+                  value={projectSettingsEnvText}
+                  onChange={(event) => setProjectSettingsEnvText(event.target.value)}
+                  placeholder={`VITE_API_BASE=https://api.example.com\nLOG_LEVEL=debug`}
+                />
+              </div>
+            </section>
+          )}
+
+          {projectSettingsTab === "commands" && (
+            <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+              <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Dev Commands</div>
+              <div className="mx-2 space-y-2 px-2 py-3">
+                {projectSettingsCommands.map((command, index) => (
+                  <div key={command.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_96px_96px_28px]">
                     <input
-                      type="radio"
-                      name="preview-command"
-                      checked={command.useForPreview}
-                      onChange={() =>
+                      className="input text-xs"
+                      value={command.name}
+                      placeholder="Name"
+                      onChange={(event) =>
                         setProjectSettingsCommands((prev) =>
-                          prev.map((item, idx) => ({ ...item, useForPreview: idx === index }))
+                          prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
                         )
                       }
                     />
-                    <span>Browser</span>
-                  </label>
-                ) : (
-                  <div />
-                )}
-                <button
-                  className="btn-secondary px-0"
-                  onClick={() => setProjectSettingsCommands((prev) => prev.filter((_, idx) => idx !== index))}
-                  disabled={projectSettingsCommands.length <= 1}
-                  title="Remove command"
-                >
-                  <FaTrashAlt className="mx-auto text-[12px]" />
-                </button>
-              </div>
-            ))}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                className="btn-secondary"
-                onClick={() =>
-                  setProjectSettingsCommands((prev) => [
-                    ...prev,
-                    {
-                      id: `cmd-${crypto.randomUUID()}`,
-                      name: `Command ${prev.length + 1}`,
-                      command: "",
-                      autoStart: false,
-                      useForPreview: false
-                    }
-                  ])
-                }
-              >
-                Add command
-              </button>
-              <p className="text-xs text-slate-400">
-                {projectSettingsBrowserEnabled
-                  ? "Choose auto-start commands and exactly one Browser command for preview URL detection."
-                  : "Choose which commands auto-start when entering this project."}
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-          <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Header Web Links</div>
-          <div className="mx-2 space-y-2 px-2 py-3">
-            {projectSettingsWebLinks.map((link, index) => (
-              <div key={link.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_28px]">
-                <input
-                  className="input text-xs"
-                  value={link.name}
-                  placeholder="Name"
-                  onChange={(event) =>
-                    setProjectSettingsWebLinks((prev) =>
-                      prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
-                    )
-                  }
-                />
-                <input
-                  className="input text-xs"
-                  value={link.url}
-                  placeholder="https://example.com"
-                  onChange={(event) =>
-                    setProjectSettingsWebLinks((prev) =>
-                      prev.map((item, idx) => (idx === index ? { ...item, url: event.target.value } : item))
-                    )
-                  }
-                />
-                <button
-                  className="btn-secondary px-0"
-                  onClick={() => setProjectSettingsWebLinks((prev) => prev.filter((_, idx) => idx !== index))}
-                  title="Remove web link"
-                >
-                  <FaTrashAlt className="mx-auto text-[12px]" />
-                </button>
-              </div>
-            ))}
-
-            <button
-              className="btn-secondary"
-              onClick={() =>
-                setProjectSettingsWebLinks((prev) => [
-                  ...prev,
-                  {
-                    id: `link-${crypto.randomUUID()}`,
-                    name: "",
-                    url: ""
-                  }
-                ])
-              }
-            >
-              Add web link
-            </button>
-          </div>
-        </section>
-
-        <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-          <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Skills</div>
-          <div className="mx-2 space-y-2 px-2 py-3">
-            {(skillsByProjectId[activeProjectId] ?? []).filter((skill) => skill.scope === "repo").length === 0 ? (
-              <p className="text-xs text-slate-400">No project-scoped skills found for this repository.</p>
-            ) : (
-              (skillsByProjectId[activeProjectId] ?? [])
-                .filter((skill) => skill.scope === "repo")
-                .map((skill) => (
-                  <div key={skill.path} className="rounded border border-border/70 bg-black/20 p-2 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm text-slate-100">{skill.name}</div>
-                        <div className="truncate text-slate-400">{skill.path}</div>
-                      </div>
-                      <label className="inline-flex items-center gap-1 whitespace-nowrap text-slate-300">
+                    <input
+                      className="input text-xs"
+                      value={command.command}
+                      placeholder="Command"
+                      onChange={(event) =>
+                        setProjectSettingsCommands((prev) =>
+                          prev.map((item, idx) => (idx === index ? { ...item, command: event.target.value } : item))
+                        )
+                      }
+                    />
+                    <label className="project-settings-toggle project-settings-toggle-inline">
+                      <input
+                        type="checkbox"
+                        checked={command.autoStart}
+                        onChange={(event) =>
+                          setProjectSettingsCommands((prev) =>
+                            prev.map((item, idx) => (idx === index ? { ...item, autoStart: event.target.checked } : item))
+                          )
+                        }
+                      />
+                      <span>Auto</span>
+                    </label>
+                    {projectSettingsBrowserEnabled ? (
+                      <label className="project-settings-toggle project-settings-toggle-inline">
                         <input
-                          type="checkbox"
-                          checked={skill.enabled}
-                          onChange={(event) => {
-                            onToggleProjectSkillEnabled(skill.path, event.target.checked).catch((error) =>
-                              appendLog(`Skill toggle failed: ${String(error)}`)
-                            );
-                          }}
+                          type="radio"
+                          name="preview-command"
+                          checked={command.useForPreview}
+                          onChange={() =>
+                            setProjectSettingsCommands((prev) =>
+                              prev.map((item, idx) => ({ ...item, useForPreview: idx === index }))
+                            )
+                          }
                         />
-                        Enabled
+                        <span>Browser</span>
                       </label>
-                    </div>
-                    <div className="mt-1 text-slate-300">{skill.description}</div>
-                    <div className="mt-2">
-                      <button
-                        className="btn-ghost h-7 px-2 py-0 text-xs"
-                        onClick={() => {
-                          onOpenSkillEditor(skill.path).catch((error) =>
-                            appendLog(`Open skill failed: ${String(error)}`)
-                          );
-                        }}
-                      >
-                        Edit SKILL.md
+                    ) : (
+                      <div />
+                    )}
+                    <button
+                      className="btn-secondary px-0"
+                      onClick={() => setProjectSettingsCommands((prev) => prev.filter((_, idx) => idx !== index))}
+                      disabled={projectSettingsCommands.length <= 1}
+                      title="Remove command"
+                    >
+                      <FaTrashAlt className="mx-auto text-[12px]" />
+                    </button>
+                  </div>
+                ))}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="btn-secondary"
+                    onClick={() =>
+                      setProjectSettingsCommands((prev) => [
+                        ...prev,
+                        {
+                          id: `cmd-${crypto.randomUUID()}`,
+                          name: `Command ${prev.length + 1}`,
+                          command: "",
+                          autoStart: false,
+                          useForPreview: false
+                        }
+                      ])
+                    }
+                  >
+                    Add command
+                  </button>
+                  <p className="text-xs text-slate-400">
+                    {projectSettingsBrowserEnabled
+                      ? "Choose auto-start commands and exactly one Browser command for preview URL detection."
+                      : "Choose which commands auto-start when entering this project."}
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {projectSettingsTab === "links" && (
+            <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+              <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Header Web Links</div>
+              <div className="mx-2 space-y-2 px-2 py-3">
+                {projectSettingsWebLinks.map((link, index) => (
+                  <div key={link.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_28px]">
+                    <input
+                      className="input text-xs"
+                      value={link.name}
+                      placeholder="Name"
+                      onChange={(event) =>
+                        setProjectSettingsWebLinks((prev) =>
+                          prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
+                        )
+                      }
+                    />
+                    <input
+                      className="input text-xs"
+                      value={link.url}
+                      placeholder="https://example.com"
+                      onChange={(event) =>
+                        setProjectSettingsWebLinks((prev) =>
+                          prev.map((item, idx) => (idx === index ? { ...item, url: event.target.value } : item))
+                        )
+                      }
+                    />
+                    <button
+                      className="btn-secondary px-0"
+                      onClick={() => setProjectSettingsWebLinks((prev) => prev.filter((_, idx) => idx !== index))}
+                      title="Remove web link"
+                    >
+                      <FaTrashAlt className="mx-auto text-[12px]" />
+                    </button>
+                  </div>
+                ))}
+
+                <button
+                  className="btn-secondary"
+                  onClick={() =>
+                    setProjectSettingsWebLinks((prev) => [
+                      ...prev,
+                      {
+                        id: `link-${crypto.randomUUID()}`,
+                        name: "",
+                        url: ""
+                      }
+                    ])
+                  }
+                >
+                  Add web link
+                </button>
+              </div>
+            </section>
+          )}
+
+          {projectSettingsTab === "skills" && (
+            <div className="space-y-3">
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Skills</div>
+                <div className="mx-2 space-y-2 px-2 py-3">
+                  {(skillsByProjectId[activeProjectId] ?? []).filter((skill) => skill.scope === "repo").length === 0 ? (
+                    <p className="text-xs text-slate-400">No project-scoped skills found for this repository.</p>
+                  ) : (
+                    (skillsByProjectId[activeProjectId] ?? [])
+                      .filter((skill) => skill.scope === "repo")
+                      .map((skill) => (
+                        <div key={skill.path} className="rounded border border-border/70 bg-black/20 p-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm text-slate-100">{skill.name}</div>
+                              <div className="truncate text-slate-400">{skill.path}</div>
+                            </div>
+                            <label className="inline-flex items-center gap-1 whitespace-nowrap text-slate-300">
+                              <input
+                                type="checkbox"
+                                checked={skill.enabled}
+                                onChange={(event) => {
+                                  onToggleProjectSkillEnabled(skill.path, event.target.checked).catch((error) =>
+                                    appendLog(`Skill toggle failed: ${String(error)}`)
+                                  );
+                                }}
+                              />
+                              Enabled
+                            </label>
+                          </div>
+                          <div className="mt-1 text-slate-300">{skill.description}</div>
+                          <div className="mt-2">
+                            <button
+                              className="btn-ghost h-7 px-2 py-0 text-xs"
+                              onClick={() => {
+                                onOpenSkillEditor(skill.path).catch((error) =>
+                                  appendLog(`Open skill failed: ${String(error)}`)
+                                );
+                              }}
+                            >
+                              Edit SKILL.md
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </section>
+
+              {skillEditorPath && (
+                <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                  <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Skill Editor</div>
+                  <div className="mx-2 space-y-2 px-2 py-3">
+                    <div className="truncate font-mono text-[11px] text-slate-400">{skillEditorPath}</div>
+                    <textarea
+                      className="input h-44 font-mono text-xs"
+                      value={skillEditorContent}
+                      onChange={(event) => setSkillEditorContent(event.target.value)}
+                    />
+                    <div className="flex justify-end">
+                      <button className="btn-primary h-8 px-3 py-0 text-xs" onClick={saveSkillEditor} disabled={skillEditorSaving}>
+                        {skillEditorSaving ? "Saving..." : "Save Skill"}
                       </button>
                     </div>
                   </div>
-                ))
-            )}
-          </div>
-        </section>
-
-        {skillEditorPath && (
-          <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-            <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Skill Editor</div>
-            <div className="mx-2 space-y-2 px-2 py-3">
-              <div className="truncate font-mono text-[11px] text-slate-400">{skillEditorPath}</div>
-              <textarea
-                className="input h-44 font-mono text-xs"
-                value={skillEditorContent}
-                onChange={(event) => setSkillEditorContent(event.target.value)}
-              />
-              <div className="flex justify-end">
-                <button className="btn-primary h-8 px-3 py-0 text-xs" onClick={saveSkillEditor} disabled={skillEditorSaving}>
-                  {skillEditorSaving ? "Saving..." : "Save Skill"}
-                </button>
-              </div>
+                </section>
+              )}
             </div>
-          </section>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="mt-4 flex shrink-0 items-center justify-between gap-2 border-t border-border pt-4">

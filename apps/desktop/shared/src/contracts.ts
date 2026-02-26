@@ -149,6 +149,7 @@ export interface DesktopApi {
     getState: (input: { projectId: string }) => Promise<GitState>;
     getDiff: (input: { projectId: string; path?: string }) => Promise<GitDiffResult>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<GitOutgoingCommit[]>;
+    getIncomingCommits: (input: { projectId: string }) => Promise<GitOutgoingCommit[]>;
     fetch: (input: { projectId: string }) => Promise<GitCommandResult>;
     pull: (input: { projectId: string }) => Promise<GitCommandResult>;
     push: (input: { projectId: string }) => Promise<GitCommandResult>;

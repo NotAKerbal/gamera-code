@@ -66,6 +66,8 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     (IPC_CHANNELS as Record<string, string>).projectsListFiles ?? "projects:listFiles";
   const gitGetOutgoingCommitsChannel =
     (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
+  const gitGetIncomingCommitsChannel =
+    (IPC_CHANNELS as Record<string, string>).gitGetIncomingCommits ?? "git:getIncomingCommits";
   const normalizePath = (path: string) => resolve(path);
   const findProjectByPath = (path: string) => {
     const normalized = normalizePath(path);
@@ -610,6 +612,10 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(gitGetOutgoingCommitsChannel, async (_event, input: { projectId: string }) => {
     return deps.gitService.getOutgoingCommits(getProjectPath(input.projectId));
+  });
+
+  ipcMain.handle(gitGetIncomingCommitsChannel, async (_event, input: { projectId: string }) => {
+    return deps.gitService.getIncomingCommits(getProjectPath(input.projectId));
   });
 
   ipcMain.handle(IPC_CHANNELS.gitFetch, async (_event, input: { projectId: string }) => {

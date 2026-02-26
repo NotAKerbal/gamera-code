@@ -216,6 +216,7 @@ export const App = () => {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaveNotice, setSettingsSaveNotice] = useState("");
   const [showProjectSettings, setShowProjectSettings] = useState(false);
+  const [projectSettingsTab, setProjectSettingsTab] = useState<"general" | "env" | "commands" | "links" | "skills">("general");
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showImportProjectModal, setShowImportProjectModal] = useState(false);
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null);
@@ -271,6 +272,7 @@ export const App = () => {
   const [terminalPopoutByKey, setTerminalPopoutByKey] = useState<Record<string, boolean>>({});
   const [gitStateByProjectId, setGitStateByProjectId] = useState<Record<string, GitState>>({});
   const [gitOutgoingCommitsByProjectId, setGitOutgoingCommitsByProjectId] = useState<Record<string, GitOutgoingCommit[]>>({});
+  const [gitIncomingCommitsByProjectId, setGitIncomingCommitsByProjectId] = useState<Record<string, GitOutgoingCommit[]>>({});
   const [gitSelectedPathByProjectId, setGitSelectedPathByProjectId] = useState<Record<string, string | null>>({});
   const [gitBusyAction, setGitBusyAction] = useState<string | null>(null);
   const [gitBranchSearch, setGitBranchSearch] = useState("");
@@ -341,7 +343,6 @@ export const App = () => {
   const pendingUserInputRequestIdByThreadIdRef = useRef<Record<string, string>>({});
   const queuedPromptsByThreadIdRef = useRef<Record<string, QueuedPrompt[]>>({});
   const queueProcessingThreadIdsRef = useRef<Set<string>>(new Set());
-  const completionFlashTimeoutsRef = useRef<Record<string, number>>({});
   const completionAudioContextRef = useRef<AudioContext | null>(null);
   const terminalPopoutWindowsRef = useRef<Record<string, Window | null>>({});
   const terminalPopoutPollIntervalRef = useRef<number | null>(null);
@@ -492,6 +493,10 @@ export const App = () => {
   const activeOutgoingCommits = useMemo(
     () => (activeProjectId ? gitOutgoingCommitsByProjectId[activeProjectId] ?? [] : []),
     [activeProjectId, gitOutgoingCommitsByProjectId]
+  );
+  const activeIncomingCommits = useMemo(
+    () => (activeProjectId ? gitIncomingCommitsByProjectId[activeProjectId] ?? [] : []),
+    [activeProjectId, gitIncomingCommitsByProjectId]
   );
   const activeStagedFiles = useMemo(
     () => (activeGitState?.files ?? []).filter((file) => file.staged),
@@ -655,21 +660,23 @@ export const App = () => {
   };
   const flashCompletedThread = (threadId: string) => {
     setThreadCompletionFlashById((prev) => ({ ...prev, [threadId]: true }));
-    const existingTimeout = completionFlashTimeoutsRef.current[threadId];
-    if (existingTimeout) {
-      window.clearTimeout(existingTimeout);
-    }
-    completionFlashTimeoutsRef.current[threadId] = window.setTimeout(() => {
-      setThreadCompletionFlashById((prev) => {
-        if (!prev[threadId]) {
-          return prev;
-        }
-        const next = { ...prev };
-        delete next[threadId];
-        return next;
-      });
-      delete completionFlashTimeoutsRef.current[threadId];
-    }, 1600);
+  };
+
+  const clearCompletedThreadFlash = (threadId: string) => {
+    setThreadCompletionFlashById((prev) => {
+      if (!prev[threadId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[threadId];
+      return next;
+    });
+  };
+
+  const activateThreadFromSidebar = (projectId: string, threadId: string) => {
+    setActiveProjectId(projectId);
+    setActiveThreadId(threadId);
+    clearCompletedThreadFlash(threadId);
   };
 
   const playThreadNeedsInputSound = () => {
@@ -815,6 +822,15 @@ export const App = () => {
   const loadGitOutgoingCommits = async (projectId: string) => {
     const commits = await api.git.getOutgoingCommits({ projectId });
     setGitOutgoingCommitsByProjectId((prev) => ({
+      ...prev,
+      [projectId]: commits
+    }));
+    return commits;
+  };
+
+  const loadGitIncomingCommits = async (projectId: string) => {
+    const commits = await api.git.getIncomingCommits({ projectId });
+    setGitIncomingCommitsByProjectId((prev) => ({
       ...prev,
       [projectId]: commits
     }));
@@ -1012,8 +1028,6 @@ export const App = () => {
       attachmentsRef.current.forEach((attachment) => {
         URL.revokeObjectURL(attachment.previewUrl);
       });
-      Object.values(completionFlashTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
-      completionFlashTimeoutsRef.current = {};
       completionAudioContextRef.current?.close().catch(() => {});
     },
     []
@@ -1531,12 +1545,6 @@ export const App = () => {
 
   useEffect(() => {
     const threadIds = new Set(threads.map((thread) => thread.id));
-    Object.keys(completionFlashTimeoutsRef.current).forEach((threadId) => {
-      if (!threadIds.has(threadId)) {
-        window.clearTimeout(completionFlashTimeoutsRef.current[threadId]);
-        delete completionFlashTimeoutsRef.current[threadId];
-      }
-    });
     setRunStateByThreadId((prev) => {
       const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
       if (nextEntries.length === Object.keys(prev).length) {
@@ -2142,7 +2150,8 @@ export const App = () => {
       loadProjectSkills(targetProjectId),
       loadProjectTerminalState(targetProjectId),
       loadGitState(targetProjectId),
-      loadGitOutgoingCommits(targetProjectId)
+      loadGitOutgoingCommits(targetProjectId),
+      loadGitIncomingCommits(targetProjectId)
     ])
       .then(([, projectSettings, , , gitState]) => {
         if (cancelled) {
@@ -2391,6 +2400,7 @@ export const App = () => {
     setProjectSettingsProjectName(projectName);
     setProjectSettingsBrowserEnabled(current.browserEnabled ?? true);
     setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
+    setProjectSettingsTab("general");
     if (activeProjectId !== projectId) {
       setActiveProjectId(projectId);
     }
@@ -2613,6 +2623,7 @@ export const App = () => {
 
       const nextState = await loadGitState(activeProjectId);
       await loadGitOutgoingCommits(activeProjectId);
+      await loadGitIncomingCommits(activeProjectId);
       const selectedPath =
         activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
           ? activeSelectedGitPath
@@ -2699,6 +2710,7 @@ export const App = () => {
 
       const nextState = await loadGitState(activeProjectId);
       await loadGitOutgoingCommits(activeProjectId);
+      await loadGitIncomingCommits(activeProjectId);
       const selectedPath =
         activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
           ? activeSelectedGitPath
@@ -5193,8 +5205,7 @@ const stopActiveRun = async () => {
                             } ${threadAwaitingInputById[thread.id] ? "thread-row-awaiting-input" : ""}`}
                             style={depth > 0 ? { marginLeft: `${depth * 14}px` } : undefined}
                             onClick={() => {
-                              setActiveProjectId(project.id);
-                              setActiveThreadId(thread.id);
+                              activateThreadFromSidebar(project.id, thread.id);
                             }}
                           >
                             <div className="thread-row-main">
@@ -5316,8 +5327,7 @@ const stopActiveRun = async () => {
                               } ${threadAwaitingInputById[thread.id] ? "thread-row-awaiting-input" : ""}`}
                               style={depth > 0 ? { marginLeft: `${depth * 14}px` } : undefined}
                               onClick={() => {
-                                setActiveProjectId(project.id);
-                                setActiveThreadId(thread.id);
+                                activateThreadFromSidebar(project.id, thread.id);
                               }}
                             >
                               <div className="thread-row-main">
@@ -6432,7 +6442,10 @@ const stopActiveRun = async () => {
                                     ? activeSelectedGitPath
                                     : state.files[0]?.path;
                                 selectGitPath(activeProjectId, selectedPath);
-                                return loadGitOutgoingCommits(activeProjectId);
+                                return Promise.all([
+                                  loadGitOutgoingCommits(activeProjectId),
+                                  loadGitIncomingCommits(activeProjectId)
+                                ]);
                               })
                               .catch((error) => setLogs((prev) => [...prev, `Git refresh failed: ${String(error)}`]));
                           }}
@@ -6482,6 +6495,41 @@ const stopActiveRun = async () => {
                     <section className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
                       {activeGitState?.insideRepo ? (
                         <div className="space-y-3">
+                          <div className="rounded-md border border-border/70 p-2">
+                            <div className="mb-2 text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                              Origin Commits ({activeIncomingCommits.length})
+                            </div>
+                            <button
+                              className="btn-ghost mb-2 w-full justify-center"
+                              onClick={() =>
+                                runGitAction("fetch", (projectId) => api.git.fetch({ projectId })).catch((error) =>
+                                  setLogs((prev) => [...prev, `Git fetch failed: ${String(error)}`])
+                                )
+                              }
+                              disabled={Boolean(gitBusyAction)}
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                {gitBusyAction === "fetch" && (
+                                  <span className={settings.useTurtleSpinners ? "loading-ring turtle-spinner" : "loading-ring"} />
+                                )}
+                                Fetch
+                              </span>
+                            </button>
+                            {activeIncomingCommits.length === 0 ? (
+                              <p className="text-xs text-slate-500">No origin-only commits.</p>
+                            ) : (
+                              activeIncomingCommits.map((commit) => (
+                                <div
+                                  key={`incoming-${commit.hash}`}
+                                  className="mt-1 rounded border border-cyan-900/40 bg-cyan-950/20 px-2 py-1 text-xs text-cyan-100/90"
+                                >
+                                  <div className="truncate text-[10px] text-cyan-300/90">{commit.hash}</div>
+                                  <div className="truncate">{commit.summary}</div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+
                           <div className="rounded-md border border-border/70 p-2">
                             <div className="mb-2 text-[11px] uppercase tracking-[0.12em] text-slate-500">
                               Local Commits ({activeOutgoingCommits.length})
@@ -6802,6 +6850,8 @@ const stopActiveRun = async () => {
           saveSkillEditor={saveSkillEditor}
           removingProject={removingProject}
           onClose={() => setShowProjectSettings(false)}
+          projectSettingsTab={projectSettingsTab}
+          setProjectSettingsTab={setProjectSettingsTab}
           onRemoveProject={removeActiveProject}
           onSaveProjectSettings={saveProjectSettings}
           onToggleProjectSkillEnabled={async (path, enabled) => {
