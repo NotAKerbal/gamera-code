@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+- Added the ability to automatically condense reasoning for easier thread navigation
+- Improved thread alerts to make finished threads easier to find
+- Improved send button performance
+- Upgraded settings toggles
+
 ## 0.2.0
 - Overhauled Project Settings
 - Skills support
