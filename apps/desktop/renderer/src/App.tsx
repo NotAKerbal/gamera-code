@@ -179,6 +179,9 @@ import {
   ProjectSettingsModal,
   RenameThreadModal
 } from "./appOverlays";
+import { SettingsModal } from "./appSettingsModal";
+import { SetupModal } from "./appSetupModal";
+import { ComposerDropdownPortal } from "./appComposerDropdown";
 
 const api = window.desktopAPI;
 const platformHints = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
@@ -6976,687 +6979,74 @@ const stopActiveRun = async () => {
           document.body
         )}
 
-      {composerDropdown &&
-        createPortal(
-          <div
-            ref={composerDropdownMenuRef}
-            className="branch-dropdown-pop"
-            style={{
-              position: "fixed",
-              bottom: `${composerDropdown.bottom}px`,
-              left: `${composerDropdown.left}px`,
-              width: `${composerDropdown.width}px`,
-              zIndex: 90
-            }}
-          >
-            <div className="branch-dropdown-list">
-              {composerDropdown.kind === "model" && (
-                <>
-                  <button
-                    className={(composerOptions.model ?? "").trim() === "" ? "branch-dropdown-row branch-dropdown-row-current" : "branch-dropdown-row"}
-                    onClick={() => {
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        model: undefined
-                      }));
-                      setComposerDropdown(null);
-                    }}
-                  >
-                    <span className="truncate">auto</span>
-                  </button>
-                  {MODEL_SUGGESTIONS.map((model) => (
-                    <button
-                      key={model}
-                      className={(composerOptions.model ?? "").trim() === model ? "branch-dropdown-row branch-dropdown-row-current" : "branch-dropdown-row"}
-                      onClick={() => {
-                        setComposerOptions((prev) => ({
-                          ...prev,
-                          model
-                        }));
-                        setComposerDropdown(null);
-                      }}
-                    >
-                      <span className="truncate">{model.toLowerCase()}</span>
-                    </button>
-                  ))}
-                </>
-              )}
-              {composerDropdown.kind === "effort" &&
-                REASONING_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    className={
-                      (composerOptions.modelReasoningEffort ?? "medium") === option.value
-                        ? "branch-dropdown-row branch-dropdown-row-current"
-                        : "branch-dropdown-row"
-                    }
-                    onClick={() => {
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        modelReasoningEffort: option.value
-                      }));
-                      setComposerDropdown(null);
-                    }}
-                  >
-                    <span className="truncate">{option.label.toLowerCase()}</span>
-                  </button>
-                ))}
-              {composerDropdown.kind === "mode" &&
-                COLLABORATION_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    className={
-                      (composerOptions.collaborationMode ?? "plan") === option.value
-                        ? "branch-dropdown-row branch-dropdown-row-current"
-                        : "branch-dropdown-row"
-                    }
-                    onClick={() => {
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        collaborationMode: option.value
-                      }));
-                      setComposerDropdown(null);
-                    }}
-                  >
-                    <span className="truncate">{option.label.toLowerCase()}</span>
-                  </button>
-                ))}
-              {composerDropdown.kind === "sandbox" &&
-                SANDBOX_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    className={
-                      (composerOptions.sandboxMode ?? "workspace-write") === option.value
-                        ? "branch-dropdown-row branch-dropdown-row-current"
-                        : "branch-dropdown-row"
-                    }
-                    onClick={() => {
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        sandboxMode: option.value
-                      }));
-                      setComposerDropdown(null);
-                    }}
-                  >
-                    <span className="truncate">{option.label.toLowerCase()}</span>
-                  </button>
-                ))}
-              {composerDropdown.kind === "approval" &&
-                APPROVAL_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    className={
-                      (composerOptions.approvalPolicy ?? "on-request") === option.value
-                        ? "branch-dropdown-row branch-dropdown-row-current"
-                        : "branch-dropdown-row"
-                    }
-                    onClick={() => {
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        approvalPolicy: option.value
-                      }));
-                      setComposerDropdown(null);
-                    }}
-                  >
-                    <span className="truncate">{option.label.toLowerCase()}</span>
-                  </button>
-                ))}
-              {composerDropdown.kind === "websearch" &&
-                WEB_SEARCH_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    className={
-                      (composerOptions.webSearchMode ?? "cached") === option.value
-                        ? "branch-dropdown-row branch-dropdown-row-current"
-                        : "branch-dropdown-row"
-                    }
-                    onClick={() => {
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        webSearchMode: option.value
-                      }));
-                      setComposerDropdown(null);
-                    }}
-                  >
-                    <span className="truncate">{option.label.toLowerCase()}</span>
-                  </button>
-                ))}
-            </div>
-          </div>,
-          document.body
-        )}
+      <ComposerDropdownPortal
+        composerDropdown={composerDropdown}
+        composerDropdownMenuRef={composerDropdownMenuRef}
+        composerOptions={composerOptions}
+        setComposerOptions={setComposerOptions}
+        setComposerDropdown={setComposerDropdown}
+      />
 
       {showSetupModal && installStatus && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Dependency Setup</h3>
-              <button
-                className="btn-secondary"
-                disabled={setupInstalling}
-                onClick={() => {
-                  if (setupInstalling) {
-                    return;
-                  }
-                  setShowSetupModal(false);
-                  setSetupPermissionGranted(false);
-                }}
-              >
-                Close
-              </button>
-            </div>
-
-            <p className="mb-3 text-sm text-slate-300">
-              This guided setup can automatically install missing dependencies for this app: Node.js/npm, Git, and ripgrep. Codex app server is bundled with the app.
-            </p>
-
-            <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
-              {installStatus.details
-                .filter((detail) => REQUIRED_SETUP_KEYS.has(detail.key))
-                .map((detail) => (
-                  <div key={detail.key} className="rounded-lg border border-border bg-black/20 p-2">
-                    <div className="font-medium">{INSTALL_DETAIL_LABELS[detail.key] ?? detail.key}</div>
-                    <div className={detail.ok ? "text-slate-100" : "text-slate-300"}>
-                      {detail.ok ? `Ready${detail.version ? ` (${detail.version})` : ""}` : detail.message}
-                    </div>
-                  </div>
-                ))}
-            </div>
-
-            {setupLiveLines.length > 0 && (
-              <div className="mb-4 max-h-48 overflow-y-auto rounded-lg border border-border bg-black/40 p-3 font-mono text-xs text-slate-300">
-                <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">Install Output</div>
-                {setupLiveLines.slice(-60).map((line, i) => (
-                  <div key={i} className="whitespace-pre-wrap leading-relaxed">{line}</div>
-                ))}
-                <div ref={setupLogEndRef} />
-              </div>
-            )}
-
-            <label className="project-settings-toggle mb-4">
-              <input
-                type="checkbox"
-                checked={setupPermissionGranted}
-                onChange={(event) => setSetupPermissionGranted(event.target.checked)}
-                disabled={setupInstalling}
-              />
-              <span>I approve running package manager install commands on this computer.</span>
-            </label>
-
-            <div className="flex justify-end gap-2">
-              <button
-                className="btn-secondary"
-                onClick={() => {
-                  loadInstallerStatus().catch((error) => {
-                    setLogs((prev) => [...prev, `Refresh setup status failed: ${String(error)}`]);
-                  });
-                }}
-                disabled={setupInstalling}
-              >
-                Refresh Status
-              </button>
-              <button
-                className="btn-primary"
-                disabled={!setupPermissionGranted || setupInstalling}
-                onClick={() => {
-                  runAutomaticSetup().catch((error) => {
-                    setLogs((prev) => [...prev, `Automatic setup failed: ${String(error)}`]);
-                  });
-                }}
-              >
-                {setupInstalling ? "Installing..." : "Install Missing Dependencies"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <SetupModal
+          installStatus={installStatus}
+          setupInstalling={setupInstalling}
+          setupPermissionGranted={setupPermissionGranted}
+          setSetupPermissionGranted={setSetupPermissionGranted}
+          setupLiveLines={setupLiveLines}
+          setupLogEndRef={setupLogEndRef}
+          onClose={() => {
+            setShowSetupModal(false);
+            setSetupPermissionGranted(false);
+          }}
+          onRefreshStatus={loadInstallerStatus}
+          onRunAutomaticSetup={runAutomaticSetup}
+          appendLog={(line) => setLogs((prev) => [...prev, line])}
+        />
       )}
 
       {(showSettings || isSettingsWindow) && (
-        <div className={isSettingsWindow ? "fixed inset-0 z-40 bg-[#0f0f10]" : "fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"}>
-          <div className={isSettingsWindow ? "flex h-full w-full flex-col bg-[#0f0f10]" : "flex w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon"}>
-            {isSettingsWindow ? (
-              <header
-                className={`drag-region window-header flex h-12 shrink-0 items-center justify-between border-b border-border/90 px-3 ${
-                  isMacOS ? "window-header-macos" : isWindows ? "window-header-windows" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-100">
-                  <img src={appIconDark} alt="GameraCode icon" className="h-8 w-8 rounded-xl object-cover" />
-                  <span>GameraCode - Settings</span>
-                </div>
-                <div className="no-drag flex items-center gap-2">
-                  {isWindows ? (
-                    <div className="window-controls ml-1">
-                      <button className="window-control-btn window-control-close" onClick={() => void closeWindow()} title="Close">
-                        <FaTimes className="window-control-icon" />
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              </header>
-            ) : (
-              <div className="mb-4 flex shrink-0 items-center justify-between">
-                <h3 className="text-lg font-semibold">Settings</h3>
-                <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    setShowSettings(false);
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-            )}
-
-            <div className={`flex min-h-0 flex-1 flex-col gap-4 md:flex-row ${isSettingsWindow ? "p-4" : ""}`}>
-              <aside className="shrink-0 md:w-52">
-                <div className="rounded-xl border border-border bg-black/20 p-2">
-                  <button
-                    className={settingsTab === "general" ? "btn-secondary w-full justify-start text-left text-xs" : "btn-ghost w-full justify-start text-left text-xs"}
-                    onClick={() => setSettingsTab("general")}
-                  >
-                    General
-                  </button>
-                  <button
-                    className={settingsTab === "codex" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-                    onClick={() => setSettingsTab("codex")}
-                  >
-                    Codex Defaults
-                  </button>
-                  <button
-                    className={settingsTab === "env" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-                    onClick={() => setSettingsTab("env")}
-                  >
-                    Environment
-                  </button>
-                  <button
-                    className={settingsTab === "skills" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-                    onClick={() => setSettingsTab("skills")}
-                  >
-                    Skills
-                  </button>
-                </div>
-              </aside>
-
-              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                {settingsTab === "general" && (
-                  <div className="space-y-3">
-                    <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                      <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">App</div>
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Permission mode</div>
-                        <select
-                          className="input"
-                          value={settings.permissionMode}
-                          onChange={(event) =>
-                            setSettings((prev) => ({
-                              ...prev,
-                              permissionMode: event.target.value as PermissionMode
-                            }))
-                          }
-                        >
-                          <option value="prompt_on_risk">Prompt on risk</option>
-                          <option value="always_ask">Always ask</option>
-                          <option value="auto_allow">Auto allow</option>
-                        </select>
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Auto-rename new threads</div>
-                        <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                          <input
-                            type="checkbox"
-                            checked={settings.autoRenameThreadTitles ?? true}
-                            onChange={(event) =>
-                              setSettings((prev) => ({
-                                ...prev,
-                                autoRenameThreadTitles: event.target.checked
-                              }))
-                            }
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Show thread descriptions</div>
-                        <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                          <input
-                            type="checkbox"
-                            checked={settings.showThreadSummaries ?? true}
-                            onChange={(event) =>
-                              setSettings((prev) => ({
-                                ...prev,
-                                showThreadSummaries: event.target.checked
-                              }))
-                            }
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Use turtle spinners</div>
-                        <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                          <input
-                            type="checkbox"
-                            checked={settings.useTurtleSpinners ?? false}
-                            onChange={(event) =>
-                              setSettings((prev) => ({
-                                ...prev,
-                                useTurtleSpinners: event.target.checked
-                              }))
-                            }
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                    </section>
-
-                    <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                      <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Projects</div>
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Default project directory</div>
-                        <div className="flex gap-2">
-                          <input
-                            className="input text-xs"
-                            value={settings.defaultProjectDirectory ?? ""}
-                            placeholder="/path/to/projects"
-                            onChange={(event) =>
-                              setSettings((prev) => ({
-                                ...prev,
-                                defaultProjectDirectory: event.target.value
-                              }))
-                            }
-                          />
-                          <button
-                            className="btn-secondary whitespace-nowrap"
-                            onClick={async () => {
-                              const picked = await api.projects.pickPath();
-                              if (!picked) {
-                                return;
-                              }
-                              setSettings((prev) => ({
-                                ...prev,
-                                defaultProjectDirectory: picked
-                              }));
-                            }}
-                          >
-                            Choose
-                          </button>
-                        </div>
-                      </div>
-                    </section>
-                  </div>
-                )}
-
-                {settingsTab === "codex" && (
-                  <div className="space-y-3">
-                    <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                      <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Defaults For New Threads</div>
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Model</div>
-                        <input
-                          list="model-suggestions"
-                          className="input text-xs"
-                          value={composerOptions.model ?? ""}
-                          placeholder="Model (default)"
-                          onChange={(event) =>
-                            setComposerOptions((prev) => ({
-                              ...prev,
-                              model: event.target.value.trim() || undefined
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Collaboration mode</div>
-                        <select
-                          className="input text-xs"
-                          value={composerOptions.collaborationMode ?? "plan"}
-                          onChange={(event) =>
-                            setComposerOptions((prev) => ({
-                              ...prev,
-                              collaborationMode: event.target.value as CodexCollaborationMode
-                            }))
-                          }
-                        >
-                          {COLLABORATION_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Reasoning effort</div>
-                        <select
-                          className="input text-xs"
-                          value={composerOptions.modelReasoningEffort ?? "medium"}
-                          onChange={(event) =>
-                            setComposerOptions((prev) => ({
-                              ...prev,
-                              modelReasoningEffort: event.target.value as CodexModelReasoningEffort
-                            }))
-                          }
-                        >
-                          {REASONING_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Sandbox mode</div>
-                        <select
-                          className="input text-xs"
-                          value={composerOptions.sandboxMode ?? "workspace-write"}
-                          onChange={(event) =>
-                            setComposerOptions((prev) => ({
-                              ...prev,
-                              sandboxMode: event.target.value as CodexSandboxMode
-                            }))
-                          }
-                        >
-                          {SANDBOX_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Approval policy</div>
-                        <select
-                          className="input text-xs"
-                          value={composerOptions.approvalPolicy ?? "on-request"}
-                          onChange={(event) =>
-                            setComposerOptions((prev) => ({
-                              ...prev,
-                              approvalPolicy: event.target.value as CodexApprovalMode
-                            }))
-                          }
-                        >
-                          {APPROVAL_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Web search mode</div>
-                        <select
-                          className="input text-xs"
-                          value={composerOptions.webSearchMode ?? "cached"}
-                          onChange={(event) =>
-                            setComposerOptions((prev) => ({
-                              ...prev,
-                              webSearchMode: event.target.value as CodexWebSearchMode
-                            }))
-                          }
-                        >
-                          {WEB_SEARCH_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="mx-2 border-t border-border/70" />
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Network access</div>
-                        <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                          <input
-                            type="checkbox"
-                            checked={composerOptions.networkAccessEnabled ?? true}
-                            onChange={(event) =>
-                              setComposerOptions((prev) => ({
-                                ...prev,
-                                networkAccessEnabled: event.target.checked
-                              }))
-                            }
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                    </section>
-
-                    <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                      <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Terminal</div>
-                      <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                        <div className="text-sm text-muted">Project switch terminal behavior</div>
-                        <select
-                          className="input text-xs"
-                          value={settings.projectTerminalSwitchBehaviorDefault ?? "start_stop"}
-                          onChange={(event) =>
-                            setSettings((prev) => ({
-                              ...prev,
-                              projectTerminalSwitchBehaviorDefault: event.target.value as ProjectTerminalSwitchBehavior
-                            }))
-                          }
-                        >
-                          {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </section>
-                  </div>
-                )}
-
-                {settingsTab === "env" && (
-                  <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                    <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Environment Variables</div>
-                    <div className="mx-2 grid items-start gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                      <div className="pt-2 text-sm text-muted">.env.local format</div>
-                      <textarea
-                        className="input h-56 font-mono text-xs"
-                        value={settingsEnvText}
-                        onChange={(event) => setSettingsEnvText(event.target.value)}
-                        placeholder={`NEXT_PUBLIC_API_URL=https://api.example.com\nFEATURE_FLAG=true`}
-                      />
-                    </div>
-                  </section>
-                )}
-
-                {settingsTab === "skills" && (
-                  <div className="space-y-3">
-                    <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                      <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">App Skills</div>
-                      <div className="mx-2 space-y-2 px-2 py-3">
-                        {appSkills.length === 0 ? (
-                          <p className="text-xs text-slate-400">No app skills discovered.</p>
-                        ) : (
-                          appSkills.map((skill) => (
-                            <div key={skill.path} className="rounded border border-border/70 bg-black/20 p-2 text-xs">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="min-w-0">
-                                  <div className="truncate text-sm text-slate-100">{skill.name}</div>
-                                  <div className="truncate text-slate-400">{skill.path}</div>
-                                </div>
-                                <label className="inline-flex items-center gap-1 whitespace-nowrap text-slate-300">
-                                  <input
-                                    type="checkbox"
-                                    checked={skill.enabled}
-                                    onChange={(event) => {
-                                      api.skills
-                                        .setEnabled({ path: skill.path, enabled: event.target.checked })
-                                        .then(() => loadAppSkills())
-                                        .catch((error) => setLogs((prev) => [...prev, `Skill toggle failed: ${String(error)}`]));
-                                    }}
-                                  />
-                                  Enabled
-                                </label>
-                              </div>
-                              <div className="mt-1 text-slate-300">{skill.description}</div>
-                              <div className="mt-2">
-                                <button
-                                  className="btn-ghost h-7 px-2 py-0 text-xs"
-                                  onClick={() => {
-                                    openSkillEditor(skill.path).catch((error) =>
-                                      setLogs((prev) => [...prev, `Open skill failed: ${String(error)}`])
-                                    );
-                                  }}
-                                >
-                                  Edit SKILL.md
-                                </button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </section>
-                    {skillEditorPath && (
-                      <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                        <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Skill Editor</div>
-                        <div className="mx-2 space-y-2 px-2 py-3">
-                          <div className="truncate font-mono text-[11px] text-slate-400">{skillEditorPath}</div>
-                          <textarea
-                            className="input h-56 font-mono text-xs"
-                            value={skillEditorContent}
-                            onChange={(event) => setSkillEditorContent(event.target.value)}
-                          />
-                          <div className="flex justify-end">
-                            <button className="btn-primary h-8 px-3 py-0 text-xs" onClick={saveSkillEditor} disabled={skillEditorSaving}>
-                              {skillEditorSaving ? "Saving..." : "Save Skill"}
-                            </button>
-                          </div>
-                        </div>
-                      </section>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-4 flex shrink-0 items-center gap-2 border-t border-border pt-4">
-              <div
-                className={`mr-auto text-xs ${
-                  settingsSaveNotice.startsWith("Settings save failed:") ? "text-rose-300" : "text-emerald-300"
-                }`}
-              >
-                {settingsSaveNotice}
-              </div>
-              {!isSettingsWindow && (
-                <button className="btn-secondary" onClick={() => setShowSettings(false)}>
-                  Cancel
-                </button>
-              )}
-              <button className="btn-primary" onClick={saveSettings} disabled={settingsSaving}>
-                {settingsSaving ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <SettingsModal
+          isSettingsWindow={isSettingsWindow}
+          isMacOS={isMacOS}
+          isWindows={isWindows}
+          appIconSrc={appIconDark}
+          settingsTab={settingsTab}
+          setSettingsTab={setSettingsTab}
+          settings={settings}
+          setSettings={setSettings}
+          composerOptions={composerOptions}
+          setComposerOptions={setComposerOptions}
+          settingsEnvText={settingsEnvText}
+          setSettingsEnvText={setSettingsEnvText}
+          appSkills={appSkills}
+          skillEditorPath={skillEditorPath}
+          skillEditorContent={skillEditorContent}
+          setSkillEditorContent={setSkillEditorContent}
+          skillEditorSaving={skillEditorSaving}
+          settingsSaveNotice={settingsSaveNotice}
+          settingsSaving={settingsSaving}
+          onClose={() => setShowSettings(false)}
+          onCloseWindow={closeWindow}
+          onSaveSettings={saveSettings}
+          onSaveSkillEditor={saveSkillEditor}
+          onToggleAppSkillEnabled={async (path, enabled) => {
+            await api.skills.setEnabled({ path, enabled });
+            await loadAppSkills();
+          }}
+          onOpenSkillEditor={openSkillEditor}
+          onPickDefaultProjectDirectory={async () => {
+            const picked = await api.projects.pickPath();
+            if (!picked) {
+              return;
+            }
+            setSettings((prev) => ({
+              ...prev,
+              defaultProjectDirectory: picked
+            }));
+          }}
+          appendLog={(line) => setLogs((prev) => [...prev, line])}
+        />
       )}
 
       {showProjectSettings && activeProjectId && (
