@@ -53,6 +53,27 @@ type SettingsModalProps = {
   appendLog: (line: string) => void;
 };
 
+type ToggleButtonProps = {
+  enabled: boolean;
+  onToggle: (next: boolean) => void;
+  className?: string;
+  onLabel?: string;
+  offLabel?: string;
+};
+
+const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLabel = "Off" }: ToggleButtonProps) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={enabled}
+    className={`settings-toggle-btn ${enabled ? "is-enabled" : ""} ${className}`.trim()}
+    onClick={() => onToggle(!enabled)}
+  >
+    <span className="settings-toggle-knob" aria-hidden="true" />
+    <span>{enabled ? onLabel : offLabel}</span>
+  </button>
+);
+
 export const SettingsModal = ({
   isSettingsWindow,
   isMacOS,
@@ -168,70 +189,61 @@ export const SettingsModal = ({
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Auto-rename new threads</div>
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                    <input
-                      type="checkbox"
-                      checked={settings.autoRenameThreadTitles ?? true}
-                      onChange={(event) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          autoRenameThreadTitles: event.target.checked
-                        }))
-                      }
-                    />
-                    Enabled
-                  </label>
+                  <ToggleButton
+                    enabled={settings.autoRenameThreadTitles ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        autoRenameThreadTitles: enabled
+                      }))
+                    }
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Show thread descriptions</div>
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                    <input
-                      type="checkbox"
-                      checked={settings.showThreadSummaries ?? true}
-                      onChange={(event) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          showThreadSummaries: event.target.checked
-                        }))
-                      }
-                    />
-                    Enabled
-                  </label>
+                  <ToggleButton
+                    enabled={settings.showThreadSummaries ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        showThreadSummaries: enabled
+                      }))
+                    }
+                  />
                 </div>
-                <div className="mx-2 border-t border-border/70" />
+              </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Theme</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Use turtle spinners</div>
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                    <input
-                      type="checkbox"
-                      checked={settings.useTurtleSpinners ?? false}
-                      onChange={(event) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          useTurtleSpinners: event.target.checked
-                        }))
-                      }
-                    />
-                    Enabled
-                  </label>
+                  <ToggleButton
+                    enabled={settings.useTurtleSpinners ?? false}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        useTurtleSpinners: enabled
+                      }))
+                    }
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Condense activity trace</div>
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                    <input
-                      type="checkbox"
-                      checked={settings.condenseActivityTimeline ?? true}
-                      onChange={(event) =>
-                        setSettings((prev) => ({
-                          ...prev,
-                          condenseActivityTimeline: event.target.checked
-                        }))
-                      }
-                    />
-                    Enabled
-                  </label>
+                  <div className="text-sm text-muted">Expand/contract activity trace groups</div>
+                  <ToggleButton
+                    enabled={settings.condenseActivityTimeline ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        condenseActivityTimeline: enabled
+                      }))
+                    }
+                  />
                 </div>
               </section>
 
@@ -389,19 +401,16 @@ export const SettingsModal = ({
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Network access</div>
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-200 md:justify-self-end">
-                    <input
-                      type="checkbox"
-                      checked={composerOptions.networkAccessEnabled ?? true}
-                      onChange={(event) =>
-                        setComposerOptions((prev) => ({
-                          ...prev,
-                          networkAccessEnabled: event.target.checked
-                        }))
-                      }
-                    />
-                    Enabled
-                  </label>
+                  <ToggleButton
+                    enabled={composerOptions.networkAccessEnabled ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setComposerOptions((prev) => ({
+                        ...prev,
+                        networkAccessEnabled: enabled
+                      }))
+                    }
+                  />
                 </div>
               </section>
 
@@ -460,18 +469,15 @@ export const SettingsModal = ({
                             <div className="truncate text-sm text-slate-100">{skill.name}</div>
                             <div className="truncate text-slate-400">{skill.path}</div>
                           </div>
-                          <label className="inline-flex items-center gap-1 whitespace-nowrap text-slate-300">
-                            <input
-                              type="checkbox"
-                              checked={skill.enabled}
-                              onChange={(event) => {
-                                onToggleAppSkillEnabled(skill.path, event.target.checked).catch((error) =>
-                                  appendLog(`Skill toggle failed: ${String(error)}`)
-                                );
-                              }}
-                            />
-                            Enabled
-                          </label>
+                          <ToggleButton
+                            enabled={skill.enabled}
+                            className="settings-toggle-btn-compact whitespace-nowrap"
+                            onToggle={(enabled) => {
+                              onToggleAppSkillEnabled(skill.path, enabled).catch((error) =>
+                                appendLog(`Skill toggle failed: ${String(error)}`)
+                              );
+                            }}
+                          />
                         </div>
                         <div className="mt-1 text-slate-300">{skill.description}</div>
                         <div className="mt-2">

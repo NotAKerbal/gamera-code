@@ -869,6 +869,50 @@ webview {
   @apply inline-flex items-center gap-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-slate-400 transition hover:text-slate-200 disabled:opacity-50;
 }
 
+.settings-toggle-btn {
+  @apply inline-flex items-center gap-2 rounded-lg border border-border/80 bg-black/25 px-2.5 py-1.5 text-xs text-slate-200 transition hover:bg-zinc-800/70;
+}
+
+.settings-toggle-btn.is-enabled {
+  @apply border-emerald-500/50 bg-emerald-500/10 text-emerald-200;
+}
+
+.settings-toggle-knob {
+  width: 1.5rem;
+  height: 0.85rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.65);
+  background: rgba(15, 23, 42, 0.75);
+  position: relative;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.settings-toggle-knob::after {
+  content: "";
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 9999px;
+  background: rgba(226, 232, 240, 0.9);
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  transform: translateY(-50%);
+  transition: left 150ms ease;
+}
+
+.settings-toggle-btn.is-enabled .settings-toggle-knob {
+  border-color: rgba(16, 185, 129, 0.65);
+  background: rgba(6, 95, 70, 0.55);
+}
+
+.settings-toggle-btn.is-enabled .settings-toggle-knob::after {
+  left: calc(100% - 2px - 0.55rem);
+}
+
+.settings-toggle-btn-compact {
+  @apply h-7 px-2 py-0 text-[11px];
+}
+
 .project-settings-toggle {
   @apply flex w-full items-center gap-2 rounded-lg border border-border/80 bg-black/20 px-3 py-2 text-sm text-slate-200;
 }
@@ -878,7 +922,7 @@ webview {
 }
 
 .project-settings-toggle-inline {
-  @apply justify-center text-[11px];
+  @apply inline-flex items-center justify-center text-[11px];
 }
 
 .project-settings-toggle > input[type="checkbox"],

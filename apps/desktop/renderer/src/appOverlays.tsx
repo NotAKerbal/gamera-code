@@ -12,6 +12,27 @@ import { PROJECT_SWITCH_BEHAVIOR_OPTIONS, type RenameDialogState } from "./appCo
 type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean };
 type ProjectSettingsTab = "general" | "env" | "commands" | "links" | "skills";
 
+type ToggleButtonProps = {
+  enabled: boolean;
+  onToggle: (next: boolean) => void;
+  className?: string;
+  onLabel?: string;
+  offLabel?: string;
+};
+
+const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLabel = "Off" }: ToggleButtonProps) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={enabled}
+    className={`settings-toggle-btn ${enabled ? "is-enabled" : ""} ${className}`.trim()}
+    onClick={() => onToggle(!enabled)}
+  >
+    <span className="settings-toggle-knob" aria-hidden="true" />
+    <span>{enabled ? onLabel : offLabel}</span>
+  </button>
+);
+
 type ProjectSettingsModalProps = {
   activeProjectId: string;
   projectSettingsProjectName: string;
@@ -150,14 +171,13 @@ export const ProjectSettingsModal = ({
               <div className="mx-2 border-t border-border/70" />
               <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                 <div className="text-sm text-muted">In-app browser</div>
-                <label className="project-settings-toggle md:justify-self-end">
-                  <input
-                    type="checkbox"
-                    checked={projectSettingsBrowserEnabled}
-                    onChange={(event) => setProjectSettingsBrowserEnabled(event.target.checked)}
-                  />
-                  <span>Enable in-app browser/preview for this project</span>
-                </label>
+                <ToggleButton
+                  enabled={projectSettingsBrowserEnabled}
+                  className="md:justify-self-end"
+                  onLabel="Enabled"
+                  offLabel="Disabled"
+                  onToggle={setProjectSettingsBrowserEnabled}
+                />
               </div>
             </section>
           )}
@@ -202,32 +222,34 @@ export const ProjectSettingsModal = ({
                         )
                       }
                     />
-                    <label className="project-settings-toggle project-settings-toggle-inline">
-                      <input
-                        type="checkbox"
-                        checked={command.autoStart}
-                        onChange={(event) =>
+                    <div className="project-settings-toggle-inline">
+                      <ToggleButton
+                        enabled={command.autoStart}
+                        className="settings-toggle-btn-compact"
+                        onLabel="Auto"
+                        offLabel="Auto"
+                        onToggle={(enabled) =>
                           setProjectSettingsCommands((prev) =>
-                            prev.map((item, idx) => (idx === index ? { ...item, autoStart: event.target.checked } : item))
+                            prev.map((item, idx) => (idx === index ? { ...item, autoStart: enabled } : item))
                           )
                         }
                       />
-                      <span>Auto</span>
-                    </label>
+                    </div>
                     {projectSettingsBrowserEnabled ? (
-                      <label className="project-settings-toggle project-settings-toggle-inline">
-                        <input
-                          type="radio"
-                          name="preview-command"
-                          checked={command.useForPreview}
-                          onChange={() =>
-                            setProjectSettingsCommands((prev) =>
-                              prev.map((item, idx) => ({ ...item, useForPreview: idx === index }))
-                            )
+                      <ToggleButton
+                        enabled={command.useForPreview}
+                        className="settings-toggle-btn-compact"
+                        onLabel="Browser"
+                        offLabel="Browser"
+                        onToggle={(enabled) => {
+                          if (!enabled) {
+                            return;
                           }
-                        />
-                        <span>Browser</span>
-                      </label>
+                          setProjectSettingsCommands((prev) =>
+                            prev.map((item, idx) => ({ ...item, useForPreview: idx === index }))
+                          );
+                        }}
+                      />
                     ) : (
                       <div />
                     )}
@@ -342,18 +364,15 @@ export const ProjectSettingsModal = ({
                               <div className="truncate text-sm text-slate-100">{skill.name}</div>
                               <div className="truncate text-slate-400">{skill.path}</div>
                             </div>
-                            <label className="inline-flex items-center gap-1 whitespace-nowrap text-slate-300">
-                              <input
-                                type="checkbox"
-                                checked={skill.enabled}
-                                onChange={(event) => {
-                                  onToggleProjectSkillEnabled(skill.path, event.target.checked).catch((error) =>
-                                    appendLog(`Skill toggle failed: ${String(error)}`)
-                                  );
-                                }}
-                              />
-                              Enabled
-                            </label>
+                            <ToggleButton
+                              enabled={skill.enabled}
+                              className="settings-toggle-btn-compact whitespace-nowrap"
+                              onToggle={(enabled) => {
+                                onToggleProjectSkillEnabled(skill.path, enabled).catch((error) =>
+                                  appendLog(`Skill toggle failed: ${String(error)}`)
+                                );
+                              }}
+                            />
                           </div>
                           <div className="mt-1 text-slate-300">{skill.description}</div>
                           <div className="mt-2">

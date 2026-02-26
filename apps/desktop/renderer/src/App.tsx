@@ -234,6 +234,7 @@ export const App = () => {
   const [threadHistoryHasMoreById, setThreadHistoryHasMoreById] = useState<Record<string, boolean>>({});
   const [threadHistoryLoadingById, setThreadHistoryLoadingById] = useState<Record<string, boolean>>({});
   const [runStateByThreadId, setRunStateByThreadId] = useState<Record<string, ThreadRunState>>({});
+  const [sendPendingByThreadId, setSendPendingByThreadId] = useState<Record<string, boolean>>({});
   const [composerDraftByThreadId, setComposerDraftByThreadId] = useState<Record<string, string>>({});
   const [queuedPromptsByThreadId, setQueuedPromptsByThreadId] = useState<Record<string, QueuedPrompt[]>>({});
   const [threadCompletionFlashById, setThreadCompletionFlashById] = useState<Record<string, boolean>>({});
@@ -333,6 +334,7 @@ export const App = () => {
     previousTop: number;
   } | null>(null);
   const runStateByThreadIdRef = useRef<Record<string, ThreadRunState>>({});
+  const sendPendingByThreadIdRef = useRef<Record<string, boolean>>({});
   const threadAwaitingInputByIdRef = useRef<Record<string, boolean>>({});
   const pendingUserQuestionsByThreadIdRef = useRef<Record<string, PendingUserQuestion[]>>({});
   const pendingUserInputRequestIdByThreadIdRef = useRef<Record<string, string>>({});
@@ -549,6 +551,7 @@ export const App = () => {
   const hasStageableFiles = activeUnstagedFiles.length > 0;
   const isWorkingTreeClean = hasStageableFiles === false && activeStagedFiles.length === 0;
   const activeRunState: ThreadRunState = activeThreadId ? runStateByThreadId[activeThreadId] ?? "idle" : "idle";
+  const activeThreadSendPending = activeThreadId ? Boolean(sendPendingByThreadId[activeThreadId]) : false;
   const activeThreadAwaitingInput = activeThreadId ? Boolean(threadAwaitingInputById[activeThreadId]) : false;
   const activePendingUserQuestions = useMemo(
     () => (activeThreadId ? pendingUserQuestionsByThreadId[activeThreadId] ?? [] : []),
@@ -3793,6 +3796,9 @@ export const App = () => {
   const sendPrompt = async () => {
     if (!activeThreadId) return;
     const targetThreadId = activeThreadId;
+    if (sendPendingByThreadIdRef.current[targetThreadId]) {
+      return;
+    }
     const trimmed = composerRef.current.trim();
     const mentionedFiles = composerMentionedFiles;
     if (!trimmed && composerAttachments.length === 0 && mentionedFiles.length === 0) return;
@@ -3882,25 +3888,41 @@ export const App = () => {
         }
       }
     };
+    setSendPendingByThreadId((prev) => {
+      const next = { ...prev, [targetThreadId]: true };
+      sendPendingByThreadIdRef.current = next;
+      return next;
+    });
+    try {
+      void applyFirstPromptMetadata();
 
-    await applyFirstPromptMetadata();
+      if ((runStateByThreadIdRef.current[targetThreadId] ?? "idle") === "running") {
+        setQueuedPromptsByThreadId((prev) => {
+          const nextQueue = [...(prev[targetThreadId] ?? []), prompt];
+          const next = {
+            ...prev,
+            [targetThreadId]: nextQueue
+          };
+          queuedPromptsByThreadIdRef.current = next;
+          return next;
+        });
+        clearComposerAfterSubmit();
+        return;
+      }
 
-    if ((runStateByThreadIdRef.current[targetThreadId] ?? "idle") === "running") {
-      setQueuedPromptsByThreadId((prev) => {
-        const nextQueue = [...(prev[targetThreadId] ?? []), prompt];
-        const next = {
-          ...prev,
-          [targetThreadId]: nextQueue
-        };
-        queuedPromptsByThreadIdRef.current = next;
+      await dispatchPromptToThread(targetThreadId, prompt);
+      clearComposerAfterSubmit();
+    } finally {
+      setSendPendingByThreadId((prev) => {
+        if (!prev[targetThreadId]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[targetThreadId];
+        sendPendingByThreadIdRef.current = next;
         return next;
       });
-      clearComposerAfterSubmit();
-      return;
     }
-
-    await dispatchPromptToThread(targetThreadId, prompt);
-    clearComposerAfterSubmit();
   };
 
   const steerPrompt = async () => {
@@ -5920,8 +5942,8 @@ const stopActiveRun = async () => {
                         onSelect={(event) => syncComposerMentionFromTextarea(event.currentTarget)}
                         onClick={(event) => syncComposerMentionFromTextarea(event.currentTarget)}
                         onPaste={onComposerPaste}
-                        placeholder={activeThread ? "Send a prompt to the active thread" : "Create a thread to start chatting"}
-                        disabled={!activeThreadId}
+                        placeholder={activeThreadSendPending ? "Sending prompt..." : activeThread ? "Send a prompt to the active thread" : "Create a thread to start chatting"}
+                        disabled={!activeThreadId || activeThreadSendPending}
                       />
                       {fileMention && (
                         <div
@@ -5992,7 +6014,7 @@ const stopActiveRun = async () => {
                       <button
                         className="composer-plus-btn"
                         title="Attach images"
-                        disabled={!activeThreadId}
+                        disabled={!activeThreadId || activeThreadSendPending}
                         onClick={() => imagePickerRef.current?.click()}
                       >
                         <FaPlus className="mx-auto text-[11px]" />
@@ -6001,7 +6023,7 @@ const stopActiveRun = async () => {
                         ref={composerModelTriggerRef}
                         className="composer-dropdown-trigger"
                         onClick={() => openComposerDropdown("model", composerModelTriggerRef.current)}
-                        disabled={!activeThreadId}
+                        disabled={!activeThreadId || activeThreadSendPending}
                         title="Model"
                       >
                         <span>{modelLabel.toLowerCase()}</span>
@@ -6011,7 +6033,7 @@ const stopActiveRun = async () => {
                         ref={composerEffortTriggerRef}
                         className="composer-dropdown-trigger"
                         onClick={() => openComposerDropdown("effort", composerEffortTriggerRef.current)}
-                        disabled={!activeThreadId}
+                        disabled={!activeThreadId || activeThreadSendPending}
                         title="Reasoning effort"
                       >
                         <span>{effortLabel.toLowerCase()}</span>
@@ -6021,7 +6043,7 @@ const stopActiveRun = async () => {
                         ref={composerModeTriggerRef}
                         className="composer-dropdown-trigger"
                         onClick={() => openComposerDropdown("mode", composerModeTriggerRef.current)}
-                        disabled={!activeThreadId}
+                        disabled={!activeThreadId || activeThreadSendPending}
                         title="Collaboration mode"
                       >
                         <span>{modeLabel.toLowerCase()}</span>
@@ -6056,10 +6078,10 @@ const stopActiveRun = async () => {
                                 setLogs((prev) => [...prev, `Queue failed: ${String(error)}`]);
                               });
                             }}
-                            disabled={!activeThreadId}
+                            disabled={!activeThreadId || activeThreadSendPending}
                             title="Queue prompt"
                           >
-                            Queue
+                            {activeThreadSendPending ? "Queueing..." : "Queue"}
                           </button>
                         </div>
                       ) : (
@@ -6087,12 +6109,12 @@ const stopActiveRun = async () => {
                             setLogs((prev) => [...prev, `Send failed: ${String(error)}`]);
                           });
                         }}
-                        disabled={!activeThreadId || !hasComposerPayload}
+                        disabled={!activeThreadId || !hasComposerPayload || activeThreadSendPending}
                         title="Send prompt"
                       >
                         <span className="inline-flex items-center gap-1.5">
                           <FaPaperPlane className="text-[11px]" />
-                          Send
+                          {activeThreadSendPending ? "Sending..." : "Send"}
                         </span>
                       </button>
                     )}
