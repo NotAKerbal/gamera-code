@@ -9,7 +9,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type KeyboardEventHandler
 } from "react";
-import { createPortal } from "react-dom";
 import {
   FaArchive,
   FaArrowUp,
@@ -182,6 +181,8 @@ import {
 import { SettingsModal } from "./appSettingsModal";
 import { SetupModal } from "./appSetupModal";
 import { ComposerDropdownPortal } from "./appComposerDropdown";
+import { BranchDropdownPortal } from "./appBranchDropdown";
+import { MainHeader } from "./appMainHeader";
 
 const api = window.desktopAPI;
 const platformHints = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
@@ -4965,240 +4966,67 @@ const stopActiveRun = async () => {
       <div className={isSettingsWindow ? "h-full w-full bg-[#0f0f10]" : `h-full w-full bg-[radial-gradient(circle_at_top_left,#1b1b1b_0%,#111111_40%,#0a0a0a_100%)] ${isWindows ? "" : "pl-2"}`}>
         <div className={isSettingsWindow ? "flex h-full flex-col overflow-hidden bg-[#0f0f10]" : "flex h-full flex-col overflow-hidden rounded-2xl bg-black/40 shadow-neon backdrop-blur-xl"}>
           {!isSettingsWindow && (
-            <header
-              className={`drag-region window-header flex h-12 items-center justify-between border-b border-border/90 px-3 ${
-                isMacOS ? "window-header-macos" : isWindows ? "window-header-windows" : ""
-              }`}
-            >
-            <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-100">
-              <img src={appIconDark} alt="GameraCode icon" className="h-8 w-8 rounded-xl object-cover" />
-              <span>GameraCode</span>
-              <div className="relative no-drag" ref={changelogRef}>
-                <button
-                  className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 transition hover:bg-zinc-700/90 hover:text-slate-200"
-                  onClick={() => setIsChangelogOpen((prev) => !prev)}
-                  title={`What's new in ${APP_VERSION_LABEL}`}
-                >
-                  {APP_VERSION_LABEL}
-                </button>
-                {isChangelogOpen && (
-                  <div className="changelog-pop">
-                    <div className="changelog-pop-title">What&apos;s New in {APP_VERSION_LABEL}</div>
-                    <ul className="changelog-pop-list">
-                      {CHANGELOG_ITEMS.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="no-drag flex items-center gap-2">
-              {updateMessage && <span className="hidden text-xs text-slate-400 md:inline">{updateMessage}</span>}
-              {activeProjectWebLinks.map((link) => (
-                <button
-                  key={link.id}
-                  className="btn-ghost"
-                  title={`${link.name || link.url} (${link.url})`}
-                  onClick={() =>
-                    openProjectWebLink(link).catch((error) => setLogs((prev) => [...prev, `Open web link failed: ${String(error)}`]))
+            <MainHeader
+              isMacOS={isMacOS}
+              isWindows={isWindows}
+              isWindowMaximized={isWindowMaximized}
+              appIconSrc={appIconDark}
+              appVersionLabel={APP_VERSION_LABEL}
+              changelogItems={CHANGELOG_ITEMS}
+              changelogRef={changelogRef}
+              isChangelogOpen={isChangelogOpen}
+              setIsChangelogOpen={setIsChangelogOpen}
+              updateMessage={updateMessage}
+              activeProjectWebLinks={activeProjectWebLinks}
+              onOpenProjectWebLink={openProjectWebLink}
+              onCheckUpdates={checkUpdates}
+              terminalMenuRef={terminalMenuRef}
+              terminalMenuTriggerRef={terminalMenuTriggerRef}
+              terminalMenuContentRef={terminalMenuContentRef}
+              isTerminalMenuOpen={isTerminalMenuOpen}
+              setIsTerminalMenuOpen={setIsTerminalMenuOpen}
+              moveTerminalMenuFocus={moveTerminalMenuFocus}
+              activeProjectId={activeProjectId}
+              activeProjectTerminals={activeProjectTerminals}
+              activeRunningTerminalsCount={activeRunningTerminalsCount}
+              isTerminalDashboardPoppedOut={isTerminalDashboardPoppedOut}
+              onOpenProjectTerminal={openProjectTerminal}
+              onOpenTerminalDashboardPopout={openTerminalDashboardPopout}
+              onOpenTerminalPopout={openTerminalPopout}
+              onStartTerminal={startActiveProjectTerminal}
+              onStopTerminal={stopActiveProjectTerminal}
+              onCopyTerminalOutput={copyTerminalOutput}
+              onOpenProjectFiles={openProjectFiles}
+              activeProjectBrowserEnabled={activeProjectBrowserEnabled}
+              isPreviewOpen={isPreviewOpen}
+              isGitPanelOpen={isGitPanelOpen}
+              onTogglePreviewPanel={() => {
+                setIsPreviewOpen((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setIsGitPanelOpen(false);
                   }
-                >
-                  <span className="inline-flex items-center gap-1">
-                    <FaExternalLinkAlt className="text-[10px]" />
-                    {link.name || "Link"}
-                  </span>
-                </button>
-              ))}
-              <button className="btn-ghost" onClick={checkUpdates} title="Check for updates">
-                <span className="inline-flex items-center gap-1"><FaSyncAlt className="text-[10px]" />Updates</span>
-              </button>
-              <div className="relative" ref={terminalMenuRef}>
-                <button
-                  ref={terminalMenuTriggerRef}
-                  className="btn-ghost inline-flex items-center gap-1"
-                  title="Select project terminal"
-                  onClick={() => setIsTerminalMenuOpen((prev) => !prev)}
-                  disabled={!activeProjectId}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    <FaTerminal className="text-[10px]" />
-                    Terminal
-                    {activeProjectId ? <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300">{activeRunningTerminalsCount}/{activeProjectTerminals.length}</span> : null}
-                  </span>
-                  <FaChevronDown className="text-[10px] text-slate-500" />
-                </button>
-                {isTerminalMenuOpen && (
-                  <div ref={terminalMenuContentRef} className="terminal-menu-pop" onKeyDown={moveTerminalMenuFocus}>
-                    <button
-                      className="terminal-menu-row"
-                      onClick={() => {
-                        openProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Open terminal failed: ${String(error)}`]));
-                        setIsTerminalMenuOpen(false);
-                      }}
-                    >
-                      Open Native Shell
-                    </button>
-                    <button
-                      className="terminal-menu-row"
-                      onClick={() => {
-                        openTerminalDashboardPopout();
-                        setIsTerminalMenuOpen(false);
-                      }}
-                    >
-                      {isTerminalDashboardPoppedOut ? "Focus Terminal Dashboard" : "Open Terminal Dashboard"}
-                    </button>
-                    <div className="terminal-menu-divider" />
-                    {activeProjectTerminals.length === 0 ? (
-                      <div className="terminal-menu-empty">No dev terminals configured.</div>
-                    ) : (
-                      <>
-                        <div className="terminal-menu-meta">Running {activeRunningTerminalsCount}/{activeProjectTerminals.length}</div>
-                        {activeProjectTerminals.map((terminal) => {
-                          const terminalPopoutKey = activeProjectId ? getTerminalPopoutKey(activeProjectId, terminal.commandId) : "";
-                          return (
-                            <div
-                              key={`menu-${terminal.commandId}`}
-                              className="terminal-menu-item"
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => {
-                                openTerminalPopout(terminal);
-                                setIsTerminalMenuOpen(false);
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key !== "Enter" && event.key !== " ") {
-                                  return;
-                                }
-                                event.preventDefault();
-                                openTerminalPopout(terminal);
-                                setIsTerminalMenuOpen(false);
-                              }}
-                              title="Pop out terminal"
-                            >
-                              <div className="terminal-menu-row">
-                                <span className="truncate">
-                                  {terminal.name}
-                                  {terminal.useForPreview ? " (Browser)" : ""}
-                                </span>
-                                <span className="terminal-menu-status">{terminal.running ? "Running" : "Stopped"}</span>
-                              </div>
-                              <div className="terminal-menu-actions">
-                                <button
-                                  className="btn-ghost px-2 py-1 text-[10px]"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    startActiveProjectTerminal(terminal.commandId).catch((error) =>
-                                      setLogs((prev) => [...prev, `Terminal start failed: ${String(error)}`])
-                                    );
-                                  }}
-                                >
-                                  {terminal.running ? "Restart" : "Start"}
-                                </button>
-                                <button
-                                  className="btn-ghost px-2 py-1 text-[10px]"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    copyTerminalOutput(terminal.name, terminal.outputTail || "");
-                                  }}
-                                  disabled={!terminal.outputTail?.trim()}
-                                >
-                                  Copy
-                                </button>
-                                {terminal.running ? (
-                                  <button
-                                    className="btn-ghost px-2 py-1 text-[10px]"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      stopActiveProjectTerminal(terminal.commandId).catch((error) =>
-                                        setLogs((prev) => [...prev, `Terminal stop failed: ${String(error)}`])
-                                      );
-                                    }}
-                                  >
-                                    Stop
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-              <button
-                className="btn-ghost"
-                title="Open project folder in file explorer"
-                onClick={() => openProjectFiles().catch((error) => setLogs((prev) => [...prev, `Open files failed: ${String(error)}`]))}
-                disabled={!activeProjectId}
-              >
-                <span className="inline-flex items-center gap-1"><FaFolderOpen className="text-[10px]" />Files</span>
-              </button>
-              {activeProjectBrowserEnabled && (
-                <button
-                  className="btn-ghost"
-                  title={isPreviewOpen ? "Hide preview panel" : "Show preview panel"}
-                  onClick={() => {
-                    setIsPreviewOpen((prev) => {
-                      const next = !prev;
-                      if (next) {
-                        setIsGitPanelOpen(false);
-                      }
-                      return next;
-                    });
-                  }}
-                >
-                  <span className="inline-flex items-center gap-1"><FaEye className="text-[10px]" />{isPreviewOpen ? "Hide Preview" : "Preview"}</span>
-                </button>
-              )}
-              <button
-                className="btn-ghost"
-                title={isGitPanelOpen ? "Hide git panel" : "Show git panel"}
-                onClick={() => {
-                  setIsGitPanelOpen((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      setIsPreviewOpen(false);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                <span className="inline-flex items-center gap-1">
-                  <FaCodeBranch className="text-[10px]" />
-                  {isGitPanelOpen ? "Hide Git" : "Git"}
-                  {showHeaderGitDiffStats ? (
-                    <span className="git-header-diff-badge rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300">
-                      <span className="text-emerald-300">+{activeGitAddedLines}</span>
-                      <span className="px-1 text-slate-500">/</span>
-                      <span className="text-rose-300">-{activeGitRemovedLines}</span>
-                    </span>
-                  ) : null}
-                </span>
-              </button>
-              <button className="sidebar-settings-btn" onClick={() => {
-                openAppSettingsWindow().catch((error) => {
-                  setLogs((prev) => [...prev, `Open settings window failed: ${String(error)}`]);
+                  return next;
                 });
-              }} title="Open app settings">
-                <span className="inline-flex items-center gap-1"><FaCog className="text-[11px]" />Settings</span>
-              </button>
-              {isWindows ? (
-                <div className="window-controls ml-1">
-                  <button className="window-control-btn" onClick={() => void minimizeWindow()} title="Minimize">
-                    <FaWindowMinimize className="window-control-icon" />
-                  </button>
-                  <button className="window-control-btn" onClick={() => void toggleMaximizeWindow()} title="Maximize or restore">
-                    {isWindowMaximized ? <FaWindowRestore className="window-control-icon" /> : <FaWindowMaximize className="window-control-icon" />}
-                  </button>
-                  <button className="window-control-btn window-control-close" onClick={() => void closeWindow()} title="Close">
-                    <FaTimes className="window-control-icon" />
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            </header>
+              }}
+              onToggleGitPanel={() => {
+                setIsGitPanelOpen((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setIsPreviewOpen(false);
+                  }
+                  return next;
+                });
+              }}
+              showHeaderGitDiffStats={Boolean(showHeaderGitDiffStats)}
+              activeGitAddedLines={activeGitAddedLines}
+              activeGitRemovedLines={activeGitRemovedLines}
+              onOpenSettingsWindow={openAppSettingsWindow}
+              onMinimizeWindow={minimizeWindow}
+              onToggleMaximizeWindow={toggleMaximizeWindow}
+              onCloseWindow={closeWindow}
+              appendLog={(line) => setLogs((prev) => [...prev, line])}
+            />
           )}
 
           <div
@@ -6859,125 +6687,27 @@ const stopActiveRun = async () => {
         </div>
       </div>
 
-      {isBranchDropdownOpen &&
-        activeProjectId &&
-        activeGitState?.insideRepo &&
-        branchDropdownPosition &&
-        createPortal(
-          <div
-            ref={branchDropdownMenuRef}
-            className="branch-dropdown-pop"
-            style={{
-              position: "fixed",
-              bottom: `${branchDropdownPosition.bottom}px`,
-              left: `${branchDropdownPosition.left}px`,
-              width: `${branchDropdownPosition.width}px`,
-              zIndex: 90
-            }}
-          >
-            <div className="p-2">
-              <input
-                className="input branch-search-input h-8 text-xs"
-                value={gitBranchSearch}
-                placeholder="Search branches or type a new one"
-                autoFocus
-                onChange={(event) => {
-                  setGitBranchSearch(event.target.value);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    setIsBranchDropdownOpen(false);
-                    return;
-                  }
-                  if (event.key !== "Enter") {
-                    return;
-                  }
-                  event.preventDefault();
-                  switchOrCreateBranch().catch((error) => {
-                    setLogs((prev) => [...prev, `Branch change failed: ${String(error)}`]);
-                  });
-                }}
-                disabled={Boolean(gitBusyAction)}
-              />
-            </div>
-            <div
-              ref={branchListRef}
-              className="branch-dropdown-list"
-              onScroll={(event) => {
-                setBranchListScrollTop(event.currentTarget.scrollTop);
-                setBranchListViewportHeight(event.currentTarget.clientHeight || 208);
-              }}
-            >
-              {filteredBranches.length === 0 ? (
-                <div className="branch-dropdown-empty">No matching branches.</div>
-              ) : (
-                <div style={{ height: `${visibleBranches.totalHeight}px`, position: "relative" }}>
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      transform: `translateY(${visibleBranches.offsetTop}px)`
-                    }}
-                  >
-                    {visibleBranches.rows.map((branch) => (
-                      <button
-                        key={branch.name}
-                        className={branch.isCurrent ? "branch-dropdown-row branch-dropdown-row-current" : "branch-dropdown-row"}
-                        onClick={() => {
-                          switchOrCreateBranch(branch.name).catch((error) => {
-                            setLogs((prev) => [...prev, `Checkout failed: ${String(error)}`]);
-                          });
-                        }}
-                        disabled={Boolean(gitBusyAction)}
-                      >
-                        <span className="truncate">{branch.name}</span>
-                        <span className="flex items-center gap-1">
-                          {branch.isLocal ? <span className="branch-dropdown-chip">local</span> : null}
-                          {branch.isOnOrigin && !branch.isLocal ? <span className="branch-dropdown-chip" title="Exists on origin only">origin</span> : null}
-                          {branch.isCurrent ? <span className="branch-dropdown-chip">current</span> : null}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="branch-dropdown-actions">
-              {exactBranchMatch ? (
-                <button
-                  className="btn-ghost w-full text-left"
-                  onClick={() => {
-                    switchOrCreateBranch().catch((error) => {
-                      setLogs((prev) => [...prev, `Branch change failed: ${String(error)}`]);
-                    });
-                  }}
-                  disabled={Boolean(gitBusyAction) || exactBranchMatch.isCurrent}
-                >
-                  {exactBranchMatch.isCurrent ? "Already on this branch" : `Switch to ${exactBranchMatch.name}`}
-                </button>
-              ) : canCreateBranchFromInput ? (
-                <button
-                  className="btn-ghost w-full text-left"
-                  onClick={() => {
-                    switchOrCreateBranch().catch((error) => {
-                      setLogs((prev) => [...prev, `Branch change failed: ${String(error)}`]);
-                    });
-                  }}
-                  disabled={Boolean(gitBusyAction)}
-                >
-                  Create and switch to {gitBranchInput}
-                </button>
-              ) : (
-                <div className="branch-dropdown-empty">Type a branch name to switch or create.</div>
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
+      <BranchDropdownPortal
+        isOpen={isBranchDropdownOpen}
+        activeProjectId={activeProjectId}
+        activeInsideRepo={Boolean(activeGitState?.insideRepo)}
+        branchDropdownPosition={branchDropdownPosition}
+        branchDropdownMenuRef={branchDropdownMenuRef}
+        branchListRef={branchListRef}
+        gitBranchSearch={gitBranchSearch}
+        setGitBranchSearch={setGitBranchSearch}
+        setIsBranchDropdownOpen={setIsBranchDropdownOpen}
+        setBranchListScrollTop={setBranchListScrollTop}
+        setBranchListViewportHeight={setBranchListViewportHeight}
+        filteredBranches={filteredBranches}
+        visibleBranches={visibleBranches}
+        exactBranchMatch={exactBranchMatch}
+        canCreateBranchFromInput={canCreateBranchFromInput}
+        gitBranchInput={gitBranchInput}
+        gitBusyAction={gitBusyAction}
+        onSwitchOrCreateBranch={switchOrCreateBranch}
+        appendLog={(line) => setLogs((prev) => [...prev, line])}
+      />
 
       <ComposerDropdownPortal
         composerDropdown={composerDropdown}
