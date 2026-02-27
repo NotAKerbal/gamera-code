@@ -59,6 +59,16 @@ export interface ProjectWebLink {
   url: string;
 }
 
+export type SystemTerminalId = string;
+
+export interface SystemTerminalOption {
+  id: SystemTerminalId;
+  label: string;
+  command: string;
+  available: boolean;
+  isDefault: boolean;
+}
+
 export type ProjectTerminalSwitchBehavior = "start_stop" | "start_only" | "manual";
 
 export interface ProjectSettings {
@@ -223,6 +233,7 @@ export interface AppSettings {
   useTurtleSpinners?: boolean;
   condenseActivityTimeline?: boolean;
   projectTerminalSwitchBehaviorDefault?: ProjectTerminalSwitchBehavior;
+  preferredSystemTerminalId?: SystemTerminalId;
 }
 
 export interface UpdateCheckResult {

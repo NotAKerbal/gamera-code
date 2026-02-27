@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
-import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import {
@@ -10,6 +10,8 @@ import {
   type ProjectTerminalEvent,
   type PromptAttachment,
   type SessionEvent,
+  type SystemTerminalId,
+  type SystemTerminalOption,
   type ThreadStatus
 } from "@code-app/shared";
 import { Repository } from "../services/repository";
@@ -147,28 +149,204 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return files;
   };
 
-  const openNativeTerminal = (cwd: string) => {
-    if (process.platform === "win32") {
-      spawn("cmd.exe", ["/c", "start", "", "cmd.exe", "/k", `cd /d "${cwd}"`], {
+  interface TerminalRuntime {
+    id: SystemTerminalId;
+    label: string;
+    command: string;
+    available: boolean;
+    launch: (cwd: string) => Promise<boolean>;
+  }
+
+  const commandExists = (command: string): boolean => {
+    const checker = process.platform === "win32" ? "where" : "which";
+    const result = spawnSync(checker, [command], { stdio: "ignore" });
+    return result.status === 0;
+  };
+
+  const appExistsOnMac = (appName: string): boolean => {
+    if (process.platform !== "darwin") {
+      return false;
+    }
+    const result = spawnSync("open", ["-Ra", appName], { stdio: "ignore" });
+    return result.status === 0;
+  };
+
+  const spawnDetached = (command: string, args: string[], cwd: string, windowsHide = false): boolean => {
+    try {
+      spawn(command, args, {
         cwd,
         detached: true,
         stdio: "ignore",
-        windowsHide: false
+        windowsHide
       }).unref();
-      return;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const terminalCandidates = (): TerminalRuntime[] => {
+    if (process.platform === "win32") {
+      const gitBashPaths = [
+        join(process.env["ProgramFiles"] ?? "C:\\Program Files", "Git", "git-bash.exe"),
+        join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Git", "git-bash.exe")
+      ];
+      const gitBashPath = gitBashPaths.find((path) => existsSync(path));
+
+      return [
+        {
+          id: "windows-terminal",
+          label: "Windows Terminal",
+          command: "wt",
+          available: commandExists("wt"),
+          launch: async (cwd) => spawnDetached("wt", ["-d", cwd], cwd)
+        },
+        {
+          id: "powershell-core",
+          label: "PowerShell (pwsh)",
+          command: "pwsh",
+          available: commandExists("pwsh"),
+          launch: async (cwd) => spawnDetached("pwsh", ["-NoExit"], cwd)
+        },
+        {
+          id: "powershell",
+          label: "Windows PowerShell",
+          command: "powershell",
+          available: commandExists("powershell"),
+          launch: async (cwd) => spawnDetached("powershell", ["-NoExit"], cwd)
+        },
+        {
+          id: "command-prompt",
+          label: "Command Prompt",
+          command: "cmd",
+          available: commandExists("cmd"),
+          launch: async (cwd) => spawnDetached("cmd.exe", ["/k"], cwd, false)
+        },
+        {
+          id: "git-bash",
+          label: "Git Bash",
+          command: gitBashPath ?? "git-bash.exe",
+          available: Boolean(gitBashPath),
+          launch: async (cwd) => (gitBashPath ? spawnDetached(gitBashPath, [`--cd=${cwd}`], cwd) : false)
+        }
+      ];
     }
 
     if (process.platform === "darwin") {
-      spawn("open", ["-a", "Terminal", cwd], {
-        cwd,
-        detached: true,
-        stdio: "ignore"
-      }).unref();
+      return [
+        {
+          id: "terminal-app",
+          label: "Terminal.app",
+          command: "open -a Terminal",
+          available: appExistsOnMac("Terminal"),
+          launch: async (cwd) => spawnDetached("open", ["-a", "Terminal", cwd], cwd)
+        },
+        {
+          id: "iterm-app",
+          label: "iTerm",
+          command: "open -a iTerm",
+          available: appExistsOnMac("iTerm"),
+          launch: async (cwd) => spawnDetached("open", ["-a", "iTerm", cwd], cwd)
+        },
+        {
+          id: "kitty",
+          label: "Kitty",
+          command: "kitty",
+          available: commandExists("kitty"),
+          launch: async (cwd) => spawnDetached("kitty", ["--directory", cwd], cwd)
+        },
+        {
+          id: "alacritty",
+          label: "Alacritty",
+          command: "alacritty",
+          available: commandExists("alacritty"),
+          launch: async (cwd) => spawnDetached("alacritty", ["--working-directory", cwd], cwd)
+        }
+      ];
+    }
+
+    return [
+      {
+        id: "x-terminal-emulator",
+        label: "Default Terminal",
+        command: "x-terminal-emulator",
+        available: commandExists("x-terminal-emulator"),
+        launch: async (cwd) => spawnDetached("x-terminal-emulator", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "gnome-terminal",
+        label: "GNOME Terminal",
+        command: "gnome-terminal",
+        available: commandExists("gnome-terminal"),
+        launch: async (cwd) => spawnDetached("gnome-terminal", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "konsole",
+        label: "Konsole",
+        command: "konsole",
+        available: commandExists("konsole"),
+        launch: async (cwd) => spawnDetached("konsole", ["--workdir", cwd], cwd)
+      },
+      {
+        id: "xfce4-terminal",
+        label: "Xfce Terminal",
+        command: "xfce4-terminal",
+        available: commandExists("xfce4-terminal"),
+        launch: async (cwd) => spawnDetached("xfce4-terminal", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "kitty",
+        label: "Kitty",
+        command: "kitty",
+        available: commandExists("kitty"),
+        launch: async (cwd) => spawnDetached("kitty", ["--directory", cwd], cwd)
+      },
+      {
+        id: "alacritty",
+        label: "Alacritty",
+        command: "alacritty",
+        available: commandExists("alacritty"),
+        launch: async (cwd) => spawnDetached("alacritty", ["--working-directory", cwd], cwd)
+      }
+    ];
+  };
+
+  const listSystemTerminals = (): SystemTerminalOption[] => {
+    const settings = deps.repository.getSettings();
+    const candidates = terminalCandidates();
+    const available = candidates.filter((candidate) => candidate.available);
+    const preferredId = settings.preferredSystemTerminalId?.trim();
+    const defaultId =
+      (preferredId && available.find((candidate) => candidate.id === preferredId)?.id) ?? available[0]?.id ?? "";
+
+    return candidates.map((candidate) => ({
+      id: candidate.id,
+      label: candidate.label,
+      command: candidate.command,
+      available: candidate.available,
+      isDefault: defaultId === candidate.id
+    }));
+  };
+
+  const openSystemTerminal = async (cwd: string, terminalId?: SystemTerminalId) => {
+    const settings = deps.repository.getSettings();
+    const preferredId = settings.preferredSystemTerminalId?.trim();
+    const candidates = terminalCandidates();
+    const available = candidates.filter((candidate) => candidate.available);
+    const selected =
+      (terminalId && available.find((candidate) => candidate.id === terminalId)) ??
+      (preferredId && available.find((candidate) => candidate.id === preferredId)) ??
+      available[0];
+
+    if (!selected) {
+      await shell.openPath(cwd);
       return;
     }
 
-    // Linux fallback: this will open the folder if no terminal command is available.
-    shell.openPath(cwd).catch(() => undefined);
+    const launched = await selected.launch(cwd);
+    if (!launched) {
+      await shell.openPath(cwd);
+    }
   };
 
   const pushSessionEvent = (event: SessionEvent) => {
@@ -294,11 +472,18 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return result.filePaths[0];
   });
 
-  ipcMain.handle(IPC_CHANNELS.projectsOpenTerminal, async (_event, input: { projectId: string }) => {
-    const projectPath = getProjectPath(input.projectId);
-    openNativeTerminal(projectPath);
-    return { ok: true };
+  ipcMain.handle(IPC_CHANNELS.projectsListSystemTerminals, async () => {
+    return listSystemTerminals();
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.projectsOpenTerminal,
+    async (_event, input: { projectId: string; terminalId?: SystemTerminalId }) => {
+    const projectPath = getProjectPath(input.projectId);
+    await openSystemTerminal(projectPath, input.terminalId);
+    return { ok: true };
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.projectsOpenFiles, async (_event, input: { projectId: string }) => {
     const projectPath = getProjectPath(input.projectId);

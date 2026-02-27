@@ -229,7 +229,9 @@ const createWindow = () => {
   mainWindow.webContents.once("did-fail-load", revealMainWindow);
 
   mainWindow.webContents.setWindowOpenHandler(({ frameName }) => {
-    if (!frameName.startsWith("codeapp-terminal-")) {
+    const isCustomCodeWindow =
+      frameName.startsWith("codeapp-terminal-") || frameName === "codeapp-plan-viewer";
+    if (!isCustomCodeWindow) {
       return { action: "allow" };
     }
     return {

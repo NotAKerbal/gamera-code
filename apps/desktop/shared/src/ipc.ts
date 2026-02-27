@@ -9,6 +9,7 @@ export const IPC_CHANNELS = {
   projectsDelete: "projects:delete",
   projectsPickPath: "projects:pickPath",
   projectsOpenTerminal: "projects:openTerminal",
+  projectsListSystemTerminals: "projects:listSystemTerminals",
   projectsOpenFiles: "projects:openFiles",
   projectsListFiles: "projects:listFiles",
   projectsOpenWebLink: "projects:openWebLink",

@@ -10,6 +10,7 @@ import type {
   CodexWebSearchMode,
   PermissionMode,
   ProjectTerminalSwitchBehavior,
+  SystemTerminalOption,
   SkillRecord
 } from "@code-app/shared";
 import {
@@ -37,6 +38,7 @@ type SettingsModalProps = {
   settingsEnvText: string;
   setSettingsEnvText: Dispatch<SetStateAction<string>>;
   appSkills: SkillRecord[];
+  systemTerminals: SystemTerminalOption[];
   skillEditorPath: string;
   skillEditorContent: string;
   setSkillEditorContent: Dispatch<SetStateAction<string>>;
@@ -88,6 +90,7 @@ export const SettingsModal = ({
   settingsEnvText,
   setSettingsEnvText,
   appSkills,
+  systemTerminals,
   skillEditorPath,
   skillEditorContent,
   setSkillEditorContent,
@@ -433,6 +436,29 @@ export const SettingsModal = ({
                         {option.label}
                       </option>
                     ))}
+                  </select>
+                </div>
+                <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Preferred system terminal</div>
+                  <select
+                    className="input text-xs"
+                    value={settings.preferredSystemTerminalId ?? ""}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        preferredSystemTerminalId: event.target.value
+                      }))
+                    }
+                  >
+                    <option value="">Auto (first available)</option>
+                    {systemTerminals
+                      .filter((terminal) => terminal.available)
+                      .map((terminal) => (
+                        <option key={terminal.id} value={terminal.id}>
+                          {terminal.label}
+                        </option>
+                      ))}
                   </select>
                 </div>
               </section>

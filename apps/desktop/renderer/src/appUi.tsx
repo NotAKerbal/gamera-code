@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { FaChevronDown, FaGlobeAmericas } from "react-icons/fa";
 import type { PromptAttachment } from "@code-app/shared";
 import {
+  splitAssistantContentSegments,
   MARKDOWN_REMARK_PLUGINS,
   TRACE_CHILD_MAX_HEIGHT_PX,
   buildFileGroupLabel,
@@ -13,18 +14,16 @@ import {
   normalizeWebLinkUrl,
   safeHref,
   sanitizeForDisplay,
+  summarizePlanMarkdown,
+  todosToMarkdown,
+  type PlanArtifact,
   type TimelineItem,
 } from "./appCore";
 
 
-const AssistantMarkdown = ({ content }: { content: string }) => {
-  const cleaned = sanitizeForDisplay(content);
-  if (!cleaned) {
-    return null;
-  }
-
+const MarkdownContent = ({ content }: { content: string }) => {
   return (
-    <div className="assistant-md text-white">
+    <div className="assistant-md text-[15px] leading-7 text-white">
       <ReactMarkdown
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
         components={{
@@ -38,20 +37,104 @@ const AssistantMarkdown = ({ content }: { content: string }) => {
             const isBlock = Boolean(className) || value.includes("\n");
 
             if (!isBlock) {
-              return <code className="rounded bg-zinc-800 px-1 py-0.5 text-[0.92em] text-slate-100">{children}</code>;
+              return <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-[0.9em] text-slate-100">{children}</code>;
             }
 
             return (
-              <code className="block overflow-x-auto rounded-md border border-zinc-700 bg-black/55 p-3 font-mono text-xs text-slate-100">
+              <code className="block overflow-x-auto rounded-md border border-zinc-700 bg-black/55 p-4 font-mono text-[13px] leading-6 text-slate-100">
                 {value.replace(/\n$/, "")}
               </code>
             );
           },
-          pre: ({ children }) => <pre className="my-2">{children}</pre>
+          pre: ({ children }) => <pre className="my-4">{children}</pre>
         }}
       >
-        {cleaned}
+        {content}
       </ReactMarkdown>
+    </div>
+  );
+};
+
+const PlanSummaryCard = ({
+  label,
+  summary,
+  onViewPlan,
+  onBuildNow,
+  onCopy
+}: {
+  label: string;
+  summary: string;
+  onViewPlan: () => void;
+  onBuildNow: () => void;
+  onCopy: () => void;
+}) => (
+  <section className="rounded-lg border border-border/70 bg-zinc-900/60 p-4">
+    <div className="mb-3 text-[11px] uppercase tracking-[0.12em] text-slate-400">{label}</div>
+    <p className="text-[15px] leading-7 text-slate-200">{summary}</p>
+    <div className="mt-4 flex flex-wrap gap-2">
+      <button className="btn-ghost h-8 px-2 py-0 text-xs" onClick={onViewPlan}>
+        View plan
+      </button>
+      <button className="btn-primary h-8 px-2 py-0 text-xs" onClick={onBuildNow}>
+        Build now
+      </button>
+      <button className="btn-ghost h-8 px-2 py-0 text-xs" onClick={onCopy}>
+        Copy
+      </button>
+    </div>
+  </section>
+);
+
+const AssistantMarkdown = ({
+  messageId,
+  content,
+  plansById,
+  onViewPlan,
+  onBuildPlan,
+  onCopyPlan
+}: {
+  messageId: string;
+  content: string;
+  plansById: Record<string, PlanArtifact>;
+  onViewPlan: (planId: string) => void;
+  onBuildPlan: (planId: string) => void;
+  onCopyPlan: (planId: string) => void;
+}) => {
+  const cleaned = sanitizeForDisplay(content);
+  if (!cleaned) {
+    return null;
+  }
+  const segments = splitAssistantContentSegments(cleaned, messageId);
+
+  return (
+    <div className="space-y-3">
+      {segments.map((segment, index) => {
+        if (segment.kind === "markdown") {
+          if (!segment.content.trim()) {
+            return null;
+          }
+          return <MarkdownContent key={`md-${messageId}-${index}`} content={segment.content} />;
+        }
+
+        const fallbackSummary = summarizePlanMarkdown(segment.content);
+        const plan = segment.planId ? plansById[segment.planId] : undefined;
+        const summary = plan?.summary ?? fallbackSummary;
+        const planId = plan?.id ?? segment.planId;
+        if (!planId) {
+          return <MarkdownContent key={`md-fallback-${messageId}-${index}`} content={segment.content} />;
+        }
+
+        return (
+          <PlanSummaryCard
+            key={`plan-${planId}`}
+            label="Proposed Plan"
+            summary={summary}
+            onViewPlan={() => onViewPlan(planId)}
+            onBuildNow={() => onBuildPlan(planId)}
+            onCopy={() => onCopyPlan(planId)}
+          />
+        );
+      })}
     </div>
   );
 };
@@ -88,6 +171,11 @@ export const MemoizedUserMessageContent = memo(UserMessageContent);
 
 interface TimelineItemsListProps {
   timelineItems: TimelineItem[];
+  plansById: Record<string, PlanArtifact>;
+  getTodoPlanByActivityId: (activityId: string) => PlanArtifact | undefined;
+  onViewPlan: (planId: string) => void;
+  onBuildPlan: (planId: string) => void;
+  onCopyPlan: (planId: string) => void;
   expandedActivityGroups: Record<string, boolean>;
   setExpandedActivityGroups: Dispatch<SetStateAction<Record<string, boolean>>>;
   setExpandedActivityChildren: Dispatch<SetStateAction<Record<string, boolean>>>;
@@ -95,6 +183,11 @@ interface TimelineItemsListProps {
 
 const TimelineItemsList = ({
   timelineItems,
+  plansById,
+  getTodoPlanByActivityId,
+  onViewPlan,
+  onBuildPlan,
+  onCopyPlan,
   expandedActivityGroups,
   setExpandedActivityGroups,
   setExpandedActivityChildren
@@ -105,7 +198,14 @@ const TimelineItemsList = ({
         if (item.kind === "message") {
           return item.message.role === "assistant" ? (
             <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
-              <MemoizedAssistantMarkdown content={item.message.content} />
+              <MemoizedAssistantMarkdown
+                messageId={item.message.id}
+                content={item.message.content}
+                plansById={plansById}
+                onViewPlan={onViewPlan}
+                onBuildPlan={onBuildPlan}
+                onCopyPlan={onCopyPlan}
+              />
             </article>
           ) : (
             <article key={item.id} className="timeline-item min-w-0 overflow-hidden rounded-lg bg-zinc-900/80 p-3">
@@ -293,17 +393,18 @@ const TimelineItemsList = ({
         }
 
         if (item.entry.category === "plan" && (item.entry.todos?.length ?? 0) > 0) {
+          const plan = getTodoPlanByActivityId(item.entry.id);
+          const summary = plan?.summary ?? summarizePlanMarkdown(todosToMarkdown(item.entry.todos ?? []));
+          const planId = plan?.id ?? `todo:${item.entry.id}`;
           return (
-            <article key={item.id} className="timeline-item min-w-0 overflow-hidden rounded-lg border border-border/70 bg-zinc-900/60 p-3">
-              <div className="mb-2 text-xs uppercase tracking-[0.12em] text-slate-400">Plan</div>
-              <div className="space-y-1">
-                {item.entry.todos?.map((todo, index) => (
-                  <div key={`${item.id}-todo-${index}`} className="flex items-start gap-2 text-sm text-slate-200">
-                    <span className="mt-0.5 text-xs">{todo.completed ? "[x]" : "[ ]"}</span>
-                    <span className={todo.completed ? "line-through text-slate-500" : ""}>{todo.text}</span>
-                  </div>
-                ))}
-              </div>
+            <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
+              <PlanSummaryCard
+                label="Plan"
+                summary={summary}
+                onViewPlan={() => onViewPlan(planId)}
+                onBuildNow={() => onBuildPlan(planId)}
+                onCopy={() => onCopyPlan(planId)}
+              />
             </article>
           );
         }

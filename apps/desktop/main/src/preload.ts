@@ -62,6 +62,7 @@ const api: DesktopApiWithGitExtras = {
     delete: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsDelete, input),
     pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath),
     openTerminal: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenTerminal, input),
+    listSystemTerminals: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsListSystemTerminals, input),
     openFiles: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenFiles, input),
     listFiles: (input: { projectId: string; limit?: number }) => ipcRenderer.invoke(projectsListFilesChannel, input),
     openWebLink: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenWebLink, input),

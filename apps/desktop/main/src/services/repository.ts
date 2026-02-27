@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoRenameThreadTitles: true,
   showThreadSummaries: true,
   useTurtleSpinners: false,
+  preferredSystemTerminalId: "",
   projectTerminalSwitchBehaviorDefault: "start_stop",
   codexDefaults: {
     collaborationMode: "plan",

@@ -83,6 +83,38 @@ webview {
   @apply my-1 border-t border-border/70;
 }
 
+.terminal-system-options {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform-origin: top;
+  transform: translateY(-4px) scaleY(0.96);
+  transition: max-height 200ms ease, opacity 160ms ease, transform 160ms ease;
+}
+
+.terminal-system-options.is-open {
+  max-height: 12rem;
+  opacity: 1;
+  transform: translateY(0) scaleY(1);
+}
+
+.terminal-system-option-row {
+  animation: terminal-option-in 180ms ease both;
+}
+
+.terminal-options-toggle-icon {
+  transition: transform 180ms ease, opacity 180ms ease;
+  transform: rotate(0deg);
+}
+
+.terminal-options-toggle-icon.is-open {
+  transform: rotate(90deg);
+}
+
+.terminal-launching {
+  animation: terminal-launch-pulse 0.42s ease;
+}
+
 .btn-danger {
   @apply rounded-lg border border-red-400 bg-red-500/15 px-3 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-500/30;
 }
@@ -174,6 +206,29 @@ webview {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes terminal-option-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes terminal-launch-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.015);
+  }
+  100% {
+    transform: scale(1);
   }
 }
 

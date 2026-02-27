@@ -1,6 +1,8 @@
-import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, RefObject, SetStateAction } from "react";
+import { useMemo, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type RefObject, type SetStateAction } from "react";
 import {
+  FaApple,
   FaChevronDown,
+  FaChevronRight,
   FaCodeBranch,
   FaCog,
   FaExternalLinkAlt,
@@ -9,11 +11,13 @@ import {
   FaSyncAlt,
   FaTerminal,
   FaTimes,
+  FaWindows,
+  FaLinux,
   FaWindowMaximize,
   FaWindowMinimize,
   FaWindowRestore
 } from "react-icons/fa";
-import type { ProjectTerminalState, ProjectWebLink } from "@code-app/shared";
+import type { ProjectTerminalState, ProjectWebLink, SystemTerminalOption } from "@code-app/shared";
 
 type HeaderTerminal = ProjectTerminalState["terminals"][number];
 
@@ -40,8 +44,9 @@ type MainHeaderProps = {
   activeProjectId: string | null;
   activeProjectTerminals: HeaderTerminal[];
   activeRunningTerminalsCount: number;
+  systemTerminals: SystemTerminalOption[];
   isTerminalDashboardPoppedOut: boolean;
-  onOpenProjectTerminal: () => Promise<void>;
+  onOpenProjectTerminal: (terminalId?: string) => Promise<void>;
   onOpenTerminalDashboardPopout: () => void;
   onOpenTerminalPopout: (terminal: HeaderTerminal) => void;
   onStartTerminal: (commandId: string) => Promise<void>;
@@ -61,6 +66,32 @@ type MainHeaderProps = {
   onToggleMaximizeWindow: () => void | Promise<void>;
   onCloseWindow: () => void | Promise<void>;
   appendLog: (line: string) => void;
+};
+
+const TerminalGlyph = ({ terminalId }: { terminalId: string }) => {
+  if (
+    terminalId === "windows-terminal" ||
+    terminalId === "powershell-core" ||
+    terminalId === "powershell" ||
+    terminalId === "command-prompt"
+  ) {
+    return <FaWindows className="text-[10px] text-slate-400" />;
+  }
+  if (terminalId === "git-bash") {
+    return <FaCodeBranch className="text-[10px] text-slate-400" />;
+  }
+  if (terminalId === "terminal-app" || terminalId === "iterm-app") {
+    return <FaApple className="text-[10px] text-slate-400" />;
+  }
+  if (
+    terminalId === "x-terminal-emulator" ||
+    terminalId === "gnome-terminal" ||
+    terminalId === "konsole" ||
+    terminalId === "xfce4-terminal"
+  ) {
+    return <FaLinux className="text-[10px] text-slate-400" />;
+  }
+  return <FaTerminal className="text-[10px] text-slate-400" />;
 };
 
 export const MainHeader = ({
@@ -86,6 +117,7 @@ export const MainHeader = ({
   activeProjectId,
   activeProjectTerminals,
   activeRunningTerminalsCount,
+  systemTerminals,
   isTerminalDashboardPoppedOut,
   onOpenProjectTerminal,
   onOpenTerminalDashboardPopout,
@@ -107,8 +139,35 @@ export const MainHeader = ({
   onToggleMaximizeWindow,
   onCloseWindow,
   appendLog
-}: MainHeaderProps) => (
-  <header
+}: MainHeaderProps) => {
+  const [showTerminalAlternatives, setShowTerminalAlternatives] = useState(false);
+  const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
+  const availableSystemTerminals = useMemo(
+    () => systemTerminals.filter((terminal) => terminal.available),
+    [systemTerminals]
+  );
+  const defaultSystemTerminal = useMemo(
+    () => systemTerminals.find((terminal) => terminal.isDefault),
+    [systemTerminals]
+  );
+  const alternativeSystemTerminals = useMemo(() => {
+    const defaultId = defaultSystemTerminal?.id;
+    return availableSystemTerminals.filter((terminal) => terminal.id !== defaultId);
+  }, [availableSystemTerminals, defaultSystemTerminal]);
+  const launchSystemTerminal = (terminalId?: string) => {
+    const launchId = terminalId ?? defaultSystemTerminal?.id ?? "default-terminal";
+    setLaunchingSystemTerminalId(launchId);
+    onOpenProjectTerminal(terminalId)
+      .catch((error) => appendLog(`Open terminal failed: ${String(error)}`))
+      .finally(() => {
+        window.setTimeout(() => {
+          setLaunchingSystemTerminalId((current) => (current === launchId ? null : current));
+        }, 520);
+      });
+  };
+
+  return (
+    <header
     className={`drag-region window-header flex h-12 items-center justify-between border-b border-border/90 px-3 ${
       isMacOS ? "window-header-macos" : isWindows ? "window-header-windows" : ""
     }`}
@@ -177,15 +236,62 @@ export const MainHeader = ({
         </button>
         {isTerminalMenuOpen && (
           <div ref={terminalMenuContentRef} className="terminal-menu-pop" onKeyDown={moveTerminalMenuFocus}>
-            <button
-              className="terminal-menu-row"
-              onClick={() => {
-                onOpenProjectTerminal().catch((error) => appendLog(`Open terminal failed: ${String(error)}`));
-                setIsTerminalMenuOpen(false);
-              }}
-            >
-              Open Native Shell
-            </button>
+            <div className="terminal-menu-row flex items-center gap-2">
+              <button
+                type="button"
+                className={`min-w-0 flex-1 text-left ${launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? "terminal-launching" : ""}`}
+                onClick={() => {
+                  launchSystemTerminal();
+                  setIsTerminalMenuOpen(false);
+                  setShowTerminalAlternatives(false);
+                }}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <TerminalGlyph terminalId={defaultSystemTerminal?.id ?? "auto"} />
+                  Open {defaultSystemTerminal?.label ?? "Terminal"}
+                  {launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? (
+                    <span className="loading-ring" aria-hidden="true" />
+                  ) : null}
+                </span>
+              </button>
+              {alternativeSystemTerminals.length > 0 ? (
+                <button
+                  type="button"
+                  className="btn-ghost h-6 px-1.5 py-0 text-[10px]"
+                  title={showTerminalAlternatives ? "Hide terminal options" : "Show terminal options"}
+                  onClick={() => {
+                    setShowTerminalAlternatives((prev) => !prev);
+                  }}
+                >
+                  <FaChevronRight
+                    className={`terminal-options-toggle-icon text-[10px] text-slate-400 ${showTerminalAlternatives ? "is-open" : ""}`}
+                  />
+                </button>
+              ) : null}
+            </div>
+            <div className={`terminal-system-options ${showTerminalAlternatives ? "is-open" : ""}`}>
+              {alternativeSystemTerminals.map((terminal, index) => (
+                <button
+                  key={terminal.id}
+                  className={`terminal-menu-row pl-6 ${showTerminalAlternatives ? "terminal-system-option-row" : ""} ${launchingSystemTerminalId === terminal.id ? "terminal-launching" : ""}`}
+                  style={showTerminalAlternatives ? { animationDelay: `${index * 28}ms` } : undefined}
+                  onClick={() => {
+                    launchSystemTerminal(terminal.id);
+                    setIsTerminalMenuOpen(false);
+                    setShowTerminalAlternatives(false);
+                  }}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <TerminalGlyph terminalId={terminal.id} />
+                    Open {terminal.label}
+                    {launchingSystemTerminalId === terminal.id ? (
+                      <span className="loading-ring" aria-hidden="true" />
+                    ) : null}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {availableSystemTerminals.length === 0 ? <div className="terminal-menu-empty">No system terminals detected.</div> : null}
             <button
               className="terminal-menu-row"
               onClick={() => {
@@ -323,4 +429,5 @@ export const MainHeader = ({
       ) : null}
     </div>
   </header>
-);
+  );
+};

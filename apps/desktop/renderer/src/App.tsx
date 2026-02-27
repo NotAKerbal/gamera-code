@@ -17,9 +17,7 @@ import {
   FaChevronRight,
   FaCodeBranch,
   FaCog,
-  FaCopy,
   FaEye,
-  FaExternalLinkAlt,
   FaGlobeAmericas,
   FaNetworkWired,
   FaPen,
@@ -62,6 +60,7 @@ import type {
   ProjectTerminalEvent,
   ProjectTerminalState,
   ProjectTerminalSwitchBehavior,
+  SystemTerminalOption,
   SessionEvent,
   SkillRecord,
   Thread,
@@ -138,12 +137,15 @@ import {
   sanitizeForDisplay,
   sanitizeProjectDirName,
   sanitizeReasoningTrace,
+  splitAssistantContentSegments,
+  summarizePlanMarkdown,
   shouldDropDisplayLine,
   suggestThreadSummary,
   suggestThreadTitle,
   summarizeRunStates,
   toCommandRuns,
   toFileChanges,
+  todosToMarkdown,
   writeStoredActiveProjectId,
   type ActivityEntry,
   type AppSettingsTab,
@@ -156,6 +158,7 @@ import {
   type RenameDialogState,
   type SkillMentionState,
   type ThreadRunState,
+  type PlanArtifact,
   type TimelineEventItem,
   type TimelineItem,
   type TimelineMessageItem,
@@ -261,6 +264,7 @@ export const App = () => {
   const [skillMention, setSkillMention] = useState<SkillMentionState | null>(null);
   const [projectSettingsById, setProjectSettingsById] = useState<Record<string, ProjectSettings>>({});
   const [projectTerminalById, setProjectTerminalById] = useState<Record<string, ProjectTerminalState>>({});
+  const [systemTerminals, setSystemTerminals] = useState<SystemTerminalOption[]>([]);
   const [projectPreviewUrlById, setProjectPreviewUrlById] = useState<Record<string, string>>({});
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isGitPanelOpen, setIsGitPanelOpen] = useState(false);
@@ -278,6 +282,7 @@ export const App = () => {
   const [gitActivityExpandedByProjectId, setGitActivityExpandedByProjectId] = useState<Record<string, boolean>>({});
   const [isGitPoppedOut, setIsGitPoppedOut] = useState(false);
   const [isTerminalDashboardPoppedOut, setIsTerminalDashboardPoppedOut] = useState(false);
+  const planPopoutWindowRef = useRef<Window | null>(null);
   const [projectSettingsEnvText, setProjectSettingsEnvText] = useState("{}");
   const [projectSettingsProjectName, setProjectSettingsProjectName] = useState("");
   const [projectSettingsCommands, setProjectSettingsCommands] = useState<
@@ -754,6 +759,11 @@ export const App = () => {
     setComposerOptions(current.codexDefaults);
     setSettingsSaveNotice("");
     await loadAppSkills();
+  };
+
+  const loadSystemTerminals = async () => {
+    const terminals = await api.projects.listSystemTerminals();
+    setSystemTerminals(terminals);
   };
 
   const loadInstallerStatus = async () => {
@@ -1270,6 +1280,7 @@ export const App = () => {
       await loadProjects();
       await loadThreads();
       await loadSettings();
+      await loadSystemTerminals();
       await loadInstallerStatus();
     };
 
@@ -2823,9 +2834,9 @@ export const App = () => {
           <button id="terminal-copy" class="btn">Copy</button>
           <span id="terminal-status" class="status"></span>
           ${isWindows
-            ? `<button id="windowMinBtn" class="window-btn" title="Minimize">-</button>
-          <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">□</button>
-          <button id="windowCloseBtn" class="window-btn close" title="Close">×</button>`
+            ? `<button id="windowMinBtn" class="window-btn" title="Minimize">&#8722;</button>
+          <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">&#9723;</button>
+          <button id="windowCloseBtn" class="window-btn close" title="Close">&times;</button>`
             : ""}
         </div>
       </div>
@@ -3091,7 +3102,7 @@ export const App = () => {
       }
       const state = await desktopApi.windowControls.isMaximized();
       if (state?.ok) {
-        windowMaxBtn.textContent = state.maximized ? "❐" : "□";
+        windowMaxBtn.textContent = state.maximized ? "\u2750" : "\u25A1";
       }
     };
     windowMinBtn?.addEventListener("click", () => {
@@ -3313,11 +3324,11 @@ export const App = () => {
     setIsGitPoppedOut(false);
   };
 
-  const openProjectTerminal = async () => {
+  const openProjectTerminal = async (terminalId?: string) => {
     if (!activeProjectId) {
       return;
     }
-    await api.projects.openTerminal({ projectId: activeProjectId });
+    await api.projects.openTerminal({ projectId: activeProjectId, terminalId });
   };
 
   const openProjectFiles = async () => {
@@ -3977,6 +3988,471 @@ export const App = () => {
     });
   };
 
+  const buildPlanImplementationPrompt = (plan: PlanArtifact) => {
+    return [
+      "Implement this plan now in coding mode.",
+      "Execute end-to-end, run relevant validation/tests, and summarize exactly what changed.",
+      "",
+      "Plan:",
+      "```markdown",
+      plan.markdown || plan.summary,
+      "```"
+    ].join("\n");
+  };
+
+  const buildNowFromPlan = async (planId: string) => {
+    if (!activeThreadId) {
+      return;
+    }
+    const plan = plansById[planId];
+    if (!plan) {
+      return;
+    }
+
+    const prompt: QueuedPrompt = {
+      id: crypto.randomUUID(),
+      input: buildPlanImplementationPrompt(plan),
+      attachments: [],
+      skills: [],
+      options: {
+        ...composerOptions,
+        collaborationMode: "coding"
+      }
+    };
+
+    setComposerOptions((prev) => ({
+      ...prev,
+      collaborationMode: "coding"
+    }));
+
+    if ((runStateByThreadIdRef.current[activeThreadId] ?? "idle") === "running") {
+      setQueuedPromptsByThreadId((prev) => {
+        const nextQueue = [...(prev[activeThreadId] ?? []), prompt];
+        const next = {
+          ...prev,
+          [activeThreadId]: nextQueue
+        };
+        queuedPromptsByThreadIdRef.current = next;
+        return next;
+      });
+      return;
+    }
+
+    await dispatchPromptToThread(activeThreadId, prompt);
+  };
+
+  const copyPlanToClipboard = (planId: string) => {
+    const plan = plansById[planId];
+    if (!plan) {
+      return;
+    }
+    navigator.clipboard.writeText(plan.markdown).catch((error) => {
+      setLogs((prev) => [...prev, `Copy plan failed: ${String(error)}`]);
+    });
+  };
+
+  const openPlanDrawerFor = (planId: string) => {
+    const selected = plansById[planId];
+    if (!selected) {
+      return;
+    }
+    const popoutPlans = [...planArtifacts].sort(
+      (left, right) => new Date(right.ts).getTime() - new Date(left.ts).getTime()
+    );
+    let currentPlanId = selected.id;
+
+    const existingPlanPopout = planPopoutWindowRef.current;
+    if (existingPlanPopout && !existingPlanPopout.closed) {
+      existingPlanPopout.close();
+      planPopoutWindowRef.current = null;
+    }
+
+    const popout = window.open("", "codeapp-plan-viewer", "popup=yes,width=1080,height=820,resizable=yes,scrollbars=yes");
+    if (!popout) {
+      setLogs((prev) => [...prev, "Plan pop-out blocked."]);
+      return;
+    }
+
+    planPopoutWindowRef.current = popout;
+    const doc = popout.document;
+    doc.open();
+    doc.write("<!doctype html><html><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /><title>Plan Viewer</title></head><body></body></html>");
+    doc.close();
+
+    const faLink = doc.createElement("link");
+    faLink.rel = "stylesheet";
+    faLink.href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css";
+    doc.head.appendChild(faLink);
+
+    const style = doc.createElement("style");
+    style.textContent = `
+      :root { color-scheme: dark; font-family: "Space Grotesk", "Avenir Next", sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #0b0d10; color: #e5e7eb; height: 100vh; overflow: hidden; }
+      .shell { height: 100vh; display: flex; flex-direction: column; }
+      .drag-region { -webkit-app-region: drag; }
+      .no-drag { -webkit-app-region: no-drag; }
+      .window-header { min-height: max(3rem, env(titlebar-area-height, 3rem)); }
+      .window-header-windows { padding-right: 0.75rem; }
+      .window-header-macos { padding-left: 5rem; }
+      .head { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #27272a; background: #000000; }
+      .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .icon { width: 24px; height: 24px; border-radius: 8px; }
+      .title { font-size: 13px; font-weight: 700; color: #f8fafc; }
+      .subtitle { font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 48vw; }
+      .actions { display: flex; align-items: center; gap: 8px; }
+      .btn-ghost { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 8px; background: transparent; padding: 6px 10px; font-size: 12px; color: #cbd5e1; transition: background 120ms ease, color 120ms ease; cursor: pointer; }
+      .btn-ghost:hover { background: #18181b; color: #ffffff; }
+      .btn-primary { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #71717a; border-radius: 8px; background: #f4f4f5; padding: 6px 11px; font-size: 12px; font-weight: 600; color: #09090b; transition: background 120ms ease; cursor: pointer; }
+      .btn-primary:hover { background: #ffffff; }
+      .btn-icon { font-size: 11px; line-height: 1; }
+      .window-controls { display: flex; align-items: center; gap: 4px; margin-left: 4px; }
+      .window-control-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 28px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #cbd5e1; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
+      .window-control-icon { font-size: 11px; line-height: 1; }
+      .window-control-btn:hover { background: #27272a; color: #ffffff; }
+      .window-control-close:hover { background: rgba(239, 68, 68, 0.2); color: #fee2e2; }
+      .content { flex: 1; min-height: 0; overflow: hidden; padding: 14px; }
+      .layout { height: 100%; min-height: 0; display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 12px; }
+      .sidebar { min-height: 0; overflow: auto; border: 1px solid #252a34; border-radius: 12px; background: #090c12; padding: 12px; }
+      .sidebar-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: #94a3b8; margin: 0 0 10px 0; }
+      .plan-item { width: 100%; text-align: left; border: 1px solid #2a3343; border-radius: 10px; background: #0c111a; color: #dbe3ee; padding: 10px; margin-bottom: 8px; cursor: pointer; }
+      .plan-item:hover { background: #101827; border-color: #334155; }
+      .plan-item.active { border-color: #64748b; background: #131c2d; }
+      .plan-item-title { font-size: 13px; font-weight: 600; color: #f8fafc; margin-bottom: 4px; }
+      .plan-item-meta { font-size: 11px; color: #94a3b8; margin-bottom: 5px; }
+      .plan-item-summary { font-size: 12px; line-height: 1.45; color: #cbd5e1; }
+      .detail { min-height: 0; overflow: auto; border: 1px solid #252a34; border-radius: 12px; background: #090c12; padding: 18px; }
+      .summary { font-size: 16px; line-height: 1.7; color: #dbe3ee; margin: 0 0 10px 0; }
+      .markdown { border: 1px solid #252a34; border-radius: 12px; background: #090c12; padding: 18px; font-size: 15px; line-height: 1.72; color: #dbe3ee; overflow-wrap: anywhere; }
+      .markdown h1, .markdown h2, .markdown h3 { margin: 22px 0 14px 0; color: #f8fafc; line-height: 1.28; }
+      .markdown h1:first-child, .markdown h2:first-child, .markdown h3:first-child { margin-top: 0; }
+      .markdown h1 { font-size: 28px; }
+      .markdown h2 { font-size: 23px; }
+      .markdown h3 { font-size: 19px; }
+      .markdown p { margin: 0 0 14px 0; }
+      .markdown ul, .markdown ol { margin: 0 0 14px 26px; padding: 0; }
+      .markdown li { margin: 0 0 8px 0; }
+      .markdown pre { margin: 0 0 14px 0; border: 1px solid #2a3343; border-radius: 10px; background: #06080d; padding: 14px; overflow-x: auto; }
+      .markdown code { font-family: "IBM Plex Mono", "Fira Code", monospace; font-size: 13px; }
+      .markdown p code, .markdown li code { border: 1px solid #2a3343; border-radius: 6px; background: #0a0f1a; padding: 1px 5px; }
+      @media (max-width: 980px) {
+        .layout { grid-template-columns: 1fr; }
+        .sidebar { max-height: 34vh; }
+      }
+    `;
+    doc.head.appendChild(style);
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const renderInlineMarkdown = (value: string) => {
+      const escaped = escapeHtml(value);
+      return escaped.replace(/`([^`]+)`/g, "<code>$1</code>");
+    };
+
+    const renderMarkdownHtml = (source: string) => {
+      const lines = source.replace(/\r/g, "").split("\n");
+      const html: string[] = [];
+      let inCode = false;
+      let codeBuffer: string[] = [];
+      let inUl = false;
+      let inOl = false;
+
+      const closeLists = () => {
+        if (inUl) {
+          html.push("</ul>");
+          inUl = false;
+        }
+        if (inOl) {
+          html.push("</ol>");
+          inOl = false;
+        }
+      };
+
+      const flushCode = () => {
+        if (!inCode) {
+          return;
+        }
+        html.push(`<pre><code>${escapeHtml(codeBuffer.join("\n"))}</code></pre>`);
+        codeBuffer = [];
+        inCode = false;
+      };
+
+      for (const rawLine of lines) {
+        const line = rawLine.replace(/\t/g, "    ");
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith("```")) {
+          if (inCode) {
+            flushCode();
+          } else {
+            closeLists();
+            inCode = true;
+          }
+          continue;
+        }
+
+        if (inCode) {
+          codeBuffer.push(line);
+          continue;
+        }
+
+        if (!trimmed) {
+          closeLists();
+          continue;
+        }
+
+        const h3 = trimmed.match(/^###\s+(.+)$/);
+        if (h3) {
+          closeLists();
+          html.push(`<h3>${renderInlineMarkdown(h3[1] ?? "")}</h3>`);
+          continue;
+        }
+        const h2 = trimmed.match(/^##\s+(.+)$/);
+        if (h2) {
+          closeLists();
+          html.push(`<h2>${renderInlineMarkdown(h2[1] ?? "")}</h2>`);
+          continue;
+        }
+        const h1 = trimmed.match(/^#\s+(.+)$/);
+        if (h1) {
+          closeLists();
+          html.push(`<h1>${renderInlineMarkdown(h1[1] ?? "")}</h1>`);
+          continue;
+        }
+
+        const orderedItem = trimmed.match(/^\d+\.\s+(.+)$/);
+        if (orderedItem) {
+          if (inUl) {
+            html.push("</ul>");
+            inUl = false;
+          }
+          if (!inOl) {
+            html.push("<ol>");
+            inOl = true;
+          }
+          html.push(`<li>${renderInlineMarkdown(orderedItem[1] ?? "")}</li>`);
+          continue;
+        }
+
+        const unorderedItem = trimmed.match(/^[-*]\s+(.+)$/);
+        if (unorderedItem) {
+          if (inOl) {
+            html.push("</ol>");
+            inOl = false;
+          }
+          if (!inUl) {
+            html.push("<ul>");
+            inUl = true;
+          }
+          html.push(`<li>${renderInlineMarkdown(unorderedItem[1] ?? "")}</li>`);
+          continue;
+        }
+
+        closeLists();
+        html.push(`<p>${renderInlineMarkdown(trimmed)}</p>`);
+      }
+
+      flushCode();
+      closeLists();
+      return html.join("");
+    };
+
+    const shell = doc.createElement("div");
+    shell.className = "shell";
+
+    const head = doc.createElement("div");
+    head.className = `head drag-region window-header ${isWindows ? "window-header-windows" : ""} ${isMacOS ? "window-header-macos" : ""}`;
+
+    const brand = doc.createElement("div");
+    brand.className = "brand";
+    const icon = doc.createElement("img");
+    icon.src = appIconDark;
+    icon.className = "icon";
+    icon.alt = "";
+    const meta = doc.createElement("div");
+    const title = doc.createElement("div");
+    title.className = "title";
+    title.textContent = "Plan Viewer";
+    const subtitle = doc.createElement("div");
+    subtitle.className = "subtitle";
+    subtitle.textContent = selected.title;
+    meta.appendChild(title);
+    meta.appendChild(subtitle);
+    brand.appendChild(icon);
+    brand.appendChild(meta);
+
+    const actions = doc.createElement("div");
+    actions.className = "actions no-drag";
+    const copyBtn = doc.createElement("button");
+    copyBtn.className = "btn-ghost";
+    copyBtn.type = "button";
+    copyBtn.innerHTML =
+      '<i class="fa-regular fa-copy btn-icon" aria-hidden="true"></i><span>Copy</span>';
+    copyBtn.addEventListener("click", () => {
+      const currentPlan = popoutPlans.find((plan) => plan.id === currentPlanId) ?? selected;
+      navigator.clipboard.writeText(currentPlan.markdown || "").catch(() => undefined);
+    });
+
+    const buildBtn = doc.createElement("button");
+    buildBtn.className = "btn-primary";
+    buildBtn.type = "button";
+    buildBtn.innerHTML =
+      '<i class="fa-solid fa-hammer btn-icon" aria-hidden="true"></i><span>Build now</span>';
+    buildBtn.addEventListener("click", () => {
+      const currentPlan = popoutPlans.find((plan) => plan.id === currentPlanId) ?? selected;
+      buildNowFromPlan(currentPlan.id).catch((error) => {
+        setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
+      });
+    });
+    actions.appendChild(copyBtn);
+    actions.appendChild(buildBtn);
+    if (isWindows) {
+      const desktopApi = (popout as Window & { desktopAPI?: typeof api }).desktopAPI;
+      const windowControls = doc.createElement("div");
+      windowControls.className = "window-controls";
+
+      const minBtn = doc.createElement("button");
+      minBtn.className = "window-control-btn";
+      minBtn.type = "button";
+      minBtn.title = "Minimize";
+      minBtn.innerHTML = '<i class="fa-solid fa-minus window-control-icon" aria-hidden="true"></i>';
+      minBtn.addEventListener("click", () => {
+        if (!desktopApi?.windowControls) {
+          popout.close();
+          return;
+        }
+        desktopApi.windowControls.minimize().catch(() => undefined);
+      });
+
+      const maxBtn = doc.createElement("button");
+      maxBtn.className = "window-control-btn";
+      maxBtn.type = "button";
+      maxBtn.title = "Maximize or restore";
+      maxBtn.innerHTML = '<i class="fa-regular fa-window-maximize window-control-icon" aria-hidden="true"></i>';
+      maxBtn.addEventListener("click", async () => {
+        if (!desktopApi?.windowControls) {
+          return;
+        }
+        const state = await desktopApi.windowControls.toggleMaximize();
+        if (state?.ok) {
+          maxBtn.innerHTML = state.maximized
+            ? '<i class="fa-regular fa-window-restore window-control-icon" aria-hidden="true"></i>'
+            : '<i class="fa-regular fa-window-maximize window-control-icon" aria-hidden="true"></i>';
+        }
+      });
+
+      const closeBtn = doc.createElement("button");
+      closeBtn.className = "window-control-btn window-control-close";
+      closeBtn.type = "button";
+      closeBtn.title = "Close";
+      closeBtn.innerHTML = '<i class="fa-solid fa-xmark window-control-icon" aria-hidden="true"></i>';
+      closeBtn.addEventListener("click", () => {
+        if (!desktopApi?.windowControls) {
+          popout.close();
+          return;
+        }
+        desktopApi.windowControls.close().catch(() => undefined);
+      });
+
+      const syncWindowState = async () => {
+        if (!desktopApi?.windowControls) {
+          return;
+        }
+        const state = await desktopApi.windowControls.isMaximized();
+        if (state?.ok) {
+          maxBtn.innerHTML = state.maximized
+            ? '<i class="fa-regular fa-window-restore window-control-icon" aria-hidden="true"></i>'
+            : '<i class="fa-regular fa-window-maximize window-control-icon" aria-hidden="true"></i>';
+        }
+      };
+
+      windowControls.appendChild(minBtn);
+      windowControls.appendChild(maxBtn);
+      windowControls.appendChild(closeBtn);
+      actions.appendChild(windowControls);
+      syncWindowState().catch(() => undefined);
+    }
+
+    head.appendChild(brand);
+    head.appendChild(actions);
+
+    const content = doc.createElement("main");
+    content.className = "content";
+    const layout = doc.createElement("div");
+    layout.className = "layout";
+
+    const sidebar = doc.createElement("aside");
+    sidebar.className = "sidebar";
+    const sidebarTitle = doc.createElement("p");
+    sidebarTitle.className = "sidebar-title";
+    sidebarTitle.textContent = "Plan Versions";
+    sidebar.appendChild(sidebarTitle);
+    const listHost = doc.createElement("div");
+    sidebar.appendChild(listHost);
+
+    const detail = doc.createElement("section");
+    detail.className = "detail";
+    const summary = doc.createElement("p");
+    summary.className = "summary";
+    const markdown = doc.createElement("div");
+    markdown.className = "markdown";
+    detail.appendChild(summary);
+    detail.appendChild(markdown);
+
+    const renderList = () => {
+      listHost.replaceChildren();
+      popoutPlans.forEach((plan) => {
+        const item = doc.createElement("button");
+        item.type = "button";
+        item.className = `plan-item ${plan.id === currentPlanId ? "active" : ""}`;
+        item.addEventListener("click", () => {
+          currentPlanId = plan.id;
+          renderList();
+          renderDetail();
+        });
+
+        const title = doc.createElement("div");
+        title.className = "plan-item-title";
+        title.textContent = plan.title || "Plan";
+        const meta = doc.createElement("div");
+        meta.className = "plan-item-meta";
+        meta.textContent = `${plan.source === "proposed" ? "Proposed" : "Todo"} • ${new Date(plan.ts).toLocaleString()}`;
+        const itemSummary = doc.createElement("div");
+        itemSummary.className = "plan-item-summary";
+        itemSummary.textContent = plan.summary || "Plan ready";
+
+        item.appendChild(title);
+        item.appendChild(meta);
+        item.appendChild(itemSummary);
+        listHost.appendChild(item);
+      });
+    };
+
+    const renderDetail = () => {
+      const currentPlan = popoutPlans.find((plan) => plan.id === currentPlanId) ?? selected;
+      subtitle.textContent = currentPlan.title || "Plan";
+      summary.textContent = currentPlan.summary || "Plan ready";
+      markdown.innerHTML = renderMarkdownHtml(currentPlan.markdown || "");
+    };
+
+    renderList();
+    renderDetail();
+
+    layout.appendChild(sidebar);
+    layout.appendChild(detail);
+    content.appendChild(layout);
+
+    shell.appendChild(head);
+    shell.appendChild(content);
+    doc.body.replaceChildren(shell);
+  };
+
   const ensureTerminalDashboardFrame = (popout: Window) => {
     const doc = popout.document;
     if (doc.getElementById("codeapp-terminal-dashboard-popout")) {
@@ -4039,9 +4515,9 @@ export const App = () => {
           <button class="btn" data-action="restart_all">Restart Running</button>
           <button class="btn" data-action="stop_all">Stop All</button>
           ${isWindows
-            ? `<button id="windowMinBtn" class="window-btn" title="Minimize">-</button>
-          <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">□</button>
-          <button id="windowCloseBtn" class="window-btn close" title="Close">×</button>`
+            ? `<button id="windowMinBtn" class="window-btn" title="Minimize">&#8722;</button>
+          <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">&#9723;</button>
+          <button id="windowCloseBtn" class="window-btn close" title="Close">&times;</button>`
             : ""}
         </div>
       </div>
@@ -4237,7 +4713,7 @@ export const App = () => {
         }
         const state = await desktopApi.windowControls.isMaximized();
         if (state?.ok) {
-          windowMaxBtn.textContent = state.maximized ? "❐" : "□";
+          windowMaxBtn.textContent = state.maximized ? "\u2750" : "\u25A1";
         }
       };
       windowMinBtn?.addEventListener("click", () => {
@@ -4253,7 +4729,7 @@ export const App = () => {
         }
         const state = await desktopApi.windowControls.toggleMaximize();
         if (state?.ok) {
-          windowMaxBtn.textContent = state.maximized ? "❐" : "□";
+          windowMaxBtn.textContent = state.maximized ? "\u2750" : "\u25A1";
         }
       });
       windowCloseBtn?.addEventListener("click", () => {
@@ -4727,6 +5203,7 @@ const stopActiveRun = async () => {
         useTurtleSpinners: settings.useTurtleSpinners ?? false,
         condenseActivityTimeline: settings.condenseActivityTimeline ?? true,
         projectTerminalSwitchBehaviorDefault: settings.projectTerminalSwitchBehaviorDefault ?? "start_stop",
+        preferredSystemTerminalId: settings.preferredSystemTerminalId?.trim() ?? "",
         codexDefaults: composerOptions
       });
 
@@ -4738,6 +5215,7 @@ const stopActiveRun = async () => {
       if (!isSettingsWindow) {
         setShowSettings(false);
       }
+      await loadSystemTerminals();
       await loadInstallerStatus();
     } catch (error) {
       const message = `Settings save failed: ${String(error)}`;
@@ -4792,6 +5270,57 @@ const stopActiveRun = async () => {
     installStatus &&
       (!installStatus.nodeOk || !installStatus.npmOk || !installStatus.gitOk || !installStatus.rgOk || !installStatus.codexOk)
   );
+  const planArtifacts = useMemo<PlanArtifact[]>(() => {
+    const plans: PlanArtifact[] = [];
+
+    activity.forEach((entry) => {
+      if (entry.category !== "plan") {
+        return;
+      }
+      const todos = entry.todos ?? [];
+      const markdown = todosToMarkdown(todos);
+      plans.push({
+        id: `todo:${entry.id}`,
+        source: "todo",
+        ts: entry.ts,
+        title: "Plan",
+        summary: summarizePlanMarkdown(markdown),
+        markdown,
+        todos,
+        activityId: entry.id
+      });
+    });
+
+    messages.forEach((message) => {
+      if (message.role !== "assistant") {
+        return;
+      }
+      const segments = splitAssistantContentSegments(message.content, message.id);
+      segments.forEach((segment) => {
+        if (segment.kind !== "plan" || !segment.planId) {
+          return;
+        }
+        plans.push({
+          id: segment.planId,
+          source: "proposed",
+          ts: message.ts,
+          title: "Plan",
+          summary: summarizePlanMarkdown(segment.content),
+          markdown: segment.content,
+          messageId: message.id
+        });
+      });
+    });
+
+    return plans.sort((left, right) => new Date(right.ts).getTime() - new Date(left.ts).getTime());
+  }, [activity, messages]);
+
+  const plansById = useMemo<Record<string, PlanArtifact>>(
+    () => Object.fromEntries(planArtifacts.map((plan) => [plan.id, plan])),
+    [planArtifacts]
+  );
+  const todoPlans = useMemo(() => planArtifacts.filter((plan) => plan.source === "todo"), [planArtifacts]);
+
   const timelineItems = useMemo(() => {
     const messageItems: TimelineMessageItem[] = messages.map((message, idx) => {
       const tsMs = new Date(message.ts).getTime();
@@ -4949,6 +5478,7 @@ const stopActiveRun = async () => {
   const timelineRows = useMemo(() => {
     const rows: Array<
       | { kind: "message"; id: string; item: TimelineMessageItem }
+      | { kind: "plan"; id: string; item: TimelineEventItem }
       | { kind: "activity-bundle"; id: string; items: TimelineItem[]; chips: string[] }
     > = [];
     let pending: TimelineItem[] = [];
@@ -4966,7 +5496,6 @@ const stopActiveRun = async () => {
         commands: 0,
         edits: 0,
         searches: 0,
-        plans: 0,
         other: 0
       };
 
@@ -4993,10 +5522,6 @@ const stopActiveRun = async () => {
         }
         if (item.entry.category === "web_search") {
           counts.searches += 1;
-          return;
-        }
-        if (item.entry.category === "plan") {
-          counts.plans += 1;
           return;
         }
         if (item.entry.category === "file_change") {
@@ -5034,9 +5559,6 @@ const stopActiveRun = async () => {
       if (counts.searches > 0) {
         chips.push(pluralizeCount(counts.searches, "search", "searches"));
       }
-      if (counts.plans > 0) {
-        chips.push(pluralizeCount(counts.plans, "plan", "plans"));
-      }
       if (counts.other > 0) {
         chips.push(pluralizeCount(counts.other, "update", "updates"));
       }
@@ -5060,6 +5582,15 @@ const stopActiveRun = async () => {
         flushPending();
         rows.push({
           kind: "message",
+          id: item.id,
+          item
+        });
+        return;
+      }
+      if (item.kind === "event" && item.entry.category === "plan") {
+        flushPending();
+        rows.push({
+          kind: "plan",
           id: item.id,
           item
         });
@@ -5151,6 +5682,7 @@ const stopActiveRun = async () => {
               activeProjectId={activeProjectId}
               activeProjectTerminals={activeProjectTerminals}
               activeRunningTerminalsCount={activeRunningTerminalsCount}
+              systemTerminals={systemTerminals}
               isTerminalDashboardPoppedOut={isTerminalDashboardPoppedOut}
               onOpenProjectTerminal={openProjectTerminal}
               onOpenTerminalDashboardPopout={openTerminalDashboardPopout}
@@ -5671,12 +6203,43 @@ const stopActiveRun = async () => {
                         const item = row.item;
                         return item.message.role === "assistant" ? (
                           <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
-                            <MemoizedAssistantMarkdown content={item.message.content} />
+                            <MemoizedAssistantMarkdown
+                              messageId={item.message.id}
+                              content={item.message.content}
+                              plansById={plansById}
+                              onViewPlan={openPlanDrawerFor}
+                              onBuildPlan={(planId) => {
+                                buildNowFromPlan(planId).catch((error) => {
+                                  setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
+                                });
+                              }}
+                              onCopyPlan={copyPlanToClipboard}
+                            />
                           </article>
                         ) : (
                           <article key={item.id} className="timeline-item min-w-0 overflow-hidden rounded-lg bg-zinc-900/80 p-3">
                             <MemoizedUserMessageContent content={item.message.content} attachments={item.message.attachments} />
                           </article>
+                        );
+                      }
+                      if (row.kind === "plan") {
+                        return (
+                          <MemoizedTimelineItemsList
+                            key={row.id}
+                            timelineItems={[row.item]}
+                            plansById={plansById}
+                            getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                            onViewPlan={openPlanDrawerFor}
+                            onBuildPlan={(planId) => {
+                              buildNowFromPlan(planId).catch((error) => {
+                                setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
+                              });
+                            }}
+                            onCopyPlan={copyPlanToClipboard}
+                            expandedActivityGroups={expandedActivityGroups}
+                            setExpandedActivityGroups={setExpandedActivityGroups}
+                            setExpandedActivityChildren={setExpandedActivityChildren}
+                          />
                         );
                       }
 
@@ -5705,6 +6268,15 @@ const stopActiveRun = async () => {
                               <div className="activity-body">
                                 <MemoizedTimelineItemsList
                                   timelineItems={row.items}
+                                  plansById={plansById}
+                                  getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                                  onViewPlan={openPlanDrawerFor}
+                                  onBuildPlan={(planId) => {
+                                    buildNowFromPlan(planId).catch((error) => {
+                                      setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
+                                    });
+                                  }}
+                                  onCopyPlan={copyPlanToClipboard}
                                   expandedActivityGroups={expandedActivityGroups}
                                   setExpandedActivityGroups={setExpandedActivityGroups}
                                   setExpandedActivityChildren={setExpandedActivityChildren}
@@ -5718,6 +6290,15 @@ const stopActiveRun = async () => {
                   ) : (
                     <MemoizedTimelineItemsList
                       timelineItems={timelineItems}
+                      plansById={plansById}
+                      getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                      onViewPlan={openPlanDrawerFor}
+                      onBuildPlan={(planId) => {
+                        buildNowFromPlan(planId).catch((error) => {
+                          setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
+                        });
+                      }}
+                      onCopyPlan={copyPlanToClipboard}
                       expandedActivityGroups={expandedActivityGroups}
                       setExpandedActivityGroups={setExpandedActivityGroups}
                       setExpandedActivityChildren={setExpandedActivityChildren}
@@ -6738,6 +7319,7 @@ const stopActiveRun = async () => {
           settingsEnvText={settingsEnvText}
           setSettingsEnvText={setSettingsEnvText}
           appSkills={appSkills}
+          systemTerminals={systemTerminals}
           skillEditorPath={skillEditorPath}
           skillEditorContent={skillEditorContent}
           setSkillEditorContent={setSkillEditorContent}
@@ -6848,4 +7430,8 @@ const stopActiveRun = async () => {
     </div>
   );
 };
+
+
+
+
 

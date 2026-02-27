@@ -25,6 +25,8 @@ import type {
   RiskCheck,
   Session,
   SessionEvent,
+  SystemTerminalId,
+  SystemTerminalOption,
   SkillRecord,
   ThreadMetadataSuggestion,
   Thread,
@@ -42,7 +44,8 @@ export interface DesktopApi {
     update: (input: { id: string; name?: string; path?: string }) => Promise<Project>;
     delete: (input: { id: string }) => Promise<{ ok: boolean }>;
     pickPath: () => Promise<string | null>;
-    openTerminal: (input: { projectId: string }) => Promise<{ ok: boolean }>;
+    openTerminal: (input: { projectId: string; terminalId?: SystemTerminalId }) => Promise<{ ok: boolean }>;
+    listSystemTerminals: (input?: { refresh?: boolean }) => Promise<SystemTerminalOption[]>;
     openFiles: (input: { projectId: string }) => Promise<{ ok: boolean }>;
     listFiles: (input: { projectId: string; limit?: number }) => Promise<ProjectFileEntry[]>;
     openWebLink: (input: { url: string; name?: string; projectName?: string; focus?: boolean }) => Promise<{ ok: boolean }>;
