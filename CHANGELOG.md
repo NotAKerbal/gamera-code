@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+- Plan mode improvements
+- More terminal options
+
 ## 0.2.1
 - Added the ability to automatically condense reasoning for easier thread navigation
 - Improved thread alerts to make finished threads easier to find

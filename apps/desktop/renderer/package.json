@@ -1,6 +1,6 @@
 {
   "name": "@code-app/renderer",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@code-app/shared": "0.2.1",
+    "@code-app/shared": "0.2.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-icons": "^5.5.0",
