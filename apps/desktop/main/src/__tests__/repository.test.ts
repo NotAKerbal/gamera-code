@@ -166,11 +166,84 @@ describeRepository("Repository", () => {
       envVars: { NODE_ENV: "development" },
       devCommands: [{ id: "vite", name: "Vite", command: "npm run dev -- --host" }],
       defaultDevCommandId: "vite",
+      subthreadPolicyOverride: "auto",
       lastDetectedPreviewUrl: "http://127.0.0.1:5173"
     });
 
     expect(updated.envVars.NODE_ENV).toBe("development");
     expect(updated.defaultDevCommandId).toBe("vite");
+    expect(updated.subthreadPolicyOverride).toBe("auto");
     expect(updated.lastDetectedPreviewUrl).toBe("http://127.0.0.1:5173");
+  });
+
+  it("stores orchestration runs and child records", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-orchestration-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-orch" });
+    const thread = repo.createThread({ projectId: project.id, title: "parent", provider: "codex" });
+
+    const run = repo.createOrchestrationRun({
+      parentThreadId: thread.id,
+      policy: "ask",
+      proposal: {
+        reason: "parallelize",
+        parentGoal: "ship feature",
+        tasks: [{ key: "api", title: "API", prompt: "Build API" }]
+      }
+    });
+    const child = repo.createOrchestrationChild({
+      runId: run.id,
+      taskKey: "api",
+      title: "API",
+      prompt: "Build API",
+      status: "queued"
+    });
+
+    const fetched = repo.getOrchestrationRun(run.id);
+    expect(fetched?.policy).toBe("ask");
+    expect(repo.listOrchestrationRuns(thread.id)).toHaveLength(1);
+
+    repo.updateOrchestrationChild({
+      id: child.id,
+      childThreadId: "child-thread-1",
+      status: "running",
+      lastCheckinAt: new Date().toISOString()
+    });
+    expect(repo.getOrchestrationChildByThreadId("child-thread-1")?.id).toBe(child.id);
+  });
+
+  it("archives and restores thread descendants with parent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-thread-archive-cascade-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-archive-cascade" });
+    const parent = repo.createThread({ projectId: project.id, title: "parent", provider: "codex" });
+    const child = repo.createThread({
+      projectId: project.id,
+      title: "child",
+      provider: "codex",
+      parentThreadId: parent.id
+    });
+    const grandchild = repo.createThread({
+      projectId: project.id,
+      title: "grandchild",
+      provider: "codex",
+      parentThreadId: child.id
+    });
+
+    repo.archiveThread(parent.id, true);
+    expect(repo.getThread(parent.id)?.archivedAt).toBeTruthy();
+    expect(repo.getThread(child.id)?.archivedAt).toBeTruthy();
+    expect(repo.getThread(grandchild.id)?.archivedAt).toBeTruthy();
+
+    repo.archiveThread(parent.id, false);
+    expect(repo.getThread(parent.id)?.archivedAt).toBeUndefined();
+    expect(repo.getThread(child.id)?.archivedAt).toBeUndefined();
+    expect(repo.getThread(grandchild.id)?.archivedAt).toBeUndefined();
   });
 });

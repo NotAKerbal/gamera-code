@@ -3,11 +3,12 @@ import { FaTimes, FaTrashAlt } from "react-icons/fa";
 import type {
   GitRepositoryCandidate,
   Project,
+  SubthreadPolicy,
   ProjectTerminalSwitchBehavior,
   ProjectWebLink,
   SkillRecord
 } from "@code-app/shared";
-import { PROJECT_SWITCH_BEHAVIOR_OPTIONS, type RenameDialogState } from "./appCore";
+import { PROJECT_SWITCH_BEHAVIOR_OPTIONS, SUBTHREAD_POLICY_OPTIONS, type RenameDialogState } from "./appCore";
 
 type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean };
 type ProjectSettingsTab = "general" | "env" | "commands" | "links" | "skills";
@@ -39,6 +40,8 @@ type ProjectSettingsModalProps = {
   setProjectSettingsProjectName: Dispatch<SetStateAction<string>>;
   projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
   setProjectSwitchBehaviorOverride: Dispatch<SetStateAction<ProjectTerminalSwitchBehavior | "">>;
+  projectSubthreadPolicyOverride: SubthreadPolicy | "";
+  setProjectSubthreadPolicyOverride: Dispatch<SetStateAction<SubthreadPolicy | "">>;
   projectSettingsBrowserEnabled: boolean;
   setProjectSettingsBrowserEnabled: Dispatch<SetStateAction<boolean>>;
   projectSettingsEnvText: string;
@@ -70,6 +73,8 @@ export const ProjectSettingsModal = ({
   setProjectSettingsProjectName,
   projectSwitchBehaviorOverride,
   setProjectSwitchBehaviorOverride,
+  projectSubthreadPolicyOverride,
+  setProjectSubthreadPolicyOverride,
   projectSettingsBrowserEnabled,
   setProjectSettingsBrowserEnabled,
   projectSettingsEnvText,
@@ -162,6 +167,22 @@ export const ProjectSettingsModal = ({
                 >
                   <option value="">Use app default</option>
                   {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mx-2 border-t border-border/70" />
+              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="text-sm text-muted">Sub-thread policy override</div>
+                <select
+                  className="input text-xs"
+                  value={projectSubthreadPolicyOverride}
+                  onChange={(event) => setProjectSubthreadPolicyOverride(event.target.value as SubthreadPolicy | "")}
+                >
+                  <option value="">Use app default</option>
+                  {SUBTHREAD_POLICY_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>

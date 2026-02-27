@@ -72,6 +72,16 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     (IPC_CHANNELS as Record<string, string>).gitGetIncomingCommits ?? "git:getIncomingCommits";
   const gitGetSnapshotChannel =
     (IPC_CHANNELS as Record<string, string>).gitGetSnapshot ?? "git:getSnapshot";
+  const orchestrationListRunsChannel =
+    (IPC_CHANNELS as Record<string, string>).orchestrationListRuns ?? "orchestration:listRuns";
+  const orchestrationGetRunChannel =
+    (IPC_CHANNELS as Record<string, string>).orchestrationGetRun ?? "orchestration:getRun";
+  const orchestrationApproveProposalChannel =
+    (IPC_CHANNELS as Record<string, string>).orchestrationApproveProposal ?? "orchestration:approveProposal";
+  const orchestrationStopChildChannel =
+    (IPC_CHANNELS as Record<string, string>).orchestrationStopChild ?? "orchestration:stopChild";
+  const orchestrationRetryChildChannel =
+    (IPC_CHANNELS as Record<string, string>).orchestrationRetryChild ?? "orchestration:retryChild";
   const normalizePath = (path: string) => resolve(path);
   const findProjectByPath = (path: string) => {
     const normalized = normalizePath(path);
@@ -524,6 +534,7 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
         defaultDevCommandId?: string;
         autoStartDevTerminal?: boolean;
         switchBehaviorOverride?: "start_stop" | "start_only" | "manual";
+        subthreadPolicyOverride?: "manual" | "ask" | "auto";
         lastDetectedPreviewUrl?: string;
       }
     ) => deps.repository.setProjectSettings(input)
@@ -604,6 +615,32 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
       return deps.repository.listMessages(input);
     }
   );
+
+  ipcMain.handle(orchestrationListRunsChannel, async (_event, input: { parentThreadId: string }) => {
+    return deps.sessionManager.listOrchestrationRuns(input.parentThreadId);
+  });
+
+  ipcMain.handle(orchestrationGetRunChannel, async (_event, input: { runId: string }) => {
+    return deps.sessionManager.getOrchestrationRun(input.runId);
+  });
+
+  ipcMain.handle(
+    orchestrationApproveProposalChannel,
+    async (_event, input: { runId: string; selectedTaskKeys?: string[] }) => {
+      const ok = await deps.sessionManager.approveOrchestrationProposal(input.runId, input.selectedTaskKeys);
+      return { ok };
+    }
+  );
+
+  ipcMain.handle(orchestrationStopChildChannel, async (_event, input: { childThreadId: string }) => {
+    const ok = await deps.sessionManager.stopOrchestrationChild(input.childThreadId);
+    return { ok };
+  });
+
+  ipcMain.handle(orchestrationRetryChildChannel, async (_event, input: { childRowId: string }) => {
+    const ok = await deps.sessionManager.retryOrchestrationChild(input.childRowId);
+    return { ok };
+  });
 
   ipcMain.handle(IPC_CHANNELS.sessionsStart, async (_event, input: { threadId: string; options?: CodexThreadOptions }) => {
     const thread = deps.repository.getThread(input.threadId);

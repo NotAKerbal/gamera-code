@@ -225,6 +225,13 @@ const mapCollaborationMode = (mode: CodexAppServerThreadOptions["collaborationMo
 const mapPersonality = (mode: CodexAppServerThreadOptions["collaborationMode"]) =>
   mode === "plan" ? "pragmatic" : null;
 
+const SUBTHREAD_PROPOSAL_INSTRUCTIONS = [
+  "When a task is large and can be split into parallel workstreams, emit one machine-readable proposal block.",
+  "Format exactly as XML-like tags with JSON content:",
+  "<subthread_proposal_v1>{\"reason\":\"...\",\"parentGoal\":\"...\",\"tasks\":[{\"key\":\"...\",\"title\":\"...\",\"prompt\":\"...\",\"expectedOutput\":\"...\"}]}</subthread_proposal_v1>",
+  "Use at most 8 tasks. Keep keys unique and lowercase. Do not emit this block for small tasks."
+].join("\n");
+
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly env: Record<string, string>;
@@ -943,7 +950,7 @@ export class CodexAppServerClient {
       settings: {
         model,
         reasoning_effort: reasoningEffort,
-        developer_instructions: null
+        developer_instructions: SUBTHREAD_PROPOSAL_INSTRUCTIONS
       }
     };
   }

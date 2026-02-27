@@ -38,6 +38,16 @@ const skillsReadDocumentChannel =
   (IPC_CHANNELS as Record<string, string>).skillsReadDocument ?? "skills:readDocument";
 const skillsWriteDocumentChannel =
   (IPC_CHANNELS as Record<string, string>).skillsWriteDocument ?? "skills:writeDocument";
+const orchestrationListRunsChannel =
+  (IPC_CHANNELS as Record<string, string>).orchestrationListRuns ?? "orchestration:listRuns";
+const orchestrationGetRunChannel =
+  (IPC_CHANNELS as Record<string, string>).orchestrationGetRun ?? "orchestration:getRun";
+const orchestrationApproveProposalChannel =
+  (IPC_CHANNELS as Record<string, string>).orchestrationApproveProposal ?? "orchestration:approveProposal";
+const orchestrationStopChildChannel =
+  (IPC_CHANNELS as Record<string, string>).orchestrationStopChild ?? "orchestration:stopChild";
+const orchestrationRetryChildChannel =
+  (IPC_CHANNELS as Record<string, string>).orchestrationRetryChild ?? "orchestration:retryChild";
 type DesktopApiWithGitExtras = DesktopApi & {
   projects: DesktopApi["projects"] & {
     listFiles: (input: { projectId: string; limit?: number }) => Promise<Array<{ path: string; updatedAtMs: number }>>;
@@ -101,6 +111,13 @@ const api: DesktopApiWithGitExtras = {
     archive: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsArchive, input),
     fork: (input) => ipcRenderer.invoke(threadsForkChannel, input),
     events: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsEvents, input)
+  },
+  orchestration: {
+    listRuns: (input) => ipcRenderer.invoke(orchestrationListRunsChannel, input),
+    getRun: (input) => ipcRenderer.invoke(orchestrationGetRunChannel, input),
+    approveProposal: (input) => ipcRenderer.invoke(orchestrationApproveProposalChannel, input),
+    stopChild: (input) => ipcRenderer.invoke(orchestrationStopChildChannel, input),
+    retryChild: (input) => ipcRenderer.invoke(orchestrationRetryChildChannel, input)
   },
   sessions: {
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsStart, input),

@@ -73,6 +73,7 @@ export const initializeDatabase = (dbPath: string) => {
       default_dev_command_id TEXT,
       auto_start_dev_terminal INTEGER NOT NULL DEFAULT 1,
       switch_behavior_override TEXT,
+      subthread_policy_override TEXT,
       last_detected_preview_url TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -97,6 +98,33 @@ export const initializeDatabase = (dbPath: string) => {
       FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS thread_orchestration_runs (
+      id TEXT PRIMARY KEY,
+      parent_thread_id TEXT NOT NULL,
+      proposal_json TEXT NOT NULL,
+      policy TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(parent_thread_id) REFERENCES threads(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS thread_orchestration_children (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      task_key TEXT NOT NULL,
+      child_thread_id TEXT,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      status TEXT NOT NULL,
+      last_checkin_at TEXT,
+      last_error TEXT,
+      retry_of_child_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES thread_orchestration_runs(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_threads_project_updated
       ON threads(project_id, updated_at DESC);
 
@@ -112,6 +140,12 @@ export const initializeDatabase = (dbPath: string) => {
     CREATE INDEX IF NOT EXISTS idx_thread_provider_state_lookup
       ON thread_provider_state(thread_id, provider);
 
+    CREATE INDEX IF NOT EXISTS idx_orchestration_runs_parent
+      ON thread_orchestration_runs(parent_thread_id, updated_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_orchestration_children_run
+      ON thread_orchestration_children(run_id, updated_at DESC);
+
     CREATE INDEX IF NOT EXISTS idx_project_settings_updated
       ON project_settings(updated_at DESC);
   `);
@@ -126,6 +160,10 @@ export const initializeDatabase = (dbPath: string) => {
   const hasWebLinksColumn = projectSettingsColumns.some((column) => column.name === "web_links_json");
   if (!hasWebLinksColumn) {
     db.exec("ALTER TABLE project_settings ADD COLUMN web_links_json TEXT NOT NULL DEFAULT '[]';");
+  }
+  const hasSubthreadPolicyOverride = projectSettingsColumns.some((column) => column.name === "subthread_policy_override");
+  if (!hasSubthreadPolicyOverride) {
+    db.exec("ALTER TABLE project_settings ADD COLUMN subthread_policy_override TEXT;");
   }
   const messageEventColumns = db
     .prepare("PRAGMA table_info(message_events)")

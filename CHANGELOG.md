@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.3
+- Pinnacle feature: subagents
+
 ## 0.2.2
 - Plan mode improvements
 - More terminal options

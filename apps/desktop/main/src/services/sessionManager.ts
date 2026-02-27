@@ -5,11 +5,16 @@ import path from "node:path";
 import * as pty from "node-pty";
 import type {
   CodexThreadOptions,
+  OrchestrationChild,
+  OrchestrationRun,
+  OrchestrationStatus,
   PromptAttachment,
   Session,
   SessionEvent,
   SessionEventType,
   SkillRecord,
+  SubthreadPolicy,
+  SubthreadProposal,
   Thread,
   ThreadMetadataSuggestion
 } from "@code-app/shared";
@@ -64,6 +69,11 @@ interface SessionManagerDeps {
   repository: Repository;
   permissionEngine: PermissionEngine;
   emit: (event: SessionEvent) => void;
+}
+
+interface SubthreadFeedbackUpdate {
+  childThreadId: string;
+  feedback: string;
 }
 
 const asRecord = (value: unknown): UnknownRecord | null => {
@@ -441,6 +451,19 @@ const isUserInputRequestTool = (tool: string | null) => {
 };
 
 const ACTIVITY_EVENT_PREFIX = "__codeapp_activity__:";
+const SUBTHREAD_PROPOSAL_TAG = "subthread_proposal_v1";
+const SUBTHREAD_PROPOSAL_PATTERN = new RegExp(
+  String.raw`<${SUBTHREAD_PROPOSAL_TAG}>\s*([\s\S]*?)\s*<\/${SUBTHREAD_PROPOSAL_TAG}>`,
+  "i"
+);
+const SUBTHREAD_FEEDBACK_TAG = "subthread_feedback_v1";
+const SUBTHREAD_FEEDBACK_PATTERN = new RegExp(
+  String.raw`<${SUBTHREAD_FEEDBACK_TAG}>\s*([\s\S]*?)\s*<\/${SUBTHREAD_FEEDBACK_TAG}>`,
+  "i"
+);
+const ORCHESTRATION_MAX_TASKS = 8;
+const ORCHESTRATION_MAX_ACTIVE_CHILDREN = 3;
+const ORCHESTRATION_HEARTBEAT_MS = 90_000;
 
 const shouldPersistActivityEvent = (type: SessionEventType, data?: Record<string, unknown>) => {
   if (type === "stdout") {
@@ -594,6 +617,11 @@ const extractUserInputQuestions = (item: UnknownRecord): UserInputQuestion[] => 
 export class SessionManager {
   private readonly sessions = new Map<string, RunningSession>();
   private readonly gitRepoCache = new Map<string, boolean>();
+  private readonly childToRunId = new Map<string, string>();
+  private readonly runHeartbeatTimerById = new Map<string, ReturnType<typeof setInterval>>();
+  private readonly runSpawnQueue = new Map<string, Promise<void>>();
+  private readonly childProgressDebounceById = new Map<string, number>();
+  private readonly runParentResumeTriggered = new Set<string>();
 
   constructor(private readonly deps: SessionManagerDeps) {}
 
@@ -877,6 +905,90 @@ export class SessionManager {
     }
 
     return forked;
+  }
+
+  listOrchestrationRuns(parentThreadId: string): OrchestrationRun[] {
+    return this.deps.repository.listOrchestrationRuns(parentThreadId);
+  }
+
+  getOrchestrationRun(runId: string): { run: OrchestrationRun; children: OrchestrationChild[] } | null {
+    const run = this.deps.repository.getOrchestrationRun(runId);
+    if (!run) {
+      return null;
+    }
+    return {
+      run,
+      children: this.deps.repository.listOrchestrationChildren(runId)
+    };
+  }
+
+  async approveOrchestrationProposal(runId: string, selectedTaskKeys?: string[]): Promise<boolean> {
+    const run = this.deps.repository.getOrchestrationRun(runId);
+    if (!run) {
+      return false;
+    }
+    const children = this.deps.repository.listOrchestrationChildren(runId);
+    const allowed = selectedTaskKeys?.length
+      ? new Set(selectedTaskKeys.map((key) => key.trim()).filter(Boolean))
+      : null;
+    children.forEach((child) => {
+      if (child.status !== "proposed") {
+        return;
+      }
+      if (allowed && !allowed.has(child.taskKey)) {
+        this.deps.repository.updateOrchestrationChild({
+          id: child.id,
+          status: "canceled",
+          lastCheckinAt: new Date().toISOString()
+        });
+        return;
+      }
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        status: "queued",
+        lastCheckinAt: new Date().toISOString()
+      });
+    });
+    this.deps.repository.updateOrchestrationRunStatus(runId, "queued");
+    await this.scheduleRunSpawns(runId);
+    return true;
+  }
+
+  async stopOrchestrationChild(childThreadId: string): Promise<boolean> {
+    const child = this.deps.repository.getOrchestrationChildByThreadId(childThreadId);
+    if (!child) {
+      return false;
+    }
+    this.stop(childThreadId);
+    this.deps.repository.updateOrchestrationChild({
+      id: child.id,
+      status: "stopped",
+      lastCheckinAt: new Date().toISOString()
+    });
+    await this.scheduleRunSpawns(child.runId);
+    await this.refreshRunStatus(child.runId);
+    return true;
+  }
+
+  async retryOrchestrationChild(childRowId: string): Promise<boolean> {
+    const child = this.deps.repository.getOrchestrationChildById(childRowId);
+    if (!child) {
+      return false;
+    }
+    const retry = this.deps.repository.createOrchestrationChild({
+      runId: child.runId,
+      taskKey: child.taskKey,
+      title: child.title,
+      prompt: child.prompt,
+      status: "queued",
+      retryOfChildId: child.id
+    });
+    this.emitOrchestrationMilestone(child.runId, `Retry queued: ${retry.title}`, "orchestration_retry", {
+      childId: retry.id,
+      retryOfChildId: child.id
+    });
+    await this.scheduleRunSpawns(child.runId);
+    return true;
   }
 
   async reviewCommit(threadId: string, sha: string, title?: string): Promise<boolean> {
@@ -1576,6 +1688,7 @@ export class SessionManager {
           eventType,
           final: true
         });
+        await this.maybeCreateSubthreadOrchestration(threadId, text);
       } else {
         const previous = agentDrafts.get(itemId);
         if (previous !== text) {
@@ -1873,12 +1986,508 @@ export class SessionManager {
     };
   }
 
+  private parseSubthreadProposal(content: string): SubthreadProposal | null {
+    const match = SUBTHREAD_PROPOSAL_PATTERN.exec(content);
+    if (!match?.[1]) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+      const reason = asString(parsed.reason) ?? "";
+      const parentGoal = asString(parsed.parentGoal) ?? "";
+      const rawTasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+      if (!reason || !parentGoal || rawTasks.length === 0 || rawTasks.length > ORCHESTRATION_MAX_TASKS) {
+        return null;
+      }
+      const seen = new Set<string>();
+      const tasks: SubthreadProposal["tasks"] = [];
+      for (const rawTask of rawTasks) {
+        const row = asRecord(rawTask);
+        if (!row) {
+          return null;
+        }
+        const key = asString(row.key)?.toLowerCase() ?? "";
+        const title = asString(row.title) ?? "";
+        const prompt = asString(row.prompt) ?? "";
+        const expectedOutput = asString(row.expectedOutput) ?? undefined;
+        if (!key || !title || !prompt || seen.has(key)) {
+          return null;
+        }
+        seen.add(key);
+        tasks.push({ key, title, prompt, expectedOutput });
+      }
+      return { reason, parentGoal, tasks };
+    } catch {
+      return null;
+    }
+  }
+
+  private parseSubthreadFeedback(content: string): SubthreadFeedbackUpdate[] {
+    const match = SUBTHREAD_FEEDBACK_PATTERN.exec(content);
+    if (!match?.[1]) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+      const rawUpdates = Array.isArray(parsed.updates) ? parsed.updates : [];
+      const updates: SubthreadFeedbackUpdate[] = [];
+      for (const raw of rawUpdates) {
+        const row = asRecord(raw);
+        if (!row) {
+          continue;
+        }
+        const childThreadId = asString(row.childThreadId)?.trim() ?? "";
+        const feedback = asString(row.feedback)?.trim() ?? "";
+        if (!childThreadId || !feedback) {
+          continue;
+        }
+        updates.push({ childThreadId, feedback });
+      }
+      return updates;
+    } catch {
+      return [];
+    }
+  }
+
+  private async maybeProcessSubthreadFeedback(parentThreadId: string, assistantMessage: string): Promise<void> {
+    const updates = this.parseSubthreadFeedback(assistantMessage);
+    if (updates.length === 0) {
+      return;
+    }
+    const runs = this.deps.repository.listOrchestrationRuns(parentThreadId);
+    if (runs.length === 0) {
+      return;
+    }
+    const allowedChildThreadIds = new Set<string>();
+    for (const run of runs) {
+      for (const child of this.deps.repository.listOrchestrationChildren(run.id)) {
+        if (child.childThreadId) {
+          allowedChildThreadIds.add(child.childThreadId);
+        }
+      }
+    }
+    for (const update of updates) {
+      if (!allowedChildThreadIds.has(update.childThreadId)) {
+        continue;
+      }
+      const ok = await this.sendInput(
+        update.childThreadId,
+        `Feedback from parent orchestration:\n${update.feedback}`
+      );
+      if (!ok) {
+        this.emitSessionEvent(parentThreadId, "progress", `Failed to send feedback to child ${update.childThreadId}`, {
+          category: "orchestration_feedback_failed",
+          childThreadId: update.childThreadId
+        });
+      } else {
+        this.emitSessionEvent(parentThreadId, "progress", `Sent follow-up feedback to child ${update.childThreadId}`, {
+          category: "orchestration_feedback_sent",
+          childThreadId: update.childThreadId
+        });
+      }
+    }
+  }
+
+  private getEffectiveSubthreadPolicy(thread: Thread): SubthreadPolicy {
+    const projectSettings = this.deps.repository.getProjectSettings(thread.projectId);
+    if (projectSettings.subthreadPolicyOverride) {
+      return projectSettings.subthreadPolicyOverride;
+    }
+    return this.deps.repository.getSettings().subthreadPolicyDefault ?? "ask";
+  }
+
+  private async maybeCreateSubthreadOrchestration(parentThreadId: string, assistantMessage: string): Promise<void> {
+    const thread = this.deps.repository.getThread(parentThreadId);
+    if (!thread || thread.provider !== "codex") {
+      return;
+    }
+    await this.maybeProcessSubthreadFeedback(parentThreadId, assistantMessage);
+    const proposal = this.parseSubthreadProposal(assistantMessage);
+    if (!proposal) {
+      return;
+    }
+    const policy = this.getEffectiveSubthreadPolicy(thread);
+    const run = this.deps.repository.createOrchestrationRun({
+      parentThreadId,
+      proposal,
+      policy,
+      status: policy === "auto" ? "queued" : "proposed"
+    });
+    for (const task of proposal.tasks) {
+      this.deps.repository.createOrchestrationChild({
+        runId: run.id,
+        taskKey: task.key,
+        title: task.title,
+        prompt: task.prompt,
+        status: policy === "auto" ? "queued" : "proposed"
+      });
+    }
+    this.emitOrchestrationMilestone(
+      run.id,
+      policy === "auto"
+        ? `Auto-spawning ${proposal.tasks.length} sub-threads`
+        : `Sub-thread proposal created (${proposal.tasks.length} tasks)`,
+      "orchestration_proposal",
+      { policy, taskCount: proposal.tasks.length, runId: run.id }
+    );
+    if (policy === "auto") {
+      await this.scheduleRunSpawns(run.id);
+    }
+  }
+
+  private async scheduleRunSpawns(runId: string): Promise<void> {
+    const previous = this.runSpawnQueue.get(runId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        while (true) {
+          const children = this.deps.repository.listOrchestrationChildren(runId);
+          const runningCount = children.filter((child) => child.status === "running").length;
+          if (runningCount >= ORCHESTRATION_MAX_ACTIVE_CHILDREN) {
+            break;
+          }
+          const nextChild = children.find((child) => child.status === "queued");
+          if (!nextChild) {
+            break;
+          }
+          await this.spawnOrchestrationChild(nextChild);
+        }
+        await this.refreshRunStatus(runId);
+      });
+    this.runSpawnQueue.set(runId, next);
+    await next;
+  }
+
+  private async spawnOrchestrationChild(child: OrchestrationChild): Promise<void> {
+    const run = this.deps.repository.getOrchestrationRun(child.runId);
+    if (!run) {
+      return;
+    }
+    const parentThread = this.deps.repository.getThread(run.parentThreadId);
+    if (!parentThread) {
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        status: "failed",
+        lastError: "Parent thread not found",
+        lastCheckinAt: new Date().toISOString()
+      });
+      return;
+    }
+    const createdThread =
+      child.childThreadId && this.deps.repository.getThread(child.childThreadId)
+        ? this.deps.repository.getThread(child.childThreadId)!
+        : this.deps.repository.createThread({
+            projectId: parentThread.projectId,
+            title: child.title,
+            provider: parentThread.provider,
+            parentThreadId: parentThread.id
+          });
+    const project = this.deps.repository.getProject(parentThread.projectId);
+    if (!project) {
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        status: "failed",
+        childThreadId: createdThread.id,
+        lastError: "Project not found",
+        lastCheckinAt: new Date().toISOString()
+      });
+      return;
+    }
+    this.deps.repository.updateOrchestrationChild({
+      id: child.id,
+      childThreadId: createdThread.id,
+      status: "running",
+      lastCheckinAt: new Date().toISOString(),
+      lastError: ""
+    });
+    this.childToRunId.set(createdThread.id, run.id);
+    const parentSession = this.sessions.get(parentThread.id);
+    const options = parentSession && parentSession.kind === "codex_app_server" ? parentSession.threadOptions : undefined;
+    this.emitOrchestrationMilestone(run.id, `Child started: ${child.title}`, "orchestration_child_started", {
+      childThreadId: createdThread.id,
+      childId: child.id
+    });
+    try {
+      await this.start(createdThread, project.path, options);
+      await this.sendInput(createdThread.id, child.prompt, options);
+      this.startOrRefreshRunHeartbeat(run.id);
+    } catch (error) {
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        childThreadId: createdThread.id,
+        status: "failed",
+        lastCheckinAt: new Date().toISOString(),
+        lastError: error instanceof Error ? error.message : String(error)
+      });
+      this.emitOrchestrationMilestone(run.id, `Child failed to start: ${child.title}`, "orchestration_child_failed", {
+        childThreadId: createdThread.id,
+        childId: child.id
+      });
+    }
+  }
+
+  private startOrRefreshRunHeartbeat(runId: string) {
+    const existing = this.runHeartbeatTimerById.get(runId);
+    if (existing) {
+      clearInterval(existing);
+    }
+    const timer = setInterval(() => {
+      const children = this.deps.repository.listOrchestrationChildren(runId);
+      const running = children.filter((child) => child.status === "running");
+      if (running.length === 0) {
+        const registered = this.runHeartbeatTimerById.get(runId);
+        if (registered) {
+          clearInterval(registered);
+        }
+        this.runHeartbeatTimerById.delete(runId);
+        return;
+      }
+      const nowMs = Date.now();
+      const stale = running.filter((child) => {
+        const ts = child.lastCheckinAt ? Date.parse(child.lastCheckinAt) : 0;
+        return !ts || nowMs - ts >= ORCHESTRATION_HEARTBEAT_MS;
+      });
+      if (stale.length === 0) {
+        return;
+      }
+      stale.forEach((child) => {
+        this.deps.repository.updateOrchestrationChild({
+          id: child.id,
+          lastCheckinAt: new Date().toISOString()
+        });
+      });
+      this.emitOrchestrationMilestone(
+        runId,
+        `Heartbeat: ${stale.length} sub-thread${stale.length === 1 ? "" : "s"} still running`,
+        "orchestration_heartbeat",
+        { runningCount: running.length }
+      );
+    }, ORCHESTRATION_HEARTBEAT_MS);
+    this.runHeartbeatTimerById.set(runId, timer);
+  }
+
+  private async refreshRunStatus(runId: string): Promise<void> {
+    const run = this.deps.repository.getOrchestrationRun(runId);
+    if (!run) {
+      return;
+    }
+    const children = this.deps.repository.listOrchestrationChildren(runId);
+    if (children.length === 0) {
+      return;
+    }
+    const statuses = new Set(children.map((child) => child.status));
+    let status: OrchestrationStatus = run.status;
+    if (statuses.has("running")) {
+      status = "running";
+    } else if (statuses.has("queued")) {
+      status = "queued";
+    } else if (statuses.has("failed")) {
+      status = "failed";
+    } else if (statuses.has("stopped")) {
+      status = "stopped";
+    } else if (statuses.has("completed")) {
+      status = "completed";
+    } else if (statuses.has("canceled")) {
+      status = "canceled";
+    } else if (statuses.has("proposed")) {
+      status = "proposed";
+    }
+    if (status !== run.status) {
+      this.deps.repository.updateOrchestrationRunStatus(runId, status);
+      this.emitOrchestrationMilestone(runId, `Orchestration ${status}`, "orchestration_status", { status });
+      if (status === "running" || status === "queued" || status === "proposed") {
+        this.runParentResumeTriggered.delete(runId);
+      }
+      if (status === "completed" || status === "failed" || status === "stopped" || status === "canceled") {
+        await this.maybeResumeParentAfterOrchestration(runId, status);
+      }
+    }
+  }
+
+  private async maybeResumeParentAfterOrchestration(runId: string, status: OrchestrationStatus): Promise<void> {
+    if (this.runParentResumeTriggered.has(runId)) {
+      return;
+    }
+    const run = this.deps.repository.getOrchestrationRun(runId);
+    if (!run) {
+      return;
+    }
+    this.runParentResumeTriggered.add(runId);
+    try {
+      const summaryPrompt = this.buildParentResumePrompt(run, status);
+      const resumed = await this.sendInput(run.parentThreadId, summaryPrompt);
+      if (!resumed) {
+        this.emitOrchestrationMilestone(
+          runId,
+          "Sub-threads finished but parent resume could not be started",
+          "orchestration_resume_failed",
+          { status }
+        );
+      } else {
+        this.emitOrchestrationMilestone(
+          runId,
+          "Sub-threads finished, resuming parent synthesis",
+          "orchestration_resume_parent",
+          { status }
+        );
+      }
+    } catch (error) {
+      this.emitOrchestrationMilestone(
+        runId,
+        `Parent resume failed: ${error instanceof Error ? error.message : String(error)}`,
+        "orchestration_resume_failed",
+        { status }
+      );
+    }
+  }
+
+  private buildParentResumePrompt(run: OrchestrationRun, status: OrchestrationStatus): string {
+    const children = this.deps.repository.listOrchestrationChildren(run.id);
+    const lines = children.map((child) => {
+      const threadId = child.childThreadId;
+      let assistantSummary = "No assistant output captured.";
+      if (threadId) {
+        const page = this.deps.repository.listMessages({ threadId, userPromptCount: 1 });
+        for (let i = page.events.length - 1; i >= 0; i -= 1) {
+          const event = page.events[i];
+          if (!event) {
+            continue;
+          }
+          if (event.role === "assistant" && event.content.trim()) {
+            const singleLine = event.content.replace(/\s+/g, " ").trim();
+            assistantSummary = singleLine.length > 280 ? `${singleLine.slice(0, 280)}...` : singleLine;
+            break;
+          }
+        }
+      }
+      const childIdNote = threadId ? ` | childThreadId: ${threadId}` : "";
+      const errorNote = child.lastError ? ` | error: ${child.lastError.replace(/\s+/g, " ").trim()}` : "";
+      return `- ${child.title} [${child.status}]${childIdNote}: ${assistantSummary}${errorNote}`;
+    });
+    return [
+      "Sub-thread orchestration has finished. Continue the parent task now.",
+      `Run status: ${status}.`,
+      `Goal: ${run.proposal.parentGoal}`,
+      "Sub-thread outcomes:",
+      ...lines,
+      "Please synthesize these outcomes and continue with the next concrete implementation steps.",
+      "If the remaining work is still large, you may propose and spawn a new sub-thread orchestration run.",
+      `If a child needs additional direction, emit <${SUBTHREAD_FEEDBACK_TAG}> JSON with this shape:`,
+      '<subthread_feedback_v1>{"updates":[{"childThreadId":"<child-id>","feedback":"<what to do next>"}]}</subthread_feedback_v1>',
+      "Only include childThreadId values listed above."
+    ].join("\n");
+  }
+
+  private emitOrchestrationMilestone(runId: string, payload: string, category: string, data?: Record<string, unknown>) {
+    const run = this.deps.repository.getOrchestrationRun(runId);
+    if (!run) {
+      return;
+    }
+    this.emitSessionEvent(run.parentThreadId, "progress", payload, {
+      category,
+      runId,
+      ...(data ?? {})
+    });
+  }
+
+  private handleOrchestrationChildSessionEvent(
+    threadId: string,
+    type: SessionEventType,
+    payload: string,
+    data?: Record<string, unknown>
+  ) {
+    const runId = this.childToRunId.get(threadId);
+    if (!runId) {
+      return;
+    }
+    const child = this.deps.repository.getOrchestrationChildByThreadId(threadId);
+    if (!child) {
+      return;
+    }
+    const now = new Date().toISOString();
+    if (type === "progress") {
+      const category = asString(data?.category) ?? "";
+      const phase = asString(data?.phase) ?? "";
+      if (category === "turn" && phase === "completed") {
+        this.deps.repository.updateOrchestrationChild({
+          id: child.id,
+          status: "completed",
+          lastCheckinAt: now,
+          lastError: ""
+        });
+        this.emitOrchestrationMilestone(runId, `Child completed: ${child.title}`, "orchestration_child_completed", {
+          childThreadId: threadId,
+          childId: child.id
+        });
+        void this.scheduleRunSpawns(runId);
+        void this.refreshRunStatus(runId);
+        return;
+      }
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        status: child.status === "queued" ? "running" : child.status,
+        lastCheckinAt: now
+      });
+      const nowMs = Date.now();
+      const last = this.childProgressDebounceById.get(child.id) ?? 0;
+      if (nowMs - last > 20_000) {
+        this.childProgressDebounceById.set(child.id, nowMs);
+        this.emitOrchestrationMilestone(runId, `Progress: ${child.title}`, "orchestration_child_progress", {
+          childThreadId: threadId,
+          childId: child.id
+        });
+      }
+      return;
+    }
+    if (type === "stderr") {
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        lastCheckinAt: now,
+        lastError: payload
+      });
+      return;
+    }
+    if (type === "status" && payload.toLowerCase().includes("stopped")) {
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        status: "stopped",
+        lastCheckinAt: now
+      });
+      this.emitOrchestrationMilestone(runId, `Child stopped: ${child.title}`, "orchestration_child_stopped", {
+        childThreadId: threadId,
+        childId: child.id
+      });
+      void this.scheduleRunSpawns(runId);
+      void this.refreshRunStatus(runId);
+      return;
+    }
+    if (type === "exit") {
+      const lower = payload.toLowerCase();
+      const failed = lower.includes("code") && !lower.includes("code 0");
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        status: failed ? "failed" : "completed",
+        lastCheckinAt: now,
+        lastError: failed ? payload : ""
+      });
+      this.emitOrchestrationMilestone(
+        runId,
+        failed ? `Child failed: ${child.title}` : `Child completed: ${child.title}`,
+        failed ? "orchestration_child_failed" : "orchestration_child_completed",
+        { childThreadId: threadId, childId: child.id }
+      );
+      void this.scheduleRunSpawns(runId);
+      void this.refreshRunStatus(runId);
+    }
+  }
+
   private emitSessionEvent(
     threadId: string,
     type: SessionEventType,
     payload: string,
     data?: Record<string, unknown>
   ) {
+    this.handleOrchestrationChildSessionEvent(threadId, type, payload, data);
     const ts = new Date().toISOString();
     this.deps.emit({
       threadId,

@@ -18,6 +18,7 @@ import {
   COLLABORATION_OPTIONS,
   MODEL_SUGGESTIONS,
   PROJECT_SWITCH_BEHAVIOR_OPTIONS,
+  SUBTHREAD_POLICY_OPTIONS,
   REASONING_OPTIONS,
   SANDBOX_OPTIONS,
   WEB_SEARCH_OPTIONS,
@@ -414,6 +415,26 @@ export const SettingsModal = ({
                       }))
                     }
                   />
+                </div>
+                <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Sub-thread spawn policy</div>
+                  <select
+                    className="input text-xs"
+                    value={settings.subthreadPolicyDefault ?? "ask"}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        subthreadPolicyDefault: event.target.value as "manual" | "ask" | "auto"
+                      }))
+                    }
+                  >
+                    {SUBTHREAD_POLICY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </section>
 

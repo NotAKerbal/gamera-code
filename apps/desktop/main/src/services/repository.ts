@@ -5,6 +5,9 @@ import type {
   AppSettings,
   InstallStatus,
   MessageEvent,
+  OrchestrationChild,
+  OrchestrationRun,
+  OrchestrationStatus,
   Project,
   ProjectDevCommand,
   ProjectSettings,
@@ -12,6 +15,8 @@ import type {
   ProjectTerminalSwitchBehavior,
   Provider,
   Session,
+  SubthreadPolicy,
+  SubthreadProposal,
   ThreadEventsPage,
   Thread,
   ThreadStatus
@@ -36,6 +41,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   useTurtleSpinners: false,
   preferredSystemTerminalId: "",
   projectTerminalSwitchBehaviorDefault: "start_stop",
+  subthreadPolicyDefault: "ask",
   codexDefaults: {
     collaborationMode: "plan",
     sandboxMode: "workspace-write",
@@ -102,7 +108,33 @@ interface ProjectSettingsRow {
   default_dev_command_id: string | null;
   auto_start_dev_terminal: number;
   switch_behavior_override: string | null;
+  subthread_policy_override: string | null;
   last_detected_preview_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OrchestrationRunRow {
+  id: string;
+  parent_thread_id: string;
+  proposal_json: string;
+  policy: SubthreadPolicy;
+  status: OrchestrationStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OrchestrationChildRow {
+  id: string;
+  run_id: string;
+  task_key: string;
+  child_thread_id: string | null;
+  title: string;
+  prompt: string;
+  status: OrchestrationStatus;
+  last_checkin_at: string | null;
+  last_error: string | null;
+  retry_of_child_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -189,6 +221,8 @@ const mapMessage = (row: MessageRow): MessageEvent => ({
 
 const isSwitchBehavior = (value: unknown): value is ProjectTerminalSwitchBehavior =>
   value === "start_stop" || value === "start_only" || value === "manual";
+const isSubthreadPolicy = (value: unknown): value is SubthreadPolicy =>
+  value === "manual" || value === "ask" || value === "auto";
 
 const parseEnvVars = (value: unknown): Record<string, string> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -290,6 +324,9 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
     webLinks = [];
   }
   const switchBehavior = isSwitchBehavior(row.switch_behavior_override) ? row.switch_behavior_override : undefined;
+  const subthreadPolicyOverride = isSubthreadPolicy(row.subthread_policy_override)
+    ? row.subthread_policy_override
+    : undefined;
 
   return {
     projectId: row.project_id,
@@ -300,11 +337,45 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
     defaultDevCommandId: row.default_dev_command_id ?? undefined,
     autoStartDevTerminal: row.auto_start_dev_terminal === 1,
     switchBehaviorOverride: switchBehavior,
+    subthreadPolicyOverride,
     lastDetectedPreviewUrl: row.last_detected_preview_url ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
 };
+
+const mapOrchestrationRun = (row: OrchestrationRunRow): OrchestrationRun => {
+  let proposal: SubthreadProposal = { reason: "", parentGoal: "", tasks: [] };
+  try {
+    proposal = JSON.parse(row.proposal_json) as SubthreadProposal;
+  } catch {
+    proposal = { reason: "", parentGoal: "", tasks: [] };
+  }
+  return {
+    id: row.id,
+    parentThreadId: row.parent_thread_id,
+    proposal,
+    policy: row.policy,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+};
+
+const mapOrchestrationChild = (row: OrchestrationChildRow): OrchestrationChild => ({
+  id: row.id,
+  runId: row.run_id,
+  taskKey: row.task_key,
+  childThreadId: row.child_thread_id ?? undefined,
+  title: row.title,
+  prompt: row.prompt,
+  status: row.status,
+  lastCheckinAt: row.last_checkin_at ?? undefined,
+  lastError: row.last_error ?? undefined,
+  retryOfChildId: row.retry_of_child_id ?? undefined,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at
+});
 
 export class Repository {
   private readonly streamSequenceCache = new Map<string, number>();
@@ -398,6 +469,7 @@ export class Repository {
       default_dev_command_id: DEFAULT_DEV_COMMAND.id,
       auto_start_dev_terminal: 1,
       switch_behavior_override: null,
+      subthread_policy_override: null,
       last_detected_preview_url: null,
       created_at: now,
       updated_at: now
@@ -410,13 +482,14 @@ export class Repository {
           env_vars_json,
           dev_commands_json,
           web_links_json,
-          browser_enabled,
-          default_dev_command_id,
-          auto_start_dev_terminal,
-          switch_behavior_override,
-          last_detected_preview_url,
-          created_at,
-          updated_at
+             browser_enabled,
+             default_dev_command_id,
+             auto_start_dev_terminal,
+             switch_behavior_override,
+             subthread_policy_override,
+             last_detected_preview_url,
+             created_at,
+             updated_at
         ) VALUES (
           @project_id,
           @env_vars_json,
@@ -426,6 +499,7 @@ export class Repository {
           @default_dev_command_id,
           @auto_start_dev_terminal,
           @switch_behavior_override,
+          @subthread_policy_override,
           @last_detected_preview_url,
           @created_at,
           @updated_at
@@ -445,6 +519,7 @@ export class Repository {
     defaultDevCommandId?: string;
     autoStartDevTerminal?: boolean;
     switchBehaviorOverride?: ProjectTerminalSwitchBehavior;
+    subthreadPolicyOverride?: SubthreadPolicy;
     lastDetectedPreviewUrl?: string;
   }): ProjectSettings {
     const current = this.getProjectSettings(input.projectId);
@@ -472,6 +547,7 @@ export class Repository {
              default_dev_command_id = @default_dev_command_id,
              auto_start_dev_terminal = @auto_start_dev_terminal,
              switch_behavior_override = @switch_behavior_override,
+             subthread_policy_override = @subthread_policy_override,
              last_detected_preview_url = @last_detected_preview_url,
              updated_at = @updated_at
          WHERE project_id = @project_id`
@@ -485,6 +561,7 @@ export class Repository {
         default_dev_command_id: validDefaultCommandId ?? null,
         auto_start_dev_terminal: autoStartDevTerminal ? 1 : 0,
         switch_behavior_override: input.switchBehaviorOverride ?? current.switchBehaviorOverride ?? null,
+        subthread_policy_override: input.subthreadPolicyOverride ?? current.subthreadPolicyOverride ?? null,
         last_detected_preview_url: input.lastDetectedPreviewUrl ?? current.lastDetectedPreviewUrl ?? null,
         updated_at: now
       });
@@ -608,8 +685,19 @@ export class Repository {
     const updatedAt = new Date().toISOString();
 
     this.db
-      .prepare("UPDATE threads SET archived_at = ?, updated_at = ? WHERE id = ?")
-      .run(archivedAt, updatedAt, id);
+      .prepare(
+        `WITH RECURSIVE descendants(id) AS (
+           SELECT id FROM threads WHERE id = ?
+           UNION ALL
+           SELECT t.id
+           FROM threads t
+           INNER JOIN descendants d ON t.parent_thread_id = d.id
+         )
+         UPDATE threads
+         SET archived_at = ?, updated_at = ?
+         WHERE id IN (SELECT id FROM descendants)`
+      )
+      .run(id, archivedAt, updatedAt);
 
     return this.getThread(id)!;
   }
@@ -928,6 +1016,146 @@ export class Repository {
     this.db
       .prepare("DELETE FROM thread_provider_state WHERE thread_id = ? AND provider = ?")
       .run(threadId, provider);
+  }
+
+  createOrchestrationRun(input: {
+    parentThreadId: string;
+    proposal: SubthreadProposal;
+    policy: SubthreadPolicy;
+    status?: OrchestrationStatus;
+  }): OrchestrationRun {
+    const now = new Date().toISOString();
+    const row: OrchestrationRunRow = {
+      id: randomUUID(),
+      parent_thread_id: input.parentThreadId,
+      proposal_json: JSON.stringify(input.proposal),
+      policy: input.policy,
+      status: input.status ?? "proposed",
+      created_at: now,
+      updated_at: now
+    };
+    this.db
+      .prepare(
+        `INSERT INTO thread_orchestration_runs (id, parent_thread_id, proposal_json, policy, status, created_at, updated_at)
+         VALUES (@id, @parent_thread_id, @proposal_json, @policy, @status, @created_at, @updated_at)`
+      )
+      .run(row);
+    return mapOrchestrationRun(row);
+  }
+
+  listOrchestrationRuns(parentThreadId: string): OrchestrationRun[] {
+    const rows = this.db
+      .prepare("SELECT * FROM thread_orchestration_runs WHERE parent_thread_id = ? ORDER BY updated_at DESC")
+      .all(parentThreadId) as OrchestrationRunRow[];
+    return rows.map(mapOrchestrationRun);
+  }
+
+  getOrchestrationRun(runId: string): OrchestrationRun | null {
+    const row = this.db
+      .prepare("SELECT * FROM thread_orchestration_runs WHERE id = ?")
+      .get(runId) as OrchestrationRunRow | undefined;
+    return row ? mapOrchestrationRun(row) : null;
+  }
+
+  updateOrchestrationRunStatus(runId: string, status: OrchestrationStatus): OrchestrationRun {
+    this.db
+      .prepare("UPDATE thread_orchestration_runs SET status = ?, updated_at = ? WHERE id = ?")
+      .run(status, new Date().toISOString(), runId);
+    const row = this.getOrchestrationRun(runId);
+    if (!row) {
+      throw new Error("Orchestration run not found");
+    }
+    return row;
+  }
+
+  createOrchestrationChild(input: {
+    runId: string;
+    taskKey: string;
+    title: string;
+    prompt: string;
+    status?: OrchestrationStatus;
+    childThreadId?: string;
+    retryOfChildId?: string;
+  }): OrchestrationChild {
+    const now = new Date().toISOString();
+    const row: OrchestrationChildRow = {
+      id: randomUUID(),
+      run_id: input.runId,
+      task_key: input.taskKey,
+      child_thread_id: input.childThreadId ?? null,
+      title: input.title,
+      prompt: input.prompt,
+      status: input.status ?? "proposed",
+      last_checkin_at: null,
+      last_error: null,
+      retry_of_child_id: input.retryOfChildId ?? null,
+      created_at: now,
+      updated_at: now
+    };
+    this.db
+      .prepare(
+        `INSERT INTO thread_orchestration_children (
+          id, run_id, task_key, child_thread_id, title, prompt, status, last_checkin_at, last_error, retry_of_child_id, created_at, updated_at
+        ) VALUES (
+          @id, @run_id, @task_key, @child_thread_id, @title, @prompt, @status, @last_checkin_at, @last_error, @retry_of_child_id, @created_at, @updated_at
+        )`
+      )
+      .run(row);
+    return mapOrchestrationChild(row);
+  }
+
+  listOrchestrationChildren(runId: string): OrchestrationChild[] {
+    const rows = this.db
+      .prepare("SELECT * FROM thread_orchestration_children WHERE run_id = ? ORDER BY created_at ASC")
+      .all(runId) as OrchestrationChildRow[];
+    return rows.map(mapOrchestrationChild);
+  }
+
+  getOrchestrationChildById(childRowId: string): OrchestrationChild | null {
+    const row = this.db
+      .prepare("SELECT * FROM thread_orchestration_children WHERE id = ?")
+      .get(childRowId) as OrchestrationChildRow | undefined;
+    return row ? mapOrchestrationChild(row) : null;
+  }
+
+  getOrchestrationChildByThreadId(childThreadId: string): OrchestrationChild | null {
+    const row = this.db
+      .prepare("SELECT * FROM thread_orchestration_children WHERE child_thread_id = ?")
+      .get(childThreadId) as OrchestrationChildRow | undefined;
+    return row ? mapOrchestrationChild(row) : null;
+  }
+
+  updateOrchestrationChild(input: {
+    id: string;
+    status?: OrchestrationStatus;
+    childThreadId?: string;
+    lastCheckinAt?: string;
+    lastError?: string;
+  }): OrchestrationChild {
+    const existing = this.getOrchestrationChildById(input.id);
+    if (!existing) {
+      throw new Error("Orchestration child not found");
+    }
+    const updatedAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE thread_orchestration_children
+         SET status = ?,
+             child_thread_id = ?,
+             last_checkin_at = ?,
+             last_error = ?,
+             updated_at = ?
+         WHERE id = ?`
+      )
+      .run(
+        input.status ?? existing.status,
+        input.childThreadId ?? existing.childThreadId ?? null,
+        input.lastCheckinAt ?? existing.lastCheckinAt ?? null,
+        input.lastError ?? existing.lastError ?? null,
+        updatedAt,
+        input.id
+      );
+    return this.getOrchestrationChildById(input.id)!;
   }
 
   private enqueueFileAppend(filePath: string, text: string): void {

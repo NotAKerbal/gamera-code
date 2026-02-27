@@ -70,6 +70,7 @@ export interface SystemTerminalOption {
 }
 
 export type ProjectTerminalSwitchBehavior = "start_stop" | "start_only" | "manual";
+export type SubthreadPolicy = "manual" | "ask" | "auto";
 
 export interface ProjectSettings {
   projectId: string;
@@ -80,6 +81,7 @@ export interface ProjectSettings {
   defaultDevCommandId?: string;
   autoStartDevTerminal: boolean;
   switchBehaviorOverride?: ProjectTerminalSwitchBehavior;
+  subthreadPolicyOverride?: SubthreadPolicy;
   lastDetectedPreviewUrl?: string;
   createdAt: string;
   updatedAt: string;
@@ -234,6 +236,54 @@ export interface AppSettings {
   condenseActivityTimeline?: boolean;
   projectTerminalSwitchBehaviorDefault?: ProjectTerminalSwitchBehavior;
   preferredSystemTerminalId?: SystemTerminalId;
+  subthreadPolicyDefault?: SubthreadPolicy;
+}
+
+export type OrchestrationStatus =
+  | "proposed"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "stopped"
+  | "canceled";
+
+export interface SubthreadProposalTask {
+  key: string;
+  title: string;
+  prompt: string;
+  expectedOutput?: string;
+}
+
+export interface SubthreadProposal {
+  reason: string;
+  parentGoal: string;
+  tasks: SubthreadProposalTask[];
+}
+
+export interface OrchestrationRun {
+  id: string;
+  parentThreadId: string;
+  proposal: SubthreadProposal;
+  policy: SubthreadPolicy;
+  status: OrchestrationStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrchestrationChild {
+  id: string;
+  runId: string;
+  taskKey: string;
+  childThreadId?: string;
+  title: string;
+  prompt: string;
+  status: OrchestrationStatus;
+  lastCheckinAt?: string;
+  lastError?: string;
+  retryOfChildId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface UpdateCheckResult {

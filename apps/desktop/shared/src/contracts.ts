@@ -12,6 +12,8 @@ import type {
   InstallDependencyKey,
   InstallStatus,
   MessageEvent,
+  OrchestrationChild,
+  OrchestrationRun,
   ProjectFileEntry,
   PreviewEvent,
   ThreadEventsPage,
@@ -25,6 +27,7 @@ import type {
   RiskCheck,
   Session,
   SessionEvent,
+  SubthreadPolicy,
   SystemTerminalId,
   SystemTerminalOption,
   SkillRecord,
@@ -62,6 +65,7 @@ export interface DesktopApi {
       defaultDevCommandId?: string;
       autoStartDevTerminal?: boolean;
       switchBehaviorOverride?: "start_stop" | "start_only" | "manual";
+      subthreadPolicyOverride?: SubthreadPolicy;
       lastDetectedPreviewUrl?: string;
     }) => Promise<ProjectSettings>;
   };
@@ -90,6 +94,13 @@ export interface DesktopApi {
       beforeStreamSeq?: number;
       userPromptCount?: number;
     }) => Promise<ThreadEventsPage>;
+  };
+  orchestration: {
+    listRuns: (input: { parentThreadId: string }) => Promise<OrchestrationRun[]>;
+    getRun: (input: { runId: string }) => Promise<{ run: OrchestrationRun; children: OrchestrationChild[] } | null>;
+    approveProposal: (input: { runId: string; selectedTaskKeys?: string[] }) => Promise<{ ok: boolean }>;
+    stopChild: (input: { childThreadId: string }) => Promise<{ ok: boolean }>;
+    retryChild: (input: { childRowId: string }) => Promise<{ ok: boolean }>;
   };
   sessions: {
     start: (input: { threadId: string; options?: CodexThreadOptions }) => Promise<Session>;

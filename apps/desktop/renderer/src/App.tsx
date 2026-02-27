@@ -50,6 +50,8 @@ import type {
   GitState,
   InstallStatus,
   MessageEvent,
+  OrchestrationChild,
+  OrchestrationRun,
   PermissionMode,
   PreviewEvent,
   PromptAttachment,
@@ -63,6 +65,7 @@ import type {
   SystemTerminalOption,
   SessionEvent,
   SkillRecord,
+  SubthreadPolicy,
   Thread,
   ThreadEventsPage
 } from "@code-app/shared";
@@ -291,6 +294,11 @@ export const App = () => {
   const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>([]);
   const [projectSettingsBrowserEnabled, setProjectSettingsBrowserEnabled] = useState(true);
   const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">("");
+  const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">("");
+  const [orchestrationRunsByParentId, setOrchestrationRunsByParentId] = useState<Record<string, OrchestrationRun[]>>({});
+  const [orchestrationChildrenByRunId, setOrchestrationChildrenByRunId] = useState<Record<string, OrchestrationChild[]>>({});
+  const [showRunningSubthreadsByThreadId, setShowRunningSubthreadsByThreadId] = useState<Record<string, boolean>>({});
+  const [selectedOrchestrationTaskKeysByRunId, setSelectedOrchestrationTaskKeysByRunId] = useState<Record<string, string[]>>({});
   const [removingProject, setRemovingProject] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
@@ -740,7 +748,19 @@ export const App = () => {
   const loadThreads = async () => {
     const data = await api.threads.list({ includeArchived: true });
     const codexThreads = data.filter((thread) => thread.provider === "codex");
+    const threadIds = codexThreads.map((thread) => thread.id);
     setThreads(codexThreads);
+    await Promise.all(
+      threadIds.map((threadId) =>
+        loadOrchestrationRuns(threadId).catch((error) => {
+          setLogs((prev) => [...prev, `Load orchestration failed: ${String(error)}`]);
+        })
+      )
+    );
+    const threadIdSet = new Set(threadIds);
+    setOrchestrationRunsByParentId((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([threadId]) => threadIdSet.has(threadId)))
+    );
 
     if (activeThreadId && !codexThreads.some((thread) => thread.id === activeThreadId)) {
       setActiveThreadId(codexThreads[0]?.id ?? null);
@@ -759,6 +779,37 @@ export const App = () => {
     setComposerOptions(current.codexDefaults);
     setSettingsSaveNotice("");
     await loadAppSkills();
+  };
+
+  const loadOrchestrationRuns = async (parentThreadId: string) => {
+    const previousRunIds = new Set((orchestrationRunsByParentId[parentThreadId] ?? []).map((run) => run.id));
+    const runs = await api.orchestration.listRuns({ parentThreadId });
+    setOrchestrationRunsByParentId((prev) => ({ ...prev, [parentThreadId]: runs }));
+    const currentRunIds = new Set(runs.map((run) => run.id));
+    setOrchestrationChildrenByRunId((prev) => {
+      const next = { ...prev };
+      previousRunIds.forEach((runId) => {
+        if (!currentRunIds.has(runId)) {
+          delete next[runId];
+        }
+      });
+      return next;
+    });
+    if (runs.length === 0) {
+      return;
+    }
+
+    const payloads = await Promise.all(runs.map((run) => api.orchestration.getRun({ runId: run.id })));
+    setOrchestrationChildrenByRunId((prev) => {
+      const next = { ...prev };
+      payloads.forEach((payload) => {
+        if (!payload) {
+          return;
+        }
+        next[payload.run.id] = payload.children;
+      });
+      return next;
+    });
   };
 
   const loadSystemTerminals = async () => {
@@ -949,6 +1000,19 @@ export const App = () => {
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
   }, [activeThreadId]);
+
+  useEffect(() => {
+    if (!activeThreadId) {
+      return;
+    }
+    const target = threads.find((thread) => thread.id === activeThreadId);
+    if (!target || target.provider !== "codex") {
+      return;
+    }
+    loadOrchestrationRuns(activeThreadId).catch((error) => {
+      setLogs((prev) => [...prev, `Load orchestration failed: ${String(error)}`]);
+    });
+  }, [activeThreadId, threads]);
 
   useEffect(() => {
     if (!activeThread || activeProjectId === activeThread.projectId) {
@@ -1366,6 +1430,11 @@ export const App = () => {
       const phase = asString(data?.phase);
       const category = asString(data?.category);
       const status = asString(data?.status);
+      if (category?.startsWith("orchestration_")) {
+        loadOrchestrationRuns(event.threadId).catch((error) => {
+          setLogs((prev) => [...prev, `Load orchestration failed: ${String(error)}`]);
+        });
+      }
       const requestId = asString(data?.requestId) ?? "";
       const requestedQuestions = normalizePendingUserQuestions(data?.questions);
 
@@ -2407,6 +2476,7 @@ export const App = () => {
     setProjectSettingsProjectName(projectName);
     setProjectSettingsBrowserEnabled(current.browserEnabled ?? true);
     setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
+    setProjectSubthreadPolicyOverride(current.subthreadPolicyOverride ?? "");
     setProjectSettingsTab("general");
     if (activeProjectId !== projectId) {
       setActiveProjectId(projectId);
@@ -2486,7 +2556,8 @@ export const App = () => {
       devCommands: sanitizedCommands,
       webLinks: sanitizedWebLinks,
       browserEnabled: projectSettingsBrowserEnabled,
-      switchBehaviorOverride: projectSwitchBehaviorOverride || undefined
+      switchBehaviorOverride: projectSwitchBehaviorOverride || undefined,
+      subthreadPolicyOverride: projectSubthreadPolicyOverride || undefined
     });
 
     setProjectSettingsById((prev) => ({
@@ -3536,15 +3607,12 @@ export const App = () => {
   };
 
   const setThreadArchived = async (thread: Thread, archived: boolean) => {
-    const updated = await api.threads.archive({ id: thread.id, archived });
-    setThreads((prev) => {
-      const next = prev.map((item) => (item.id === updated.id ? updated : item));
-      if (archived && activeThreadId === thread.id) {
-        const fallback = next.find((item) => item.projectId === thread.projectId && !item.archivedAt && item.id !== thread.id);
-        setActiveThreadId(fallback?.id ?? null);
-      }
-      return next;
-    });
+    await api.threads.archive({ id: thread.id, archived });
+    if (archived && activeThreadId === thread.id) {
+      const fallback = threads.find((item) => item.projectId === thread.projectId && !item.archivedAt && item.id !== thread.id);
+      setActiveThreadId(fallback?.id ?? null);
+    }
+    await loadThreads();
   };
 
   const beginProjectInlineRename = (project: Project) => {
@@ -5603,6 +5671,16 @@ const stopActiveRun = async () => {
     return rows;
   }, [timelineItems]);
 
+  const activeOrchestrationRuns = useMemo(
+    () => (activeThreadId ? orchestrationRunsByParentId[activeThreadId] ?? [] : []),
+    [activeThreadId, orchestrationRunsByParentId]
+  );
+
+  const activeAskOrchestrationRuns = useMemo(
+    () => activeOrchestrationRuns.filter((run) => run.status === "proposed" && run.policy === "ask"),
+    [activeOrchestrationRuns]
+  );
+
   useEffect(() => {
     const pendingRestore = pendingHistoryScrollRestoreRef.current;
     const viewport = timelineViewportRef.current;
@@ -5653,6 +5731,31 @@ const stopActiveRun = async () => {
       window.cancelAnimationFrame(frameId);
     };
   }, [activeRunState, activeThreadId, timelineItems.length]);
+
+  const approveOrchestrationRun = async (runId: string, selectedTaskKeys?: string[]) => {
+    const result = await api.orchestration.approveProposal({ runId, selectedTaskKeys });
+    if (!result.ok) {
+      throw new Error("Failed to approve orchestration run");
+    }
+    setSelectedOrchestrationTaskKeysByRunId((prev) => {
+      const next = { ...prev };
+      delete next[runId];
+      return next;
+    });
+    if (activeThreadId) {
+      await loadOrchestrationRuns(activeThreadId);
+    }
+  };
+
+  const stopOrchestrationChild = async (childThreadId: string) => {
+    const result = await api.orchestration.stopChild({ childThreadId });
+    if (!result.ok) {
+      throw new Error("Failed to stop child thread");
+    }
+    if (activeThreadId) {
+      await loadOrchestrationRuns(activeThreadId);
+    }
+  };
 
   return (
     <div className="h-screen overflow-hidden bg-bg text-white">
@@ -5879,112 +5982,222 @@ const stopActiveRun = async () => {
 
                       <div className="thread-list">
                         {visibleRows.length === 0 && <div className="thread-empty">No active threads</div>}
-                        {visibleRows.map(({ thread, depth }) => (
-                          <button
-                            key={thread.id}
-                            className={`${activeThreadId === thread.id ? "thread-row active" : "thread-row"} ${
-                              threadCompletionFlashById[thread.id] ? "thread-row-complete-flash" : ""
-                            } ${threadAwaitingInputById[thread.id] ? "thread-row-awaiting-input" : ""}`}
-                            style={depth > 0 ? { marginLeft: `${depth * 14}px` } : undefined}
-                            onClick={() => {
-                              activateThreadFromSidebar(project.id, thread.id);
-                            }}
-                          >
-                            <div className="thread-row-main">
-                              <div className="thread-row-title-block">
-                                <div className="truncate text-left text-sm">{thread.title}</div>
-                              </div>
-                              <div className="thread-row-actions">
-                                <span
-                                  className="thread-row-action-btn"
-                                  title="Rename thread"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    renameThread(thread).catch((error) => {
-                                      setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
-                                    });
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      renameThread(thread).catch((error) => {
-                                        setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
-                                      });
-                                    }
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <FaPen className="text-[10px]" />
-                                </span>
-                                <span
-                                  className="thread-row-action-btn"
-                                  title="Fork thread"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    forkThreadFromSidebar(thread).catch((error) => {
-                                      setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                                    });
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      forkThreadFromSidebar(thread).catch((error) => {
-                                        setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                                      });
-                                    }
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <FaCodeBranch className="text-[10px]" />
-                                </span>
-                                <span
-                                  className="thread-row-action-btn"
-                                  title="Archive thread"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setThreadArchived(thread, true).catch((error) => {
-                                      setLogs((prev) => [...prev, `Archive thread failed: ${String(error)}`]);
-                                    });
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      setThreadArchived(thread, true).catch((error) => {
-                                        setLogs((prev) => [...prev, `Archive thread failed: ${String(error)}`]);
-                                      });
-                                    }
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <FaArchive className="text-[10px]" />
-                                </span>
-                                {threadAwaitingInputById[thread.id] ? (
-                                  <div className="thread-awaiting-badge" title="Model is waiting for your input">
-                                    Needs input
-                                    {(pendingUserQuestionsByThreadId[thread.id]?.length ?? 0) > 0
-                                      ? ` (${pendingUserQuestionsByThreadId[thread.id]?.length ?? 0})`
-                                      : ""}
+                        {visibleRows.map(({ thread, depth }) => {
+                          const threadRuns = orchestrationRunsByParentId[thread.id] ?? [];
+                          const runningChildren = threadRuns.flatMap((run) =>
+                            (orchestrationChildrenByRunId[run.id] ?? []).filter(
+                              (child) => child.status === "running" || child.status === "queued"
+                            )
+                          );
+                          const showRunningChildren = showRunningSubthreadsByThreadId[thread.id] ?? false;
+
+                          return (
+                            <div key={thread.id}>
+                              <button
+                                className={`${activeThreadId === thread.id ? "thread-row active" : "thread-row"} ${
+                                  threadCompletionFlashById[thread.id] ? "thread-row-complete-flash" : ""
+                                } ${threadAwaitingInputById[thread.id] ? "thread-row-awaiting-input" : ""}`}
+                                style={depth > 0 ? { marginLeft: `${depth * 14}px` } : undefined}
+                                onClick={() => {
+                                  activateThreadFromSidebar(project.id, thread.id);
+                                }}
+                              >
+                                <div className="thread-row-main">
+                                  <div className="thread-row-title-block">
+                                    <div className="truncate text-left text-sm">{thread.title}</div>
                                   </div>
-                                ) : (runStateByThreadId[thread.id] ?? "idle") === "running" ? (
-                                  <div className="thread-activity-indicator" aria-label="Agent running" title="Agent running">
-                                    <span className={settings.useTurtleSpinners ? "loading-ring turtle-spinner" : "loading-ring"} />
+                                  <div className="thread-row-actions">
+                                    <span
+                                      className="thread-row-action-btn"
+                                      title="Rename thread"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        renameThread(thread).catch((error) => {
+                                          setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
+                                        });
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          renameThread(thread).catch((error) => {
+                                            setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
+                                          });
+                                        }
+                                      }}
+                                      role="button"
+                                      tabIndex={0}
+                                    >
+                                      <FaPen className="text-[10px]" />
+                                    </span>
+                                    <span
+                                      className="thread-row-action-btn"
+                                      title="Fork thread"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        forkThreadFromSidebar(thread).catch((error) => {
+                                          setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
+                                        });
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          forkThreadFromSidebar(thread).catch((error) => {
+                                            setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
+                                          });
+                                        }
+                                      }}
+                                      role="button"
+                                      tabIndex={0}
+                                    >
+                                      <FaCodeBranch className="text-[10px]" />
+                                    </span>
+                                    <span
+                                      className="thread-row-action-btn"
+                                      title="Archive thread"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setThreadArchived(thread, true).catch((error) => {
+                                          setLogs((prev) => [...prev, `Archive thread failed: ${String(error)}`]);
+                                        });
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          setThreadArchived(thread, true).catch((error) => {
+                                            setLogs((prev) => [...prev, `Archive thread failed: ${String(error)}`]);
+                                          });
+                                        }
+                                      }}
+                                      role="button"
+                                      tabIndex={0}
+                                    >
+                                      <FaArchive className="text-[10px]" />
+                                    </span>
+                                    {threadAwaitingInputById[thread.id] ? (
+                                      <div className="thread-awaiting-badge" title="Model is waiting for your input">
+                                        Needs input
+                                        {(pendingUserQuestionsByThreadId[thread.id]?.length ?? 0)
+                                          ? ` (${pendingUserQuestionsByThreadId[thread.id]?.length ?? 0})`
+                                          : ""}
+                                      </div>
+                                    ) : (runStateByThreadId[thread.id] ?? "idle") === "running" ? (
+                                      <div className="thread-activity-indicator" aria-label="Agent running" title="Agent running">
+                                        <span className={settings.useTurtleSpinners ? "loading-ring turtle-spinner" : "loading-ring"} />
+                                      </div>
+                                    ) : (
+                                      <div className="thread-row-time text-[11px] text-muted">{formatRelative(thread.updatedAt)}</div>
+                                    )}
                                   </div>
-                                ) : (
-                                  <div className="thread-row-time text-[11px] text-muted">{formatRelative(thread.updatedAt)}</div>
+                                </div>
+                                {(settings.showThreadSummaries ?? true) && (
+                                  <div className="thread-row-subtitle text-left">{getThreadSidebarSummary(thread)}</div>
                                 )}
-                              </div>
+                              </button>
+                              {runningChildren.length > 0 && (
+                                <>
+                                  <button
+                                    className="thread-archived-toggle"
+                                    style={{ marginLeft: `${Math.max(0, depth) * 14}px` }}
+                                    onClick={() =>
+                                      setShowRunningSubthreadsByThreadId((prev) => ({
+                                        ...prev,
+                                        [thread.id]: !showRunningChildren
+                                      }))
+                                    }
+                                    title="View running sub-threads"
+                                  >
+                                    {showRunningChildren
+                                      ? "Hide running sub-threads"
+                                      : `View running sub-threads (${runningChildren.length})`}
+                                  </button>
+                                  <div className={showRunningChildren ? "thread-archived-group expanded" : "thread-archived-group"}>
+                                    <div className="thread-archived-group-inner">
+                                      {runningChildren.map((child) => {
+                                        const childThreadId = child.childThreadId;
+                                        const isActiveChild = childThreadId ? activeThreadId === childThreadId : false;
+                                        return (
+                                          <button
+                                            key={`running-subthread-${thread.id}-${child.id}`}
+                                            className={`${isActiveChild ? "thread-row active" : "thread-row"} archived`}
+                                            style={{ marginLeft: `${(depth + 1) * 14}px` }}
+                                            onClick={() => {
+                                              if (!childThreadId) {
+                                                return;
+                                              }
+                                              activateThreadFromSidebar(project.id, childThreadId);
+                                            }}
+                                            disabled={!childThreadId}
+                                          >
+                                            <div className="thread-row-main">
+                                              <div className="thread-row-title-block">
+                                                <div className="truncate text-left text-sm">{"-> "}{child.title}</div>
+                                              </div>
+                                              <div className="thread-row-actions">
+                                                <div className="thread-row-time text-[11px] text-muted">{child.status}</div>
+                                                {childThreadId && (
+                                                  <span
+                                                    className="thread-row-action-btn"
+                                                    title="Open sub-thread"
+                                                    onClick={(event) => {
+                                                      event.stopPropagation();
+                                                      activateThreadFromSidebar(project.id, childThreadId);
+                                                    }}
+                                                    onKeyDown={(event) => {
+                                                      if (event.key === "Enter" || event.key === " ") {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        activateThreadFromSidebar(project.id, childThreadId);
+                                                      }
+                                                    }}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                  >
+                                                    <FaEye className="text-[10px]" />
+                                                  </span>
+                                                )}
+                                                {childThreadId && child.status === "running" && (
+                                                  <span
+                                                    className="thread-row-action-btn"
+                                                    title="Stop sub-thread"
+                                                    onClick={(event) => {
+                                                      event.stopPropagation();
+                                                      stopOrchestrationChild(childThreadId).catch((error) => {
+                                                        setLogs((prev) => [...prev, `Stop sub-thread failed: ${String(error)}`]);
+                                                      });
+                                                    }}
+                                                    onKeyDown={(event) => {
+                                                      if (event.key === "Enter" || event.key === " ") {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        stopOrchestrationChild(childThreadId).catch((error) => {
+                                                          setLogs((prev) => [...prev, `Stop sub-thread failed: ${String(error)}`]);
+                                                        });
+                                                      }
+                                                    }}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                  >
+                                                    <FaStop className="text-[10px]" />
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                            {child.lastError && (
+                                              <div className="thread-row-subtitle text-left text-rose-300">{child.lastError}</div>
+                                            )}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                </>
+                              )}
                             </div>
-                            {(settings.showThreadSummaries ?? true) && (
-                              <div className="thread-row-subtitle text-left">{getThreadSidebarSummary(thread)}</div>
-                            )}
-                          </button>
-                        ))}
+                          );
+                        })}
                         {archivedRows.length > 0 && (
                           <button
                             className="thread-archived-toggle"
@@ -6318,8 +6531,93 @@ const stopActiveRun = async () => {
                       <span className="thinking-indicator-text">Thinking...</span>
                     </div>
                   )}
+
                 </div>
               </section>
+
+              {activeThreadId && activeAskOrchestrationRuns.length > 0 && (
+                <section className="px-5 pb-1">
+                  <div className="space-y-2">
+                    {activeAskOrchestrationRuns.map((run) => {
+                      const allTaskKeys = run.proposal.tasks.map((task) => task.key);
+                      const selectedTaskKeys = selectedOrchestrationTaskKeysByRunId[run.id] ?? allTaskKeys;
+                      const selectedCount = selectedTaskKeys.length;
+                      return (
+                        <div key={`orchestration-ask-${run.id}`} className="rounded-lg border border-border bg-black/25 p-3">
+                          <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Sub-thread request</div>
+                          <div className="mt-1 text-sm text-slate-100">{run.proposal.reason}</div>
+                          <div className="mt-1 text-xs text-slate-400">Goal: {run.proposal.parentGoal}</div>
+                          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {run.proposal.tasks.map((task) => {
+                              const isSelected = selectedTaskKeys.includes(task.key);
+                              return (
+                                <button
+                                  key={`${run.id}-${task.key}`}
+                                  type="button"
+                                  className={
+                                    isSelected
+                                      ? "h-9 w-full rounded-md border border-zinc-600 bg-zinc-800 px-2 text-left text-xs text-slate-100"
+                                      : "h-9 w-full rounded-md border border-border bg-zinc-900/60 px-2 text-left text-xs text-slate-300 hover:bg-zinc-800"
+                                  }
+                                  onClick={() =>
+                                    setSelectedOrchestrationTaskKeysByRunId((prev) => {
+                                      const prior = prev[run.id] ?? allTaskKeys;
+                                      const next = prior.includes(task.key)
+                                        ? prior.filter((key) => key !== task.key)
+                                        : [...prior, task.key];
+                                      return { ...prev, [run.id]: next };
+                                    })
+                                  }
+                                >
+                                  {task.title}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-[11px] text-slate-400">
+                              {selectedCount} of {allTaskKeys.length} selected
+                            </div>
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                className="btn-secondary h-7 px-2 py-0 text-xs"
+                                onClick={() => {
+                                  approveOrchestrationRun(run.id, []).catch((error) => {
+                                    setLogs((prev) => [...prev, `Decline orchestration failed: ${String(error)}`]);
+                                  });
+                                }}
+                              >
+                                Decline
+                              </button>
+                              <button
+                                className="btn-secondary h-7 px-2 py-0 text-xs"
+                                onClick={() => {
+                                  approveOrchestrationRun(run.id, selectedTaskKeys).catch((error) => {
+                                    setLogs((prev) => [...prev, `Spawn selected failed: ${String(error)}`]);
+                                  });
+                                }}
+                                disabled={selectedCount === 0}
+                              >
+                                Spawn selected
+                              </button>
+                              <button
+                                className="btn-primary h-7 px-2 py-0 text-xs"
+                                onClick={() => {
+                                  approveOrchestrationRun(run.id).catch((error) => {
+                                    setLogs((prev) => [...prev, `Spawn all failed: ${String(error)}`]);
+                                  });
+                                }}
+                              >
+                                Spawn all
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
 
               <section className="bg-transparent px-5 py-3">
                 <div
@@ -7356,6 +7654,8 @@ const stopActiveRun = async () => {
           setProjectSettingsProjectName={setProjectSettingsProjectName}
           projectSwitchBehaviorOverride={projectSwitchBehaviorOverride}
           setProjectSwitchBehaviorOverride={setProjectSwitchBehaviorOverride}
+          projectSubthreadPolicyOverride={projectSubthreadPolicyOverride}
+          setProjectSubthreadPolicyOverride={setProjectSubthreadPolicyOverride}
           projectSettingsBrowserEnabled={projectSettingsBrowserEnabled}
           setProjectSettingsBrowserEnabled={setProjectSettingsBrowserEnabled}
           projectSettingsEnvText={projectSettingsEnvText}
@@ -7430,6 +7730,7 @@ const stopActiveRun = async () => {
     </div>
   );
 };
+
 
 
 
