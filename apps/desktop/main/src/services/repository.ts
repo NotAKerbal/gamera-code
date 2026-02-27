@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type {
@@ -307,6 +307,7 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
 
 export class Repository {
   private readonly streamSequenceCache = new Map<string, number>();
+  private readonly fileWriteQueue = new Map<string, Promise<void>>();
 
   constructor(
     private readonly db: Database.Database,
@@ -681,7 +682,7 @@ export class Repository {
       });
 
     const filePath = getThreadDataPath(this.paths.threadsDir, event.threadId).eventsPath;
-    appendFileSync(filePath, `${JSON.stringify(event)}\n`, "utf8");
+    this.enqueueFileAppend(filePath, `${JSON.stringify(event)}\n`);
 
     return event;
   }
@@ -774,7 +775,15 @@ export class Repository {
 
   appendPtyLog(threadId: string, text: string): void {
     const filePath = getThreadDataPath(this.paths.threadsDir, threadId).ptyLogPath;
-    appendFileSync(filePath, text, "utf8");
+    this.enqueueFileAppend(filePath, text);
+  }
+
+  async flushPendingFileWrites(): Promise<void> {
+    const pending = Array.from(this.fileWriteQueue.values());
+    if (pending.length === 0) {
+      return;
+    }
+    await Promise.allSettled(pending);
   }
 
   getThreadStoragePaths(threadId: string) {
@@ -918,5 +927,21 @@ export class Repository {
     this.db
       .prepare("DELETE FROM thread_provider_state WHERE thread_id = ? AND provider = ?")
       .run(threadId, provider);
+  }
+
+  private enqueueFileAppend(filePath: string, text: string): void {
+    const current = this.fileWriteQueue.get(filePath) ?? Promise.resolve();
+    const next = current
+      .catch(() => undefined)
+      .then(async () => {
+        await appendFile(filePath, text, "utf8");
+      });
+    this.fileWriteQueue.set(filePath, next);
+    void next.catch(() => undefined);
+    void next.finally(() => {
+      if (this.fileWriteQueue.get(filePath) === next) {
+        this.fileWriteQueue.delete(filePath);
+      }
+    });
   }
 }

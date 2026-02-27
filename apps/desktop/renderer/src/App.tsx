@@ -342,7 +342,6 @@ export const App = () => {
   const queueProcessingThreadIdsRef = useRef<Set<string>>(new Set());
   const completionAudioContextRef = useRef<AudioContext | null>(null);
   const terminalPopoutWindowsRef = useRef<Record<string, Window | null>>({});
-  const terminalPopoutPollIntervalRef = useRef<number | null>(null);
   const terminalDashboardWindowRef = useRef<Window | null>(null);
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
@@ -801,13 +800,26 @@ export const App = () => {
     return state;
   };
 
-  const loadGitState = async (projectId: string) => {
-    const gitState = await api.git.getState({ projectId });
+  const loadGitSnapshot = async (projectId: string) => {
+    const snapshot = await api.git.getSnapshot({ projectId });
     setGitStateByProjectId((prev) => ({
       ...prev,
-      [projectId]: gitState
+      [projectId]: snapshot.state
     }));
-    return gitState;
+    setGitOutgoingCommitsByProjectId((prev) => ({
+      ...prev,
+      [projectId]: snapshot.outgoingCommits
+    }));
+    setGitIncomingCommitsByProjectId((prev) => ({
+      ...prev,
+      [projectId]: snapshot.incomingCommits
+    }));
+    return snapshot;
+  };
+
+  const loadGitState = async (projectId: string) => {
+    const snapshot = await loadGitSnapshot(projectId);
+    return snapshot.state;
   };
 
   const selectGitPath = (projectId: string, path?: string) => {
@@ -818,21 +830,13 @@ export const App = () => {
   };
 
   const loadGitOutgoingCommits = async (projectId: string) => {
-    const commits = await api.git.getOutgoingCommits({ projectId });
-    setGitOutgoingCommitsByProjectId((prev) => ({
-      ...prev,
-      [projectId]: commits
-    }));
-    return commits;
+    const snapshot = await loadGitSnapshot(projectId);
+    return snapshot.outgoingCommits;
   };
 
   const loadGitIncomingCommits = async (projectId: string) => {
-    const commits = await api.git.getIncomingCommits({ projectId });
-    setGitIncomingCommitsByProjectId((prev) => ({
-      ...prev,
-      [projectId]: commits
-    }));
-    return commits;
+    const snapshot = await loadGitSnapshot(projectId);
+    return snapshot.incomingCommits;
   };
 
   const addImageFiles = async (files: File[]) => {
@@ -1862,10 +1866,6 @@ export const App = () => {
 
   useEffect(() => {
     return () => {
-      if (terminalPopoutPollIntervalRef.current) {
-        window.clearInterval(terminalPopoutPollIntervalRef.current);
-        terminalPopoutPollIntervalRef.current = null;
-      }
       Object.values(terminalPopoutWindowsRef.current).forEach((popout) => {
         if (popout && !popout.closed) {
           popout.close();
@@ -2147,11 +2147,9 @@ export const App = () => {
       loadProjectSettings(targetProjectId),
       loadProjectSkills(targetProjectId),
       loadProjectTerminalState(targetProjectId),
-      loadGitState(targetProjectId),
-      loadGitOutgoingCommits(targetProjectId),
-      loadGitIncomingCommits(targetProjectId)
+      loadGitSnapshot(targetProjectId)
     ])
-      .then(([, projectSettings, , , gitState]) => {
+      .then(([, projectSettings, , , gitSnapshot]) => {
         if (cancelled) {
           return;
         }
@@ -2187,7 +2185,7 @@ export const App = () => {
               setLogs((prev) => [...prev, `Web link auto-switch failed: ${String(error)}`]);
             });
         }
-        selectGitPath(targetProjectId, gitState.files[0]?.path);
+        selectGitPath(targetProjectId, gitSnapshot.state.files[0]?.path);
       })
       .catch((error) => {
         setLogs((prev) => [...prev, `Load project failed: ${String(error)}`]);
@@ -2619,9 +2617,8 @@ export const App = () => {
         setLogs((prev) => [...prev, `Git ${label} failed.${result.stderr ? ` ${result.stderr}` : ""}`]);
       }
 
-      const nextState = await loadGitState(activeProjectId);
-      await loadGitOutgoingCommits(activeProjectId);
-      await loadGitIncomingCommits(activeProjectId);
+      const nextSnapshot = await loadGitSnapshot(activeProjectId);
+      const nextState = nextSnapshot.state;
       const selectedPath =
         activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
           ? activeSelectedGitPath
@@ -2706,9 +2703,8 @@ export const App = () => {
         }
       }
 
-      const nextState = await loadGitState(activeProjectId);
-      await loadGitOutgoingCommits(activeProjectId);
-      await loadGitIncomingCommits(activeProjectId);
+      const nextSnapshot = await loadGitSnapshot(activeProjectId);
+      const nextState = nextSnapshot.state;
       const selectedPath =
         activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
           ? activeSelectedGitPath
@@ -3204,17 +3200,27 @@ export const App = () => {
     });
   };
 
-  const ensureTerminalPopoutPoller = () => {
-    if (terminalPopoutPollIntervalRef.current) {
-      return;
-    }
-    terminalPopoutPollIntervalRef.current = window.setInterval(() => {
-      clearClosedTerminalPopouts();
-      if (Object.keys(terminalPopoutWindowsRef.current).length === 0 && terminalPopoutPollIntervalRef.current) {
-        window.clearInterval(terminalPopoutPollIntervalRef.current);
-        terminalPopoutPollIntervalRef.current = null;
-      }
-    }, 700);
+  const attachTerminalPopoutCloseListener = (key: string, popout: Window) => {
+    const handleClose = () => {
+      delete terminalPopoutWindowsRef.current[key];
+      setTerminalPopoutByKey((prev) => {
+        if (!prev[key]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    };
+    popout.addEventListener("beforeunload", handleClose, { once: true });
+  };
+
+  const attachTerminalDashboardCloseListener = (popout: Window) => {
+    const handleClose = () => {
+      terminalDashboardWindowRef.current = null;
+      setIsTerminalDashboardPoppedOut(false);
+    };
+    popout.addEventListener("beforeunload", handleClose, { once: true });
   };
 
   const openTerminalPopout = (terminal: ProjectTerminalState["terminals"][number]) => {
@@ -3238,7 +3244,7 @@ export const App = () => {
     terminalPopoutWindowsRef.current[key] = popout;
     renderTerminalPopout(popout, terminal, activeProject?.name);
     setTerminalPopoutByKey((prev) => ({ ...prev, [key]: true }));
-    ensureTerminalPopoutPoller();
+    attachTerminalPopoutCloseListener(key, popout);
   };
 
   const closeTerminalPopout = (key: string) => {
@@ -4310,7 +4316,7 @@ export const App = () => {
     terminalDashboardWindowRef.current = popout;
     renderTerminalDashboardPopout(popout);
     setIsTerminalDashboardPoppedOut(true);
-    ensureTerminalPopoutPoller();
+    attachTerminalDashboardCloseListener(popout);
   };
 const stopActiveRun = async () => {
     if (!activeThreadId) {
@@ -6371,17 +6377,15 @@ const stopActiveRun = async () => {
                             if (!activeProjectId) {
                               return;
                             }
-                            loadGitState(activeProjectId)
-                              .then((state) => {
+                            loadGitSnapshot(activeProjectId)
+                              .then((snapshot) => {
+                                const state = snapshot.state;
                                 const selectedPath =
                                   activeSelectedGitPath && state.files.some((file) => file.path === activeSelectedGitPath)
                                     ? activeSelectedGitPath
                                     : state.files[0]?.path;
                                 selectGitPath(activeProjectId, selectedPath);
-                                return Promise.all([
-                                  loadGitOutgoingCommits(activeProjectId),
-                                  loadGitIncomingCommits(activeProjectId)
-                                ]);
+                                return snapshot;
                               })
                               .catch((error) => setLogs((prev) => [...prev, `Git refresh failed: ${String(error)}`]));
                           }}

@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC_CHANNELS, type DesktopApi, type PreviewEvent, type ProjectTerminalEvent, type SessionEvent } from "@code-app/shared";
+import {
+  IPC_CHANNELS,
+  type DesktopApi,
+  type GitSnapshot,
+  type PreviewEvent,
+  type ProjectTerminalEvent,
+  type SessionEvent
+} from "@code-app/shared";
 
 const settingsOpenWindowChannel =
   (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
@@ -11,6 +18,8 @@ const gitGetOutgoingCommitsChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
 const gitGetIncomingCommitsChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetIncomingCommits ?? "git:getIncomingCommits";
+const gitGetSnapshotChannel =
+  (IPC_CHANNELS as Record<string, string>).gitGetSnapshot ?? "git:getSnapshot";
 const threadsForkChannel =
   (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
 const sessionsSteerChannel =
@@ -34,6 +43,7 @@ type DesktopApiWithGitExtras = DesktopApi & {
     listFiles: (input: { projectId: string; limit?: number }) => Promise<Array<{ path: string; updatedAtMs: number }>>;
   };
   git: DesktopApi["git"] & {
+    getSnapshot: (input: { projectId: string }) => Promise<GitSnapshot>;
     discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
     getIncomingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
@@ -140,6 +150,7 @@ const api: DesktopApiWithGitExtras = {
   },
   git: {
     getState: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetState, input),
+    getSnapshot: (input: { projectId: string }) => ipcRenderer.invoke(gitGetSnapshotChannel, input),
     getDiff: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetDiff, input),
     getOutgoingCommits: (input: { projectId: string }) => ipcRenderer.invoke(gitGetOutgoingCommitsChannel, input),
     getIncomingCommits: (input: { projectId: string }) => ipcRenderer.invoke(gitGetIncomingCommitsChannel, input),

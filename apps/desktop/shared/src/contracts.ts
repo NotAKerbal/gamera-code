@@ -5,6 +5,7 @@ import type {
   GitCommandResult,
   GitDiffResult,
   GitOutgoingCommit,
+  GitSnapshot,
   GitRepositoryCandidate,
   GitState,
   InstallDependenciesResult,
@@ -147,6 +148,7 @@ export interface DesktopApi {
   };
   git: {
     getState: (input: { projectId: string }) => Promise<GitState>;
+    getSnapshot: (input: { projectId: string }) => Promise<GitSnapshot>;
     getDiff: (input: { projectId: string; path?: string }) => Promise<GitDiffResult>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<GitOutgoingCommit[]>;
     getIncomingCommits: (input: { projectId: string }) => Promise<GitOutgoingCommit[]>;

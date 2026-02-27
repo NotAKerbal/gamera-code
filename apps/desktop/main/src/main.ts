@@ -1576,6 +1576,23 @@ const bootstrap = async () => {
   });
   emitSessionEvent = handlers.emitSessionEvent;
   emitProjectTerminalEvent = handlers.emitProjectTerminalEvent;
+  let isQuittingAfterFlush = false;
+
+  app.on("before-quit", (event) => {
+    if (isQuittingAfterFlush) {
+      return;
+    }
+    event.preventDefault();
+    repository
+      .flushPendingFileWrites()
+      .catch((error) => {
+        log.warn("Failed to flush pending repository writes before quit", error);
+      })
+      .finally(() => {
+        isQuittingAfterFlush = true;
+        app.quit();
+      });
+  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;

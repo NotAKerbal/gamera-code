@@ -9,6 +9,7 @@ import type {
   GitDiffResult,
   GitFileStatus,
   GitRepositoryCandidate,
+  GitSnapshot,
   GitState
 } from "@code-app/shared";
 import { withRuntimePath } from "../utils/runtimeEnv";
@@ -383,6 +384,20 @@ export class GitService {
       return [];
     }
     return parseOnelineCommits(result.stdout);
+  }
+
+  async getSnapshot(cwd: string, limit = 30): Promise<GitSnapshot> {
+    const [state, outgoingCommits, incomingCommits] = await Promise.all([
+      this.getState(cwd),
+      this.getOutgoingCommits(cwd, limit),
+      this.getIncomingCommits(cwd, limit)
+    ]);
+
+    return {
+      state,
+      outgoingCommits,
+      incomingCommits
+    };
   }
 
   async fetch(cwd: string): Promise<GitCommandResult> {

@@ -59,6 +59,7 @@ export const IPC_CHANNELS = {
   windowClose: "window:close",
   windowIsMaximized: "window:isMaximized",
   gitGetState: "git:getState",
+  gitGetSnapshot: "git:getSnapshot",
   gitGetDiff: "git:getDiff",
   gitGetOutgoingCommits: "git:getOutgoingCommits",
   gitGetIncomingCommits: "git:getIncomingCommits",
