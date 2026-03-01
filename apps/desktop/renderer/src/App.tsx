@@ -783,10 +783,34 @@ export const App = () => {
     () => Object.fromEntries(workspaces.map((workspace) => [workspace.id, workspace])) as Record<string, Workspace>,
     [workspaces]
   );
-  const projectsInActiveWorkspace = useMemo(
-    () => projects.filter((project) => !activeWorkspaceId || project.workspaceId === activeWorkspaceId),
-    [projects, activeWorkspaceId]
-  );
+  const projectsInActiveWorkspace = useMemo(() => {
+    const toTimestamp = (value: string) => {
+      const ts = Date.parse(value);
+      return Number.isFinite(ts) ? ts : 0;
+    };
+    const latestThreadUpdatedAtByProjectId = threads.reduce<Record<string, number>>((acc, thread) => {
+      const ts = toTimestamp(thread.updatedAt);
+      if (ts <= 0) {
+        return acc;
+      }
+      const prev = acc[thread.projectId] ?? 0;
+      if (ts > prev) {
+        acc[thread.projectId] = ts;
+      }
+      return acc;
+    }, {});
+
+    return projects
+      .filter((project) => !activeWorkspaceId || project.workspaceId === activeWorkspaceId)
+      .sort((a, b) => {
+        const aLatest = latestThreadUpdatedAtByProjectId[a.id] ?? toTimestamp(a.updatedAt);
+        const bLatest = latestThreadUpdatedAtByProjectId[b.id] ?? toTimestamp(b.updatedAt);
+        if (aLatest !== bLatest) {
+          return bLatest - aLatest;
+        }
+        return a.name.localeCompare(b.name);
+      });
+  }, [projects, activeWorkspaceId, threads]);
   const hasPendingSubagentReviewByThreadId = useMemo(() => {
     const next: Record<string, boolean> = {};
     Object.entries(orchestrationRunsByParentId).forEach(([threadId, runs]) => {
@@ -6613,7 +6637,7 @@ const stopActiveRun = async () => {
                 </div>
               )}
 
-              <div className="flex-1 min-h-0 space-y-3 overflow-y-auto pr-1 pb-3">
+              <div className="projects-scroll-area flex-1 min-h-0 space-y-3 overflow-y-auto pb-3">
                 {projectsInActiveWorkspace.length === 0 && <p className="px-2 text-sm text-muted">No projects in this workspace.</p>}
 
                 {projectsInActiveWorkspace.map((project) => {
