@@ -33,6 +33,7 @@ import type {
   SkillRecord,
   ThreadMetadataSuggestion,
   Thread,
+  Workspace,
   UpdateCheckResult
 } from "./types";
 
@@ -44,7 +45,7 @@ export interface DesktopApi {
     listGitRepositories: () => Promise<GitRepositoryCandidate[]>;
     importFromPath: (input: { path: string; name?: string }) => Promise<Project>;
     cloneFromGitUrl: (input: { url: string; name?: string }) => Promise<Project>;
-    update: (input: { id: string; name?: string; path?: string }) => Promise<Project>;
+    update: (input: { id: string; name?: string; path?: string; workspaceId?: string }) => Promise<Project>;
     delete: (input: { id: string }) => Promise<{ ok: boolean }>;
     pickPath: () => Promise<string | null>;
     openTerminal: (input: { projectId: string; terminalId?: SystemTerminalId }) => Promise<{ ok: boolean }>;
@@ -53,6 +54,12 @@ export interface DesktopApi {
     listFiles: (input: { projectId: string; limit?: number }) => Promise<ProjectFileEntry[]>;
     openWebLink: (input: { url: string; name?: string; projectName?: string; focus?: boolean }) => Promise<{ ok: boolean }>;
     getWebLinkState: () => Promise<{ open: boolean; url?: string }>;
+  };
+  workspaces: {
+    list: () => Promise<Workspace[]>;
+    create: (input: { name: string; icon: string; color: string; moveProjectIds?: string[] }) => Promise<Workspace>;
+    update: (input: { id: string; name?: string; icon?: string; color?: string }) => Promise<Workspace>;
+    delete: (input: { id: string }) => Promise<{ ok: boolean }>;
   };
   projectSettings: {
     get: (input: { projectId: string }) => Promise<ProjectSettings>;

@@ -10,6 +10,10 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type KeyboardEventHandler
 } from "react";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Terminal as XtermTerminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
 import {
   FaArchive,
   FaArrowUp,
@@ -69,7 +73,8 @@ import type {
   SkillRecord,
   SubthreadPolicy,
   Thread,
-  ThreadEventsPage
+  ThreadEventsPage,
+  Workspace
 } from "@code-app/shared";
 import {
   APP_VERSION_LABEL,
@@ -137,6 +142,7 @@ import {
   parseStoredActivityEvent,
   pendingQuestionEquals,
   readStoredActiveProjectId,
+  readStoredActiveWorkspaceId,
   readStoredThreadSummaries,
   safeHref,
   sanitizeForDisplay,
@@ -152,6 +158,7 @@ import {
   toFileChanges,
   todosToMarkdown,
   writeStoredActiveProjectId,
+  writeStoredActiveWorkspaceId,
   type ActivityEntry,
   type AppSettingsTab,
   type ComposerAttachment,
@@ -179,7 +186,8 @@ import {
   ImportProjectModal,
   NewProjectModal,
   ProjectSettingsModal,
-  RenameThreadModal
+  RenameThreadModal,
+  WorkspaceModal
 } from "./appOverlays";
 import { SettingsModal } from "./appSettingsModal";
 import { SetupModal } from "./appSetupModal";
@@ -194,12 +202,18 @@ const isWindows = platformHints.includes("win");
 
 export const App = () => {
   const isSettingsWindow = isSettingsWindowContext();
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(() => readStoredActiveWorkspaceId());
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() => readStoredActiveProjectId());
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageEvent[]>([]);
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
+  const terminalOutputRef = useRef<HTMLDivElement | null>(null);
+  const terminalInstanceRef = useRef<XtermTerminal | null>(null);
+  const terminalFitAddonRef = useRef<FitAddon | null>(null);
+  const terminalRenderedOutputRef = useRef("");
   const [composerHasText, setComposerHasText] = useState(false);
   const [threadMenuProjectId, setThreadMenuProjectId] = useState<string | null>(null);
   const [showArchivedByProjectId, setShowArchivedByProjectId] = useState<Record<string, boolean>>({});
@@ -221,6 +235,12 @@ export const App = () => {
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [projectSettingsTab, setProjectSettingsTab] = useState<"general" | "env" | "commands" | "links" | "skills">("general");
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
+  const [workspaceModalMode, setWorkspaceModalMode] = useState<"create" | "edit">("create");
+  const [workspaceEditingId, setWorkspaceEditingId] = useState<string | null>(null);
+  const [workspaceDraftName, setWorkspaceDraftName] = useState("");
+  const [workspaceDraftColor, setWorkspaceDraftColor] = useState("#64748b");
+  const [workspaceDraftMoveProjectIds, setWorkspaceDraftMoveProjectIds] = useState<string[]>([]);
   const [showImportProjectModal, setShowImportProjectModal] = useState(false);
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -246,6 +266,7 @@ export const App = () => {
   const [composerDraftByThreadId, setComposerDraftByThreadId] = useState<Record<string, string>>({});
   const [queuedPromptsByThreadId, setQueuedPromptsByThreadId] = useState<Record<string, QueuedPrompt[]>>({});
   const [threadCompletionFlashById, setThreadCompletionFlashById] = useState<Record<string, boolean>>({});
+  const [threadFinishedUnreadById, setThreadFinishedUnreadById] = useState<Record<string, boolean>>({});
   const [threadAwaitingInputById, setThreadAwaitingInputById] = useState<Record<string, boolean>>({});
   const [pendingUserQuestionsByThreadId, setPendingUserQuestionsByThreadId] = useState<Record<string, PendingUserQuestion[]>>({});
   const [pendingUserInputRequestIdByThreadId, setPendingUserInputRequestIdByThreadId] = useState<Record<string, string>>({});
@@ -297,6 +318,7 @@ export const App = () => {
   const [projectSettingsBrowserEnabled, setProjectSettingsBrowserEnabled] = useState(true);
   const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">("");
   const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">("");
+  const [projectWorkspaceTargetId, setProjectWorkspaceTargetId] = useState<string>("");
   const [orchestrationRunsByParentId, setOrchestrationRunsByParentId] = useState<Record<string, OrchestrationRun[]>>({});
   const [orchestrationChildrenByRunId, setOrchestrationChildrenByRunId] = useState<Record<string, OrchestrationChild[]>>({});
   const [showRunningSubthreadsByThreadId, setShowRunningSubthreadsByThreadId] = useState<Record<string, boolean>>({});
@@ -635,6 +657,52 @@ export const App = () => {
       return acc;
     }, {});
   }, [threads]);
+  const workspaceById = useMemo(
+    () => Object.fromEntries(workspaces.map((workspace) => [workspace.id, workspace])) as Record<string, Workspace>,
+    [workspaces]
+  );
+  const projectsInActiveWorkspace = useMemo(
+    () => projects.filter((project) => !activeWorkspaceId || project.workspaceId === activeWorkspaceId),
+    [projects, activeWorkspaceId]
+  );
+  const hasPendingSubagentReviewByThreadId = useMemo(() => {
+    const next: Record<string, boolean> = {};
+    Object.entries(orchestrationRunsByParentId).forEach(([threadId, runs]) => {
+      next[threadId] = runs.some((run) => run.policy === "ask" && run.status === "proposed");
+    });
+    return next;
+  }, [orchestrationRunsByParentId]);
+  const workspaceHeaderItems = useMemo(() => {
+    return workspaces.map((workspace) => {
+      const workspaceProjectIds = new Set(
+        projects.filter((project) => project.workspaceId === workspace.id).map((project) => project.id)
+      );
+      const workspaceThreads = threads.filter((thread) => !thread.archivedAt && workspaceProjectIds.has(thread.projectId));
+      const runningCount = workspaceThreads.filter((thread) => (runStateByThreadId[thread.id] ?? "idle") === "running").length;
+      const reviewCount = workspaceThreads.filter(
+        (thread) =>
+          Boolean(threadAwaitingInputById[thread.id]) ||
+          (pendingUserQuestionsByThreadId[thread.id]?.length ?? 0) > 0 ||
+          Boolean(hasPendingSubagentReviewByThreadId[thread.id])
+      ).length;
+      const finishedCount = workspaceThreads.filter((thread) => Boolean(threadFinishedUnreadById[thread.id])).length;
+      return {
+        ...workspace,
+        runningCount,
+        reviewCount,
+        finishedCount
+      };
+    });
+  }, [
+    workspaces,
+    projects,
+    threads,
+    runStateByThreadId,
+    threadAwaitingInputById,
+    pendingUserQuestionsByThreadId,
+    hasPendingSubagentReviewByThreadId,
+    threadFinishedUnreadById
+  ]);
   const hasUserPromptInThread = useMemo(() => messages.some((message) => message.role === "user"), [messages]);
   const getThreadSidebarSummary = (thread: Thread) => threadSummaryById[thread.id] ?? suggestThreadSummary(thread.title);
 
@@ -677,6 +745,7 @@ export const App = () => {
   };
   const flashCompletedThread = (threadId: string) => {
     setThreadCompletionFlashById((prev) => ({ ...prev, [threadId]: true }));
+    setThreadFinishedUnreadById((prev) => ({ ...prev, [threadId]: true }));
   };
 
   const clearCompletedThreadFlash = (threadId: string) => {
@@ -690,10 +759,23 @@ export const App = () => {
     });
   };
 
+  const clearFinishedUnreadThread = (threadId: string) => {
+    setThreadFinishedUnreadById((prev) => {
+      if (!prev[threadId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[threadId];
+      return next;
+    });
+  };
+
   const activateThreadFromSidebar = (projectId: string, threadId: string) => {
     setActiveProjectId(projectId);
+    setActiveWorkspaceId(projects.find((project) => project.id === projectId)?.workspaceId ?? null);
     setActiveThreadId(threadId);
     clearCompletedThreadFlash(threadId);
+    clearFinishedUnreadThread(threadId);
   };
 
   const playThreadNeedsInputSound = () => {
@@ -734,7 +816,24 @@ export const App = () => {
     }
   };
 
-  const loadProjects = async () => {
+  const loadWorkspaces = async () => {
+    const allWorkspaces = await api.workspaces.list();
+    setWorkspaces(allWorkspaces);
+    const validIds = new Set(allWorkspaces.map((workspace) => workspace.id));
+    const storedWorkspaceId = readStoredActiveWorkspaceId();
+    if (activeWorkspaceId && validIds.has(activeWorkspaceId)) {
+      return { allWorkspaces, selectedWorkspaceId: activeWorkspaceId };
+    }
+    if (storedWorkspaceId && validIds.has(storedWorkspaceId)) {
+      setActiveWorkspaceId(storedWorkspaceId);
+      return { allWorkspaces, selectedWorkspaceId: storedWorkspaceId };
+    }
+    const fallbackWorkspaceId = allWorkspaces[0]?.id ?? null;
+    setActiveWorkspaceId(fallbackWorkspaceId);
+    return { allWorkspaces, selectedWorkspaceId: fallbackWorkspaceId };
+  };
+
+  const loadProjects = async (workspaceIdOverride?: string | null) => {
     const allProjects = await api.projects.list();
     setProjects(allProjects);
 
@@ -749,7 +848,11 @@ export const App = () => {
       return;
     }
 
-    setActiveProjectId(allProjects[0]?.id ?? null);
+    const workspaceId = workspaceIdOverride ?? activeWorkspaceId;
+    const projectsInWorkspace = workspaceId
+      ? allProjects.filter((project) => project.workspaceId === workspaceId)
+      : allProjects;
+    setActiveProjectId(projectsInWorkspace[0]?.id ?? allProjects[0]?.id ?? null);
   };
 
   const loadThreads = async () => {
@@ -775,6 +878,16 @@ export const App = () => {
     }
 
     if (!activeThreadId && codexThreads.length > 0) {
+      if (activeWorkspaceId) {
+        const workspaceProjectIds = new Set(
+          projects.filter((project) => project.workspaceId === activeWorkspaceId).map((project) => project.id)
+        );
+        const workspaceThread = codexThreads.find((thread) => workspaceProjectIds.has(thread.projectId));
+        if (workspaceThread) {
+          setActiveThreadId(workspaceThread.id);
+          return;
+        }
+      }
       setActiveThreadId(codexThreads[0]!.id);
     }
   };
@@ -1356,7 +1469,8 @@ export const App = () => {
 
   useEffect(() => {
     const initialize = async () => {
-      await loadProjects();
+      const { selectedWorkspaceId } = await loadWorkspaces();
+      await loadProjects(selectedWorkspaceId);
       await loadThreads();
       await loadSettings();
       await loadSystemTerminals();
@@ -1382,6 +1496,23 @@ export const App = () => {
   useEffect(() => {
     writeStoredActiveProjectId(activeProjectId);
   }, [activeProjectId]);
+
+  useEffect(() => {
+    writeStoredActiveWorkspaceId(activeWorkspaceId);
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      return;
+    }
+    const project = projects.find((item) => item.id === activeProjectId);
+    if (!project) {
+      return;
+    }
+    if (activeWorkspaceId !== project.workspaceId) {
+      setActiveWorkspaceId(project.workspaceId);
+    }
+  }, [activeProjectId, projects, activeWorkspaceId]);
 
   useEffect(() => {
     try {
@@ -1580,6 +1711,9 @@ export const App = () => {
 
       const previousThreadRunState = runStateByThreadIdRef.current[event.threadId] ?? "idle";
       if (nextThreadRunState && previousThreadRunState !== nextThreadRunState) {
+        if (nextThreadRunState === "running") {
+          clearFinishedUnreadThread(event.threadId);
+        }
         setRunStateByThreadId((prev) => {
           const current = prev[event.threadId] ?? "idle";
           if (current === nextThreadRunState) {
@@ -1594,6 +1728,9 @@ export const App = () => {
         });
         if (previousThreadRunState === "running" && nextThreadRunState === "completed") {
           flashCompletedThread(event.threadId);
+          if (event.threadId === activeThreadIdRef.current) {
+            clearFinishedUnreadThread(event.threadId);
+          }
           playThreadCompletedSound();
         }
         if (previousThreadRunState === "running" && nextThreadRunState !== "running") {
@@ -1652,6 +1789,106 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!SHOW_TERMINAL) {
+      return;
+    }
+
+    if (terminalInstanceRef.current) {
+      return;
+    }
+
+    const container = terminalOutputRef.current;
+    if (!container) {
+      return;
+    }
+
+    const terminal = new XtermTerminal({
+      convertEol: true,
+      cursorBlink: false,
+      fontFamily: '"Cascadia Mono", "Fira Code", Consolas, "Courier New", monospace',
+      fontSize: 12,
+      lineHeight: 1.3,
+      scrollback: 2000,
+      theme: {
+        background: "#00000000",
+        foreground: "#cbd5e1",
+        cursor: "#94a3b8",
+        selectionBackground: "#33415580"
+      }
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.loadAddon(
+      new WebLinksAddon((_event, uri) => {
+        window.open(uri, "_blank", "noopener,noreferrer");
+      })
+    );
+    terminal.open(container);
+    fitAddon.fit();
+
+    terminalInstanceRef.current = terminal;
+    terminalFitAddonRef.current = fitAddon;
+    terminalRenderedOutputRef.current = "";
+
+    const initialOutput = terminalLines.join("");
+    if (initialOutput) {
+      terminal.write(initialOutput);
+      terminalRenderedOutputRef.current = initialOutput;
+      terminal.scrollToBottom();
+    } else {
+      terminal.writeln("No terminal output yet.");
+    }
+
+    const onResize = () => {
+      terminalFitAddonRef.current?.fit();
+    };
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+      terminal.dispose();
+      terminalInstanceRef.current = null;
+      terminalFitAddonRef.current = null;
+      terminalRenderedOutputRef.current = "";
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!SHOW_TERMINAL) {
+      return;
+    }
+
+    const terminal = terminalInstanceRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    const nextOutput = terminalLines.join("");
+    const previousOutput = terminalRenderedOutputRef.current;
+
+    if (!nextOutput) {
+      terminal.reset();
+      terminal.writeln("No terminal output yet.");
+      terminalRenderedOutputRef.current = "";
+      terminalFitAddonRef.current?.fit();
+      return;
+    }
+
+    if (previousOutput && nextOutput.startsWith(previousOutput)) {
+      const delta = nextOutput.slice(previousOutput.length);
+      if (delta) {
+        terminal.write(delta);
+      }
+    } else if (previousOutput !== nextOutput) {
+      terminal.reset();
+      terminal.write(nextOutput);
+    }
+
+    terminalRenderedOutputRef.current = nextOutput;
+    terminal.scrollToBottom();
+  }, [terminalLines]);
+
+  useEffect(() => {
     const threadIds = new Set(threads.map((thread) => thread.id));
     setRunStateByThreadId((prev) => {
       const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
@@ -1684,6 +1921,13 @@ export const App = () => {
       }
     });
     setThreadCompletionFlashById((prev) => {
+      const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
+      if (nextEntries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      return Object.fromEntries(nextEntries) as Record<string, boolean>;
+    });
+    setThreadFinishedUnreadById((prev) => {
       const nextEntries = Object.entries(prev).filter(([threadId]) => threadIds.has(threadId));
       if (nextEntries.length === Object.keys(prev).length) {
         return prev;
@@ -2319,6 +2563,8 @@ export const App = () => {
       return;
     }
 
+    clearFinishedUnreadThread(activeThreadId);
+
     const bootThread = async () => {
       setComposerMentionedFiles([]);
       setComposerMentionedSkills([]);
@@ -2345,13 +2591,22 @@ export const App = () => {
     });
   }, [activeThreadId]);
 
+  const assignProjectToActiveWorkspace = async (project: Project) => {
+    if (!activeWorkspaceId || project.workspaceId === activeWorkspaceId) {
+      return project;
+    }
+    const updated = await api.projects.update({ id: project.id, workspaceId: activeWorkspaceId });
+    setProjects((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    return updated;
+  };
+
   const openProject = async () => {
     setIsProjectMenuOpen(false);
     const path = await api.projects.pickPath();
     if (!path) return;
 
     const name = getProjectNameFromPath(path);
-    const project = await api.projects.create({ name, path });
+    const project = await assignProjectToActiveWorkspace(await api.projects.create({ name, path }));
     await loadProjects();
     setActiveProjectId(project.id);
   };
@@ -2400,7 +2655,7 @@ export const App = () => {
   const importProjectFromPath = async (path: string) => {
     setImportBusyPath(path);
     try {
-      const project = await api.projects.importFromPath({ path });
+      const project = await assignProjectToActiveWorkspace(await api.projects.importFromPath({ path }));
       await loadProjects();
       setActiveProjectId(project.id);
       setShowImportProjectModal(false);
@@ -2420,7 +2675,7 @@ export const App = () => {
 
     setCloneBusy(true);
     try {
-      const project = await api.projects.cloneFromGitUrl({ url });
+      const project = await assignProjectToActiveWorkspace(await api.projects.cloneFromGitUrl({ url }));
       await loadProjects();
       setActiveProjectId(project.id);
       setShowImportProjectModal(false);
@@ -2466,7 +2721,7 @@ export const App = () => {
 
     setCreatingProject(true);
     try {
-      const project = await api.projects.createInDirectory({ name: projectName, parentDir });
+      const project = await assignProjectToActiveWorkspace(await api.projects.createInDirectory({ name: projectName, parentDir }));
       await loadProjects();
       setActiveProjectId(project.id);
       setShowNewProjectModal(false);
@@ -2499,7 +2754,9 @@ export const App = () => {
       }))
     );
     const projectName = projects.find((project) => project.id === projectId)?.name ?? "";
+    const projectWorkspaceId = projects.find((project) => project.id === projectId)?.workspaceId ?? "";
     setProjectSettingsProjectName(projectName);
+    setProjectWorkspaceTargetId(projectWorkspaceId);
     setProjectSettingsBrowserEnabled(current.browserEnabled ?? true);
     setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
     setProjectSubthreadPolicyOverride(current.subthreadPolicyOverride ?? "");
@@ -2572,9 +2829,13 @@ export const App = () => {
 
     const updatedProject = await api.projects.update({
       id: activeProjectId,
-      name: nextProjectName
+      name: nextProjectName,
+      workspaceId: projectWorkspaceTargetId || undefined
     });
     setProjects((prev) => prev.map((project) => (project.id === updatedProject.id ? updatedProject : project)));
+    if (activeProjectId === updatedProject.id) {
+      setActiveWorkspaceId(updatedProject.workspaceId);
+    }
 
     const saved = await api.projectSettings.set({
       projectId: activeProjectId,
@@ -3629,6 +3890,10 @@ export const App = () => {
   };
 
   const focusProjectFromSidebar = async (projectId: string) => {
+    const project = projects.find((item) => item.id === projectId) ?? null;
+    if (project) {
+      setActiveWorkspaceId(project.workspaceId);
+    }
     setActiveProjectId(projectId);
     const mostRecentActiveThread = threads
       .filter((thread) => thread.projectId === projectId && !thread.archivedAt)
@@ -3640,6 +3905,102 @@ export const App = () => {
     }
 
     await createThread(projectId);
+  };
+
+  const focusWorkspace = async (workspaceId: string) => {
+    setActiveWorkspaceId(workspaceId);
+    const workspaceProjects = projects.filter((project) => project.workspaceId === workspaceId);
+    const workspaceProjectIds = new Set(workspaceProjects.map((project) => project.id));
+    const mostRecentThread = threads
+      .filter((thread) => !thread.archivedAt && workspaceProjectIds.has(thread.projectId))
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+
+    if (mostRecentThread) {
+      setActiveProjectId(mostRecentThread.projectId);
+      setActiveThreadId(mostRecentThread.id);
+      clearCompletedThreadFlash(mostRecentThread.id);
+      clearFinishedUnreadThread(mostRecentThread.id);
+      return;
+    }
+
+    const fallbackProject = workspaceProjects[0];
+    if (fallbackProject) {
+      setActiveProjectId(fallbackProject.id);
+      await createThread(fallbackProject.id);
+      return;
+    }
+
+    setActiveProjectId(null);
+    setActiveThreadId(null);
+  };
+
+  const openCreateWorkspaceModal = () => {
+    setWorkspaceModalMode("create");
+    setWorkspaceEditingId(null);
+    setWorkspaceDraftName("");
+    setWorkspaceDraftColor("#64748b");
+    setWorkspaceDraftMoveProjectIds([]);
+    setShowWorkspaceModal(true);
+  };
+
+  const openWorkspaceSettingsModal = (workspaceId: string) => {
+    const workspace = workspaceById[workspaceId];
+    if (!workspace) {
+      return;
+    }
+    setWorkspaceModalMode("edit");
+    setWorkspaceEditingId(workspace.id);
+    setWorkspaceDraftName(workspace.name);
+    setWorkspaceDraftColor(workspace.color);
+    setWorkspaceDraftMoveProjectIds([]);
+    setShowWorkspaceModal(true);
+  };
+
+  const saveWorkspaceFromModal = async () => {
+    const name = workspaceDraftName.trim();
+    const color = workspaceDraftColor.trim() || "#64748b";
+    if (!name) {
+      setLogs((prev) => [...prev, "Workspace name is required."]);
+      return;
+    }
+    if (workspaceModalMode === "create") {
+      const created = await api.workspaces.create({
+        name,
+        icon: "grid",
+        color,
+        moveProjectIds: workspaceDraftMoveProjectIds
+      });
+      await Promise.all([loadWorkspaces(), loadProjects(), loadThreads()]);
+      setShowWorkspaceModal(false);
+      await focusWorkspace(created.id);
+      return;
+    }
+    if (!workspaceEditingId) {
+      return;
+    }
+    await api.workspaces.update({
+      id: workspaceEditingId,
+      name,
+      color
+    });
+    await loadWorkspaces();
+    setShowWorkspaceModal(false);
+  };
+
+  const deleteWorkspaceFromModal = async () => {
+    if (!workspaceEditingId) {
+      return;
+    }
+    const workspace = workspaceById[workspaceEditingId];
+    const confirmed = window.confirm(
+      `Delete workspace "${workspace?.name ?? "Workspace"}"?\n\nProjects in this workspace will be removed from GameraCode. Files on disk stay intact.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    await api.workspaces.delete({ id: workspaceEditingId });
+    setShowWorkspaceModal(false);
+    await Promise.all([loadWorkspaces(), loadProjects(), loadThreads()]);
   };
 
   const setThreadArchived = async (thread: Thread, archived: boolean) => {
@@ -5841,6 +6202,15 @@ const stopActiveRun = async () => {
               isWindowMaximized={isWindowMaximized}
               appIconSrc={appIconSrc}
               appVersionLabel={APP_VERSION_LABEL}
+              workspaces={workspaceHeaderItems}
+              activeWorkspaceId={activeWorkspaceId}
+              onSelectWorkspace={(workspaceId) => {
+                focusWorkspace(workspaceId).catch((error) => {
+                  setLogs((prev) => [...prev, `Workspace switch failed: ${String(error)}`]);
+                });
+              }}
+              onOpenWorkspaceSettings={openWorkspaceSettingsModal}
+              onOpenNewWorkspaceModal={openCreateWorkspaceModal}
               changelogItems={CHANGELOG_ITEMS}
               changelogRef={changelogRef}
               isChangelogOpen={isChangelogOpen}
@@ -5943,9 +6313,9 @@ const stopActiveRun = async () => {
               )}
 
               <div className="flex-1 min-h-0 space-y-3 overflow-y-auto pr-1 pb-3">
-                {projects.length === 0 && <p className="px-2 text-sm text-muted">No projects added yet.</p>}
+                {projectsInActiveWorkspace.length === 0 && <p className="px-2 text-sm text-muted">No projects in this workspace.</p>}
 
-                {projects.map((project) => {
+                {projectsInActiveWorkspace.map((project) => {
                   const threadBuckets = threadBucketsByProjectId[project.id];
                   const archivedThreads = threadBuckets?.archived ?? [];
                   const visibleThreads = threadBuckets?.active ?? [];
@@ -7294,9 +7664,9 @@ const stopActiveRun = async () => {
                       Clear
                     </button>
                   </div>
-                  <pre className="h-[150px] overflow-y-auto rounded-lg border border-border bg-black/35 p-2 font-mono text-xs text-slate-300">
-                    {terminalLines.join("") || "No terminal output yet."}
-                  </pre>
+                  <div className="h-[150px] overflow-hidden rounded-lg border border-border bg-black/35 p-2">
+                    <div ref={terminalOutputRef} className="h-full w-full" />
+                  </div>
                 </section>
               )}
             </main>
@@ -7776,6 +8146,9 @@ const stopActiveRun = async () => {
           setProjectSettingsCommands={setProjectSettingsCommands}
           projectSettingsWebLinks={projectSettingsWebLinks}
           setProjectSettingsWebLinks={setProjectSettingsWebLinks}
+          workspaces={workspaces}
+          projectWorkspaceTargetId={projectWorkspaceTargetId}
+          setProjectWorkspaceTargetId={setProjectWorkspaceTargetId}
           skillsByProjectId={skillsByProjectId}
           skillEditorPath={skillEditorPath}
           skillEditorContent={skillEditorContent}
@@ -7788,6 +8161,18 @@ const stopActiveRun = async () => {
           setProjectSettingsTab={setProjectSettingsTab}
           onRemoveProject={removeActiveProject}
           onSaveProjectSettings={saveProjectSettings}
+          onMoveProjectWorkspace={async () => {
+            if (!activeProjectId || !projectWorkspaceTargetId) {
+              return;
+            }
+            const updated = await api.projects.update({
+              id: activeProjectId,
+              workspaceId: projectWorkspaceTargetId
+            });
+            setProjects((prev) => prev.map((project) => (project.id === updated.id ? updated : project)));
+            setActiveWorkspaceId(updated.workspaceId);
+            await loadThreads();
+          }}
           onToggleProjectSkillEnabled={async (path, enabled) => {
             await api.skills.setEnabled({ projectId: activeProjectId, path, enabled });
             await loadProjectSkills(activeProjectId);
@@ -7806,6 +8191,25 @@ const stopActiveRun = async () => {
           isNameValid={Boolean(sanitizeProjectDirName(newProjectName))}
           onClose={() => setShowNewProjectModal(false)}
           onSubmit={submitNewProject}
+          appendLog={(line) => setLogs((prev) => [...prev, line])}
+        />
+      )}
+
+      {showWorkspaceModal && (
+        <WorkspaceModal
+          mode={workspaceModalMode}
+          workspaces={workspaces}
+          projects={projects}
+          editingWorkspaceId={workspaceEditingId}
+          draftName={workspaceDraftName}
+          setDraftName={setWorkspaceDraftName}
+          draftColor={workspaceDraftColor}
+          setDraftColor={setWorkspaceDraftColor}
+          draftMoveProjectIds={workspaceDraftMoveProjectIds}
+          setDraftMoveProjectIds={setWorkspaceDraftMoveProjectIds}
+          onClose={() => setShowWorkspaceModal(false)}
+          onSave={saveWorkspaceFromModal}
+          onDelete={deleteWorkspaceFromModal}
           appendLog={(line) => setLogs((prev) => [...prev, line])}
         />
       )}

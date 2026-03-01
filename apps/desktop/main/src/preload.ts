@@ -48,6 +48,10 @@ const orchestrationStopChildChannel =
   (IPC_CHANNELS as Record<string, string>).orchestrationStopChild ?? "orchestration:stopChild";
 const orchestrationRetryChildChannel =
   (IPC_CHANNELS as Record<string, string>).orchestrationRetryChild ?? "orchestration:retryChild";
+const workspacesListChannel = (IPC_CHANNELS as Record<string, string>).workspacesList ?? "workspaces:list";
+const workspacesCreateChannel = (IPC_CHANNELS as Record<string, string>).workspacesCreate ?? "workspaces:create";
+const workspacesUpdateChannel = (IPC_CHANNELS as Record<string, string>).workspacesUpdate ?? "workspaces:update";
+const workspacesDeleteChannel = (IPC_CHANNELS as Record<string, string>).workspacesDelete ?? "workspaces:delete";
 type DesktopApiWithGitExtras = DesktopApi & {
   projects: DesktopApi["projects"] & {
     listFiles: (input: { projectId: string; limit?: number }) => Promise<Array<{ path: string; updatedAtMs: number }>>;
@@ -57,6 +61,14 @@ type DesktopApiWithGitExtras = DesktopApi & {
     discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
     getIncomingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
+  };
+  workspaces: {
+    list: () => Promise<Array<{ id: string; name: string; icon: string; color: string; createdAt: string; updatedAt: string }>>;
+    create: (input: { name: string; icon: string; color: string; moveProjectIds?: string[] }) =>
+      Promise<{ id: string; name: string; icon: string; color: string; createdAt: string; updatedAt: string }>;
+    update: (input: { id: string; name?: string; icon?: string; color?: string }) =>
+      Promise<{ id: string; name: string; icon: string; color: string; createdAt: string; updatedAt: string }>;
+    delete: (input: { id: string }) => Promise<{ ok: boolean }>;
   };
 };
 
@@ -77,6 +89,14 @@ const api: DesktopApiWithGitExtras = {
     listFiles: (input: { projectId: string; limit?: number }) => ipcRenderer.invoke(projectsListFilesChannel, input),
     openWebLink: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenWebLink, input),
     getWebLinkState: () => ipcRenderer.invoke(IPC_CHANNELS.projectsGetWebLinkState)
+  },
+  workspaces: {
+    list: () => ipcRenderer.invoke(workspacesListChannel),
+    create: (input: { name: string; icon: string; color: string; moveProjectIds?: string[] }) =>
+      ipcRenderer.invoke(workspacesCreateChannel, input),
+    update: (input: { id: string; name?: string; icon?: string; color?: string }) =>
+      ipcRenderer.invoke(workspacesUpdateChannel, input),
+    delete: (input: { id: string }) => ipcRenderer.invoke(workspacesDeleteChannel, input)
   },
   projectSettings: {
     get: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectSettingsGet, input),

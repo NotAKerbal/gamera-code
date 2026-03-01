@@ -611,6 +611,93 @@ webview {
   @apply rounded border border-border/80 bg-panel/70 text-muted transition hover:bg-panel hover:text-accent;
 }
 
+.workspace-segmented-control {
+  @apply ml-2 inline-flex items-center gap-1 rounded-xl border border-border/80 bg-black/25 p-1;
+}
+
+.workspace-segment {
+  @apply relative inline-flex h-8 items-center gap-1 rounded-lg border border-transparent px-2 text-xs text-slate-300 transition;
+  background: rgba(24, 24, 27, 0.55);
+}
+
+.workspace-segment:hover {
+  @apply border-border/80 text-white;
+  background: rgba(39, 39, 42, 0.7);
+}
+
+.workspace-segment.active {
+  @apply border-border/90 text-white;
+  background: rgba(63, 63, 70, 0.7);
+}
+
+.workspace-segment-icon {
+  @apply text-[12px];
+}
+
+.workspace-segment-name {
+  @apply max-w-[7rem] truncate;
+}
+
+.workspace-segment-summary {
+  @apply rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-slate-300;
+}
+
+.workspace-segment-meta {
+  @apply inline-flex items-center gap-1 overflow-hidden;
+  max-width: 0;
+  opacity: 0;
+  transition: max-width 190ms ease, opacity 150ms ease;
+}
+
+.workspace-segment:hover .workspace-segment-meta,
+.workspace-segment:focus-visible .workspace-segment-meta,
+.workspace-segment:focus-within .workspace-segment-meta {
+  max-width: 10rem;
+  opacity: 1;
+}
+
+.workspace-segment-count {
+  @apply rounded px-1.5 py-0.5 text-[10px] leading-none;
+}
+
+.workspace-segment-count.count-running {
+  background: rgba(16, 185, 129, 0.16);
+  color: rgb(110, 231, 183);
+}
+
+.workspace-segment-count.count-review {
+  background: rgba(245, 158, 11, 0.16);
+  color: rgb(253, 186, 116);
+}
+
+.workspace-segment-count.count-finished {
+  background: rgba(96, 165, 250, 0.16);
+  color: rgb(147, 197, 253);
+}
+
+.workspace-segment-settings {
+  @apply ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 transition;
+  opacity: 0;
+  transform: translateX(3px);
+  pointer-events: none;
+}
+
+.workspace-segment:hover .workspace-segment-settings,
+.workspace-segment:focus-visible .workspace-segment-settings,
+.workspace-segment:focus-within .workspace-segment-settings {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.workspace-segment-settings:hover {
+  @apply bg-black/35 text-white;
+}
+
+.workspace-segment-add {
+  @apply w-8 justify-center px-0;
+}
+
 .project-row {
   @apply flex w-full items-center justify-between rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm text-left text-muted transition;
 }

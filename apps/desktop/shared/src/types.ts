@@ -34,9 +34,19 @@ export interface PromptAttachment {
 
 export interface Project {
   id: string;
+  workspaceId: string;
   name: string;
   path: string;
   settings?: ProjectSettings;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
   createdAt: string;
   updatedAt: string;
 }

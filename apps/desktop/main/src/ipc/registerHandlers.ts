@@ -84,6 +84,10 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     (IPC_CHANNELS as Record<string, string>).orchestrationStopChild ?? "orchestration:stopChild";
   const orchestrationRetryChildChannel =
     (IPC_CHANNELS as Record<string, string>).orchestrationRetryChild ?? "orchestration:retryChild";
+  const workspacesListChannel = (IPC_CHANNELS as Record<string, string>).workspacesList ?? "workspaces:list";
+  const workspacesCreateChannel = (IPC_CHANNELS as Record<string, string>).workspacesCreate ?? "workspaces:create";
+  const workspacesUpdateChannel = (IPC_CHANNELS as Record<string, string>).workspacesUpdate ?? "workspaces:update";
+  const workspacesDeleteChannel = (IPC_CHANNELS as Record<string, string>).workspacesDelete ?? "workspaces:delete";
   const normalizePath = (path: string) => resolve(path);
   const isPathInside = (rootPath: string, candidatePath: string) => {
     const relativePath = relative(rootPath, candidatePath);
@@ -435,6 +439,26 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   };
 
   ipcMain.handle(IPC_CHANNELS.projectsList, async () => deps.repository.listProjects());
+  ipcMain.handle(workspacesListChannel, async () => deps.repository.listWorkspaces());
+
+  ipcMain.handle(
+    workspacesCreateChannel,
+    async (_event, input: { name: string; icon: string; color: string; moveProjectIds?: string[] }) => {
+      return deps.repository.createWorkspace(input);
+    }
+  );
+
+  ipcMain.handle(
+    workspacesUpdateChannel,
+    async (_event, input: { id: string; name?: string; icon?: string; color?: string }) => {
+      return deps.repository.updateWorkspace(input);
+    }
+  );
+
+  ipcMain.handle(workspacesDeleteChannel, async (_event, input: { id: string }) => {
+    deps.repository.deleteWorkspace(input.id);
+    return { ok: true };
+  });
 
   ipcMain.handle(IPC_CHANNELS.projectsCreate, async (_event, input: { name: string; path: string }) => {
     return deps.repository.createProject(input);
@@ -507,9 +531,12 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     return deps.repository.createProject({ name, path: clone.path });
   });
 
-  ipcMain.handle(IPC_CHANNELS.projectsUpdate, async (_event, input: { id: string; name?: string; path?: string }) => {
+  ipcMain.handle(
+    IPC_CHANNELS.projectsUpdate,
+    async (_event, input: { id: string; name?: string; path?: string; workspaceId?: string }) => {
     return deps.repository.updateProject(input);
-  });
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.projectsDelete, async (_event, input: { id: string }) => {
     deps.repository.deleteProject(input.id);

@@ -31,7 +31,7 @@ const DEFAULT_DEV_COMMAND: ProjectDevCommand = {
   useForPreview: true
 };
 
-const DEFAULT_SETTINGS: AppSettings = {
+const DEFAULT_SETTINGS = {
   permissionMode: "prompt_on_risk",
   theme: "midnight",
   binaryOverrides: {},
@@ -51,15 +51,38 @@ const DEFAULT_SETTINGS: AppSettings = {
     networkAccessEnabled: true,
     approvalPolicy: "on-request"
   }
-};
+} as AppSettings;
 
 interface ProjectRow {
   id: string;
+  workspace_id: string | null;
   name: string;
   path: string;
   created_at: string;
   updated_at: string;
 }
+
+interface WorkspaceRow {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WorkspaceModel {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+type ProjectModel = Project & { workspaceId: string };
+
+const asProjectModel = (project: Project): ProjectModel => project as ProjectModel;
 
 interface ThreadRow {
   id: string;
@@ -140,10 +163,23 @@ interface OrchestrationChildRow {
   updated_at: string;
 }
 
-const mapProject = (row: ProjectRow): Project => ({
+const mapProject = (row: ProjectRow): Project => {
+  const mapped: ProjectModel = {
+    id: row.id,
+    workspaceId: row.workspace_id ?? "",
+    name: row.name,
+    path: row.path,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+  return mapped as Project;
+};
+
+const mapWorkspace = (row: WorkspaceRow): WorkspaceModel => ({
   id: row.id,
   name: row.name,
-  path: row.path,
+  icon: row.icon,
+  color: row.color,
   createdAt: row.created_at,
   updatedAt: row.updated_at
 });
@@ -392,6 +428,109 @@ export class Repository {
     return rows.map(mapProject);
   }
 
+  listWorkspaces(): WorkspaceModel[] {
+    const rows = this.db.prepare("SELECT * FROM workspaces ORDER BY created_at ASC").all() as WorkspaceRow[];
+    return rows.map(mapWorkspace);
+  }
+
+  getWorkspace(id: string): WorkspaceModel | null {
+    const row = this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as WorkspaceRow | undefined;
+    return row ? mapWorkspace(row) : null;
+  }
+
+  createWorkspace(input: { name: string; icon: string; color: string; moveProjectIds?: string[] }): WorkspaceModel {
+    const now = new Date().toISOString();
+    const workspace: WorkspaceModel = {
+      id: randomUUID(),
+      name: input.name.trim(),
+      icon: input.icon.trim(),
+      color: input.color.trim(),
+      createdAt: now,
+      updatedAt: now
+    };
+
+    if (!workspace.name) {
+      throw new Error("Workspace name is required");
+    }
+    if (!workspace.icon) {
+      throw new Error("Workspace icon is required");
+    }
+    if (!workspace.color) {
+      throw new Error("Workspace color is required");
+    }
+
+    const transaction = this.db.transaction(() => {
+      this.db
+        .prepare(
+          "INSERT INTO workspaces (id, name, icon, color, created_at, updated_at) VALUES (@id, @name, @icon, @color, @createdAt, @updatedAt)"
+        )
+        .run(workspace);
+
+      const moveProjectIds = (input.moveProjectIds ?? []).filter((projectId) => typeof projectId === "string" && projectId.trim());
+      if (moveProjectIds.length > 0) {
+        const updateProjectWorkspaceStmt = this.db.prepare(
+          "UPDATE projects SET workspace_id = ?, updated_at = ? WHERE id = ?"
+        );
+        for (const projectId of moveProjectIds) {
+          updateProjectWorkspaceStmt.run(workspace.id, now, projectId);
+        }
+      }
+    });
+
+    transaction();
+    return workspace;
+  }
+
+  updateWorkspace(input: { id: string; name?: string; icon?: string; color?: string }): WorkspaceModel {
+    const existing = this.getWorkspace(input.id);
+    if (!existing) {
+      throw new Error("Workspace not found");
+    }
+    const updated: WorkspaceModel = {
+      ...existing,
+      name: input.name?.trim() || existing.name,
+      icon: input.icon?.trim() || existing.icon,
+      color: input.color?.trim() || existing.color,
+      updatedAt: new Date().toISOString()
+    };
+
+    this.db
+      .prepare("UPDATE workspaces SET name = @name, icon = @icon, color = @color, updated_at = @updatedAt WHERE id = @id")
+      .run(updated);
+
+    return updated;
+  }
+
+  deleteWorkspace(id: string): void {
+    const existing = this.getWorkspace(id);
+    if (!existing) {
+      throw new Error("Workspace not found");
+    }
+
+    const transaction = this.db.transaction(() => {
+      const projectRows = this.db.prepare("SELECT id FROM projects WHERE workspace_id = ?").all(id) as Array<{ id: string }>;
+      const deleteProject = this.db.prepare("DELETE FROM projects WHERE id = ?");
+      for (const row of projectRows) {
+        deleteProject.run(row.id);
+      }
+      this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+
+      const remainingWorkspace = this.db
+        .prepare("SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1")
+        .get() as { id: string } | undefined;
+      if (!remainingWorkspace) {
+        const now = new Date().toISOString();
+        this.db
+          .prepare(
+            "INSERT INTO workspaces (id, name, icon, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+          )
+          .run(randomUUID(), "Default", "grid", "#64748b", now, now);
+      }
+    });
+
+    transaction();
+  }
+
   getProject(id: string): Project | null {
     const row = this.db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow | undefined;
     return row ? mapProject(row) : null;
@@ -399,8 +538,16 @@ export class Repository {
 
   createProject(input: { name: string; path: string }): Project {
     const now = new Date().toISOString();
-    const project: Project = {
+    const defaultWorkspace =
+      this.listWorkspaces()[0] ??
+      this.createWorkspace({
+        name: "Default",
+        icon: "grid",
+        color: "#64748b"
+      });
+    const project: ProjectModel = {
       id: randomUUID(),
+      workspaceId: defaultWorkspace.id,
       name: input.name,
       path: input.path,
       createdAt: now,
@@ -409,31 +556,39 @@ export class Repository {
 
     this.db
       .prepare(
-        "INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (@id, @name, @path, @createdAt, @updatedAt)"
+        "INSERT INTO projects (id, workspace_id, name, path, created_at, updated_at) VALUES (@id, @workspaceId, @name, @path, @createdAt, @updatedAt)"
       )
       .run(project);
 
-    return project;
+    return project as Project;
   }
 
-  updateProject(input: { id: string; name?: string; path?: string }): Project {
+  updateProject(input: { id: string; name?: string; path?: string; workspaceId?: string }): Project {
     const existing = this.getProject(input.id);
     if (!existing) {
       throw new Error("Project not found");
     }
 
-    const updated: Project = {
-      ...existing,
+    if (input.workspaceId && !this.getWorkspace(input.workspaceId)) {
+      throw new Error("Workspace not found");
+    }
+
+    const existingModel = asProjectModel(existing);
+    const updated: ProjectModel = {
+      ...existingModel,
+      workspaceId: input.workspaceId ?? existingModel.workspaceId,
       name: input.name ?? existing.name,
       path: input.path ?? existing.path,
       updatedAt: new Date().toISOString()
     };
 
     this.db
-      .prepare("UPDATE projects SET name = @name, path = @path, updated_at = @updatedAt WHERE id = @id")
+      .prepare(
+        "UPDATE projects SET workspace_id = @workspaceId, name = @name, path = @path, updated_at = @updatedAt WHERE id = @id"
+      )
       .run(updated);
 
-    return updated;
+    return updated as Project;
   }
 
   deleteProject(id: string): void {

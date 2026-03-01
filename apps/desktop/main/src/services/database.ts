@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 
 export const initializeDatabase = (dbPath: string) => {
   const db = new Database(dbPath);
@@ -8,8 +9,18 @@ export const initializeDatabase = (dbPath: string) => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
+      workspace_id TEXT,
       name TEXT NOT NULL,
       path TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      icon TEXT NOT NULL,
+      color TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -148,6 +159,7 @@ export const initializeDatabase = (dbPath: string) => {
 
     CREATE INDEX IF NOT EXISTS idx_project_settings_updated
       ON project_settings(updated_at DESC);
+
   `);
 
   const projectSettingsColumns = db
@@ -180,6 +192,28 @@ export const initializeDatabase = (dbPath: string) => {
   if (!hasParentThreadIdColumn) {
     db.exec("ALTER TABLE threads ADD COLUMN parent_thread_id TEXT;");
   }
+
+  const projectColumns = db
+    .prepare("PRAGMA table_info(projects)")
+    .all() as Array<{ name: string }>;
+  const hasWorkspaceIdColumn = projectColumns.some((column) => column.name === "workspace_id");
+  if (!hasWorkspaceIdColumn) {
+    db.exec("ALTER TABLE projects ADD COLUMN workspace_id TEXT;");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_projects_workspace_updated ON projects(workspace_id, updated_at DESC);");
+
+  const firstWorkspace = db
+    .prepare("SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1")
+    .get() as { id: string } | undefined;
+  const defaultWorkspaceId = firstWorkspace?.id ?? randomUUID();
+  if (!firstWorkspace) {
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO workspaces (id, name, icon, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(defaultWorkspaceId, "Default", "grid", "#64748b", now, now);
+  }
+
+  db.prepare("UPDATE projects SET workspace_id = ? WHERE workspace_id IS NULL OR workspace_id = ''").run(defaultWorkspaceId);
 
   return db;
 };

@@ -11,6 +11,7 @@ import {
   FaSyncAlt,
   FaTerminal,
   FaTimes,
+  FaPlus,
   FaWindows,
   FaLinux,
   FaWindowMaximize,
@@ -27,6 +28,18 @@ type MainHeaderProps = {
   isWindowMaximized: boolean;
   appIconSrc: string;
   appVersionLabel: string;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    color: string;
+    runningCount: number;
+    reviewCount: number;
+    finishedCount: number;
+  }>;
+  activeWorkspaceId: string | null;
+  onSelectWorkspace: (workspaceId: string) => void;
+  onOpenWorkspaceSettings: (workspaceId: string) => void;
+  onOpenNewWorkspaceModal: () => void;
   changelogItems: string[];
   changelogRef: RefObject<HTMLDivElement | null>;
   isChangelogOpen: boolean;
@@ -100,6 +113,11 @@ export const MainHeader = ({
   isWindowMaximized,
   appIconSrc,
   appVersionLabel,
+  workspaces,
+  activeWorkspaceId,
+  onSelectWorkspace,
+  onOpenWorkspaceSettings,
+  onOpenNewWorkspaceModal,
   changelogItems,
   changelogRef,
   isChangelogOpen,
@@ -197,6 +215,60 @@ export const MainHeader = ({
             </ul>
           </div>
         )}
+      </div>
+      <div className="workspace-segmented-control no-drag">
+        {workspaces.map((workspace) => {
+          const isActive = workspace.id === activeWorkspaceId;
+          const workspaceLabel = workspace.name.trim() || "Workspace";
+          return (
+            <button
+              key={workspace.id}
+              className={`workspace-segment ${isActive ? "active" : ""}`}
+              onClick={() => onSelectWorkspace(workspace.id)}
+              title={workspaceLabel}
+              type="button"
+              style={{ borderColor: isActive ? workspace.color : undefined }}
+            >
+              <span className="workspace-segment-name">{workspaceLabel}</span>
+              <span className="workspace-segment-meta" aria-hidden="true">
+                <span className="workspace-segment-count count-running">{workspace.runningCount}</span>
+                <span className="workspace-segment-count count-review">{workspace.reviewCount}</span>
+                <span className="workspace-segment-count count-finished">{workspace.finishedCount}</span>
+              </span>
+              <span className="workspace-segment-summary">
+                {workspace.runningCount + workspace.reviewCount + workspace.finishedCount}
+              </span>
+              <span
+                className="workspace-segment-settings"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenWorkspaceSettings(workspace.id);
+                }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onOpenWorkspaceSettings(workspace.id);
+                }}
+              >
+                <FaCog className="text-[10px]" />
+              </span>
+            </button>
+          );
+        })}
+        <button
+          className="workspace-segment workspace-segment-add app-tooltip-target"
+          type="button"
+          data-app-tooltip={tooltipText("New Workspace", "Create a workspace and optionally move projects into it.")}
+          onClick={onOpenNewWorkspaceModal}
+          aria-label="Create workspace"
+        >
+          <FaPlus className="text-[10px]" />
+        </button>
       </div>
     </div>
     <div className="no-drag flex items-center gap-2">

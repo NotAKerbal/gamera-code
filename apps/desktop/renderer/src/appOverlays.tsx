@@ -3,6 +3,7 @@ import { FaTimes, FaTrashAlt } from "react-icons/fa";
 import type {
   GitRepositoryCandidate,
   Project,
+  Workspace,
   SubthreadPolicy,
   ProjectTerminalSwitchBehavior,
   ProjectWebLink,
@@ -50,6 +51,9 @@ type ProjectSettingsModalProps = {
   setProjectSettingsCommands: Dispatch<SetStateAction<ProjectCommand[]>>;
   projectSettingsWebLinks: ProjectWebLink[];
   setProjectSettingsWebLinks: Dispatch<SetStateAction<ProjectWebLink[]>>;
+  workspaces: Workspace[];
+  projectWorkspaceTargetId: string;
+  setProjectWorkspaceTargetId: Dispatch<SetStateAction<string>>;
   skillsByProjectId: Record<string, SkillRecord[]>;
   skillEditorPath: string;
   skillEditorContent: string;
@@ -62,6 +66,7 @@ type ProjectSettingsModalProps = {
   onClose: () => void;
   onRemoveProject: () => Promise<void>;
   onSaveProjectSettings: () => Promise<void>;
+  onMoveProjectWorkspace: () => Promise<void>;
   onToggleProjectSkillEnabled: (path: string, enabled: boolean) => Promise<void>;
   onOpenSkillEditor: (path: string) => Promise<void>;
   appendLog: (line: string) => void;
@@ -83,6 +88,9 @@ export const ProjectSettingsModal = ({
   setProjectSettingsCommands,
   projectSettingsWebLinks,
   setProjectSettingsWebLinks,
+  workspaces,
+  projectWorkspaceTargetId,
+  setProjectWorkspaceTargetId,
   skillsByProjectId,
   skillEditorPath,
   skillEditorContent,
@@ -95,6 +103,7 @@ export const ProjectSettingsModal = ({
   onClose,
   onRemoveProject,
   onSaveProjectSettings,
+  onMoveProjectWorkspace,
   onToggleProjectSkillEnabled,
   onOpenSkillEditor,
   appendLog
@@ -188,6 +197,33 @@ export const ProjectSettingsModal = ({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="mx-2 border-t border-border/70" />
+              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="text-sm text-muted">Workspace</div>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="input text-xs"
+                    value={projectWorkspaceTargetId}
+                    onChange={(event) => setProjectWorkspaceTargetId(event.target.value)}
+                  >
+                    {workspaces.map((workspace) => (
+                      <option key={workspace.id} value={workspace.id}>
+                        {workspace.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn-secondary h-8 px-2 py-0 text-xs whitespace-nowrap"
+                    onClick={() => {
+                      onMoveProjectWorkspace().catch((error) => {
+                        appendLog(`Move workspace failed: ${String(error)}`);
+                      });
+                    }}
+                  >
+                    Move Workspace
+                  </button>
+                </div>
               </div>
               <div className="mx-2 border-t border-border/70" />
               <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -686,6 +722,113 @@ type RenameThreadModalProps = {
   submitRenameDialog: () => Promise<void>;
   appendLog: (line: string) => void;
 };
+
+type WorkspaceModalProps = {
+  mode: "create" | "edit";
+  workspaces: Workspace[];
+  projects: Project[];
+  editingWorkspaceId: string | null;
+  draftName: string;
+  setDraftName: Dispatch<SetStateAction<string>>;
+  draftColor: string;
+  setDraftColor: Dispatch<SetStateAction<string>>;
+  draftMoveProjectIds: string[];
+  setDraftMoveProjectIds: Dispatch<SetStateAction<string[]>>;
+  onClose: () => void;
+  onSave: () => Promise<void>;
+  onDelete: () => Promise<void>;
+  appendLog: (line: string) => void;
+};
+
+export const WorkspaceModal = ({
+  mode,
+  workspaces,
+  projects,
+  editingWorkspaceId,
+  draftName,
+  setDraftName,
+  draftColor,
+  setDraftColor,
+  draftMoveProjectIds,
+  setDraftMoveProjectIds,
+  onClose,
+  onSave,
+  onDelete,
+  appendLog
+}: WorkspaceModalProps) => (
+  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+    <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-lg font-semibold">{mode === "create" ? "New Workspace" : "Workspace Settings"}</h3>
+        <button className="btn-secondary" onClick={onClose}>Close</button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Name</label>
+          <input className="input text-sm" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="Workspace name" />
+        </div>
+        <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Color</label>
+        <input className="input text-sm" value={draftColor} onChange={(event) => setDraftColor(event.target.value)} placeholder="#64748b" />
+      </div>
+
+      {mode === "create" && (
+        <div className="mt-4 rounded-xl border border-border/80 bg-black/20 p-3">
+          <div className="mb-2 text-xs uppercase tracking-wide text-muted">Move Projects Into This Workspace</div>
+          <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+            {projects.length === 0 ? (
+              <p className="text-xs text-slate-400">No projects available.</p>
+            ) : (
+              projects.map((project) => (
+                <label key={project.id} className="project-settings-toggle">
+                  <input
+                    type="checkbox"
+                    checked={draftMoveProjectIds.includes(project.id)}
+                    onChange={(event) => {
+                      setDraftMoveProjectIds((prev) =>
+                        event.target.checked ? [...prev, project.id] : prev.filter((id) => id !== project.id)
+                      );
+                    }}
+                  />
+                  <span>{project.name}</span>
+                </label>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 flex items-center justify-between">
+        {mode === "edit" ? (
+          <button
+            className="btn-danger"
+            onClick={() => {
+              if (workspaces.length <= 1) {
+                appendLog("Cannot delete the last workspace.");
+                return;
+              }
+              onDelete().catch((error) => appendLog(`Workspace delete failed: ${String(error)}`));
+            }}
+            disabled={!editingWorkspaceId || workspaces.length <= 1}
+          >
+            Delete Workspace
+          </button>
+        ) : <div />}
+        <div className="flex items-center gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={() => {
+              onSave().catch((error) => appendLog(`Workspace save failed: ${String(error)}`));
+            }}
+          >
+            {mode === "create" ? "Create Workspace" : "Save Workspace"}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 export const RenameThreadModal = ({
   renameDialog,
