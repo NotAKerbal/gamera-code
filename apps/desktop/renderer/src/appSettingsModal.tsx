@@ -101,6 +101,28 @@ const THEME_PREVIEW_STYLES: Record<AppTheme, CSSProperties> = {
     ["--preview-thread-active" as string]: "rgba(51, 65, 85, 0.98)",
     ["--preview-text" as string]: "rgba(241, 245, 249, 0.96)",
     ["--preview-muted" as string]: "rgba(148, 163, 184, 0.88)"
+  },
+  dawn: {
+    ["--preview-shell-start" as string]: "#f4efe6",
+    ["--preview-shell-end" as string]: "#ece4d6",
+    ["--preview-sidebar-start" as string]: "#ebe2d1",
+    ["--preview-sidebar-end" as string]: "#e2d7c2",
+    ["--preview-border" as string]: "rgba(161, 138, 107, 0.45)",
+    ["--preview-thread" as string]: "rgba(222, 207, 181, 0.9)",
+    ["--preview-thread-active" as string]: "rgba(208, 188, 154, 0.96)",
+    ["--preview-text" as string]: "rgba(56, 43, 28, 0.95)",
+    ["--preview-muted" as string]: "rgba(115, 90, 60, 0.72)"
+  },
+  linen: {
+    ["--preview-shell-start" as string]: "#f8fafc",
+    ["--preview-shell-end" as string]: "#eef2f7",
+    ["--preview-sidebar-start" as string]: "#f1f5f9",
+    ["--preview-sidebar-end" as string]: "#e7edf4",
+    ["--preview-border" as string]: "rgba(100, 116, 139, 0.34)",
+    ["--preview-thread" as string]: "rgba(226, 232, 240, 0.95)",
+    ["--preview-thread-active" as string]: "rgba(203, 213, 225, 0.98)",
+    ["--preview-text" as string]: "rgba(30, 41, 59, 0.95)",
+    ["--preview-muted" as string]: "rgba(71, 85, 105, 0.7)"
   }
 };
 

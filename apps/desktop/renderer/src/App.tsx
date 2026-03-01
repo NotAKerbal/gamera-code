@@ -38,6 +38,7 @@ import {
   FaWindowRestore
 } from "react-icons/fa";
 import appIconDark from "./assets/icon_rounded.png";
+import appIconLight from "./assets/icon_light.png";
 import type {
   AppSettings,
   CodexApprovalMode,
@@ -357,6 +358,8 @@ export const App = () => {
   const completionAudioContextRef = useRef<AudioContext | null>(null);
   const terminalPopoutWindowsRef = useRef<Record<string, Window | null>>({});
   const terminalDashboardWindowRef = useRef<Window | null>(null);
+  const isLightTheme = (settings.theme ?? "midnight") === "dawn" || (settings.theme ?? "midnight") === "linen";
+  const appIconSrc = isLightTheme ? appIconLight : appIconDark;
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
   const selectedProject = useMemo(
@@ -5836,7 +5839,7 @@ const stopActiveRun = async () => {
               isMacOS={isMacOS}
               isWindows={isWindows}
               isWindowMaximized={isWindowMaximized}
-              appIconSrc={appIconDark}
+              appIconSrc={appIconSrc}
               appVersionLabel={APP_VERSION_LABEL}
               changelogItems={CHANGELOG_ITEMS}
               changelogRef={changelogRef}
@@ -7423,8 +7426,8 @@ const stopActiveRun = async () => {
                     <section className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
                       {activeGitState?.insideRepo ? (
                         <div className="space-y-3">
-                          <div className="rounded-md border border-border/70 p-2">
-                            <div className="mb-2 text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                          <div className="git-panel-card">
+                            <div className="git-panel-card-title mb-2">
                               Origin Commits ({activeIncomingCommits.length})
                             </div>
                             <button
@@ -7449,17 +7452,17 @@ const stopActiveRun = async () => {
                               activeIncomingCommits.map((commit) => (
                                 <div
                                   key={`incoming-${commit.hash}`}
-                                  className="mt-1 rounded border border-cyan-900/40 bg-cyan-950/20 px-2 py-1 text-xs text-cyan-100/90"
+                                  className="git-commit-pill git-commit-pill-incoming mt-1 px-2 py-1 text-xs"
                                 >
-                                  <div className="truncate text-[10px] text-cyan-300/90">{commit.hash}</div>
+                                  <div className="git-commit-pill-hash truncate text-[10px]">{commit.hash}</div>
                                   <div className="truncate">{commit.summary}</div>
                                 </div>
                               ))
                             )}
                           </div>
 
-                          <div className="rounded-md border border-border/70 p-2">
-                            <div className="mb-2 text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                          <div className="git-panel-card">
+                            <div className="git-panel-card-title mb-2">
                               Local Commits ({activeOutgoingCommits.length})
                             </div>
                             <button
@@ -7484,9 +7487,9 @@ const stopActiveRun = async () => {
                               activeOutgoingCommits.map((commit) => (
                                 <div
                                   key={`outgoing-${commit.hash}`}
-                                  className="mt-1 rounded border border-indigo-900/40 bg-indigo-950/20 px-2 py-1 text-xs text-indigo-100/90"
+                                  className="git-commit-pill git-commit-pill-outgoing mt-1 px-2 py-1 text-xs"
                                 >
-                                  <div className="truncate text-[10px] text-indigo-300/90">{commit.hash}</div>
+                                  <div className="git-commit-pill-hash truncate text-[10px]">{commit.hash}</div>
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="truncate">{commit.summary}</div>
                                     <button
@@ -7522,8 +7525,8 @@ const stopActiveRun = async () => {
                             )}
                           </div>
 
-                          <div className="rounded-md border border-border/70 p-2">
-                            <div className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                          <div className="git-panel-card">
+                            <div className="git-panel-card-title">
                               Staged ({activeStagedFiles.length})
                             </div>
                             <div className="mt-1">
@@ -7553,8 +7556,8 @@ const stopActiveRun = async () => {
                                   key={`staged-${file.path}-${file.indexStatus}-${file.workTreeStatus}`}
                                   className={`mt-1 rounded border px-2 py-1 text-xs ${
                                     activeSelectedGitPath === file.path
-                                      ? "border-emerald-500/60 bg-emerald-500/15 text-slate-100"
-                                      : "border-emerald-900/40 bg-emerald-950/20 text-emerald-100/90"
+                                      ? "git-file-pill git-file-pill-selected"
+                                      : "git-file-pill git-file-pill-staged"
                                   }`}
                                 >
                                   <div className="flex items-start justify-between gap-2">
@@ -7585,8 +7588,8 @@ const stopActiveRun = async () => {
                               </button>
                             )}
                           </div>
-                          <div className="rounded-md border border-border/70 p-2">
-                            <div className="text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                          <div className="git-panel-card">
+                            <div className="git-panel-card-title">
                               Unstaged / Untracked ({activeUnstagedFiles.length})
                             </div>
                             {hasStageableFiles && (
@@ -7609,10 +7612,10 @@ const stopActiveRun = async () => {
                                   key={`unstaged-${file.path}-${file.indexStatus}-${file.workTreeStatus}`}
                                   className={`mt-1 rounded border px-2 py-1 text-xs ${
                                     activeSelectedGitPath === file.path
-                                      ? "border-amber-500/60 bg-amber-500/15 text-slate-100"
+                                      ? "git-file-pill git-file-pill-selected"
                                       : file.untracked
-                                        ? "border-cyan-900/40 bg-cyan-950/20 text-cyan-100/90"
-                                        : "border-amber-900/40 bg-amber-950/20 text-amber-100/90"
+                                        ? "git-file-pill git-file-pill-untracked"
+                                        : "git-file-pill git-file-pill-unstaged"
                                   }`}
                                 >
                                   <div className="flex items-start justify-between gap-2">
@@ -7716,7 +7719,7 @@ const stopActiveRun = async () => {
           isSettingsWindow={isSettingsWindow}
           isMacOS={isMacOS}
           isWindows={isWindows}
-          appIconSrc={appIconDark}
+          appIconSrc={appIconSrc}
           settingsTab={settingsTab}
           setSettingsTab={setSettingsTab}
           settings={settings}

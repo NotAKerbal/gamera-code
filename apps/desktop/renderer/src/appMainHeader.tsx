@@ -180,7 +180,7 @@ export const MainHeader = ({
       <span>GameraCode</span>
       <div className="relative no-drag" ref={changelogRef}>
         <button
-          className="app-tooltip-target rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 transition hover:bg-zinc-700/90 hover:text-slate-200"
+          className="app-tooltip-target header-pill px-1.5 py-0.5 text-[10px] font-medium"
           data-app-tooltip={tooltipText("What's New", `Open release notes for ${appVersionLabel}.`)}
           aria-label={`What's new in ${appVersionLabel}`}
           onClick={() => setIsChangelogOpen((prev) => !prev)}
@@ -428,7 +428,7 @@ export const MainHeader = ({
           <FaCodeBranch className="text-[10px]" />
           {isGitPanelOpen ? "Hide Git" : "Git"}
           {showHeaderGitDiffStats ? (
-            <span className="git-header-diff-badge rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300">
+            <span className="git-header-diff-badge header-pill px-1.5 py-0.5 text-[10px]">
               <span className="text-emerald-300">+{activeGitAddedLines}</span>
               <span className="px-1 text-slate-500">/</span>
               <span className="text-rose-300">-{activeGitRemovedLines}</span>

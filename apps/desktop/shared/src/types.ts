@@ -1,7 +1,7 @@
 export type Provider = "codex" | "gemini";
 
 export type PermissionMode = "prompt_on_risk" | "always_ask" | "auto_allow";
-export type AppTheme = "midnight" | "graphite";
+export type AppTheme = "midnight" | "graphite" | "dawn" | "linen";
 
 export type ThreadStatus = "created" | "running" | "stopped" | "exited" | "error";
 
