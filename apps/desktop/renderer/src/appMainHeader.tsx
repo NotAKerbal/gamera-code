@@ -237,7 +237,6 @@ export const MainHeader = ({
               onClick={() => onSelectWorkspace(workspace.id)}
               title={workspaceLabel}
               type="button"
-              style={{ borderColor: isActive ? workspace.color : undefined }}
             >
               <span className="workspace-segment-name">{workspaceLabel}</span>
               <span className="workspace-segment-meta" aria-hidden="true">

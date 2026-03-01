@@ -649,7 +649,7 @@ webview {
 }
 
 .workspace-segment.active {
-  @apply border-border/90 text-white;
+  @apply border-transparent text-white;
   background: rgba(63, 63, 70, 0.7);
 }
 
