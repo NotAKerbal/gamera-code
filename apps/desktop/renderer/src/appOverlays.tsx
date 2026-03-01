@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { FaTimes, FaTrashAlt } from "react-icons/fa";
 import type {
@@ -34,6 +35,15 @@ const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLa
     <span>{enabled ? onLabel : offLabel}</span>
   </button>
 );
+
+const WORKSPACE_COLOR_PRESETS = [
+  "#64748b",
+  "#2563eb",
+  "#059669",
+  "#d97706",
+  "#dc2626",
+  "#7c3aed"
+];
 
 type ProjectSettingsModalProps = {
   activeProjectId: string;
@@ -728,14 +738,13 @@ type WorkspaceModalProps = {
   workspaces: Workspace[];
   projects: Project[];
   editingWorkspaceId: string | null;
-  draftName: string;
-  setDraftName: Dispatch<SetStateAction<string>>;
-  draftColor: string;
-  setDraftColor: Dispatch<SetStateAction<string>>;
-  draftMoveProjectIds: string[];
-  setDraftMoveProjectIds: Dispatch<SetStateAction<string[]>>;
+  initialDraft: {
+    name: string;
+    color: string;
+    moveProjectIds: string[];
+  };
   onClose: () => void;
-  onSave: () => Promise<void>;
+  onSave: (draft: { name: string; color: string; moveProjectIds: string[] }) => Promise<void>;
   onDelete: () => Promise<void>;
   appendLog: (line: string) => void;
 };
@@ -745,90 +754,111 @@ export const WorkspaceModal = ({
   workspaces,
   projects,
   editingWorkspaceId,
-  draftName,
-  setDraftName,
-  draftColor,
-  setDraftColor,
-  draftMoveProjectIds,
-  setDraftMoveProjectIds,
+  initialDraft,
   onClose,
   onSave,
   onDelete,
   appendLog
-}: WorkspaceModalProps) => (
-  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-    <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
+}: WorkspaceModalProps) => {
+  const [draftName, setDraftName] = useState(initialDraft.name);
+  const [draftColor, setDraftColor] = useState(initialDraft.color);
+  const [draftMoveProjectIds, setDraftMoveProjectIds] = useState<string[]>(initialDraft.moveProjectIds);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-lg font-semibold">{mode === "create" ? "New Workspace" : "Workspace Settings"}</h3>
-        <button className="btn-secondary" onClick={onClose}>Close</button>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div>
-          <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Name</label>
-          <input className="input text-sm" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="Workspace name" />
-        </div>
-        <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Color</label>
-        <input className="input text-sm" value={draftColor} onChange={(event) => setDraftColor(event.target.value)} placeholder="#64748b" />
-      </div>
-
-      {mode === "create" && (
-        <div className="mt-4 rounded-xl border border-border/80 bg-black/20 p-3">
-          <div className="mb-2 text-xs uppercase tracking-wide text-muted">Move Projects Into This Workspace</div>
-          <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
-            {projects.length === 0 ? (
-              <p className="text-xs text-slate-400">No projects available.</p>
-            ) : (
-              projects.map((project) => (
-                <label key={project.id} className="project-settings-toggle">
-                  <input
-                    type="checkbox"
-                    checked={draftMoveProjectIds.includes(project.id)}
-                    onChange={(event) => {
-                      setDraftMoveProjectIds((prev) =>
-                        event.target.checked ? [...prev, project.id] : prev.filter((id) => id !== project.id)
-                      );
-                    }}
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Name</label>
+            <input className="input text-sm" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="Workspace name" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Color</label>
+            <div className="flex items-center gap-2">
+              {WORKSPACE_COLOR_PRESETS.map((color) => {
+                const selected = draftColor.toLowerCase() === color.toLowerCase();
+                return (
+                  <button
+                    key={color}
+                    type="button"
+                    className={`h-9 w-9 rounded-lg border ${selected ? "border-slate-100" : "border-border/80"}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setDraftColor(color)}
+                    aria-label={`Select workspace color ${color}`}
+                    title={color}
                   />
-                  <span>{project.name}</span>
-                </label>
-              ))
-            )}
+                );
+              })}
+            </div>
           </div>
         </div>
-      )}
 
-      <div className="mt-4 flex items-center justify-between">
-        {mode === "edit" ? (
-          <button
-            className="btn-danger"
-            onClick={() => {
-              if (workspaces.length <= 1) {
-                appendLog("Cannot delete the last workspace.");
-                return;
-              }
-              onDelete().catch((error) => appendLog(`Workspace delete failed: ${String(error)}`));
-            }}
-            disabled={!editingWorkspaceId || workspaces.length <= 1}
-          >
-            Delete Workspace
-          </button>
-        ) : <div />}
-        <div className="flex items-center gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button
-            className="btn-primary"
-            onClick={() => {
-              onSave().catch((error) => appendLog(`Workspace save failed: ${String(error)}`));
-            }}
-          >
-            {mode === "create" ? "Create Workspace" : "Save Workspace"}
-          </button>
+        {mode === "create" && (
+          <div className="mt-4 rounded-xl border border-border/80 bg-black/20 p-3">
+            <div className="mb-2 text-xs uppercase tracking-wide text-muted">Move Projects Into This Workspace</div>
+            <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+              {projects.length === 0 ? (
+                <p className="text-xs text-slate-400">No projects available.</p>
+              ) : (
+                projects.map((project) => (
+                  <label key={project.id} className="project-settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={draftMoveProjectIds.includes(project.id)}
+                      onChange={(event) => {
+                        setDraftMoveProjectIds((prev) =>
+                          event.target.checked ? [...prev, project.id] : prev.filter((id) => id !== project.id)
+                        );
+                      }}
+                    />
+                    <span>{project.name}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-between">
+          {mode === "edit" ? (
+            <button
+              className="btn-danger"
+              onClick={() => {
+                if (workspaces.length <= 1) {
+                  appendLog("Cannot delete the last workspace.");
+                  return;
+                }
+                onDelete().catch((error) => appendLog(`Workspace delete failed: ${String(error)}`));
+              }}
+              disabled={!editingWorkspaceId || workspaces.length <= 1}
+            >
+              Delete Workspace
+            </button>
+          ) : <div />}
+          <div className="flex items-center gap-2">
+            <button className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                onSave({
+                  name: draftName,
+                  color: draftColor,
+                  moveProjectIds: draftMoveProjectIds
+                }).catch((error) => appendLog(`Workspace save failed: ${String(error)}`));
+              }}
+            >
+              {mode === "create" ? "Create Workspace" : "Save Workspace"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const RenameThreadModal = ({
   renameDialog,

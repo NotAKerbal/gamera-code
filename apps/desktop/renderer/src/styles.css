@@ -641,11 +641,19 @@ webview {
 .workspace-segment {
   @apply relative inline-flex h-8 items-center gap-1 rounded-lg border border-transparent px-2 text-xs text-slate-300 transition;
   background: rgba(24, 24, 27, 0.55);
+  padding-right: 0.5rem;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease, padding-right 180ms ease;
 }
 
 .workspace-segment:hover {
   @apply border-border/80 text-white;
   background: rgba(39, 39, 42, 0.7);
+}
+
+.workspace-segment:hover,
+.workspace-segment:focus-visible,
+.workspace-segment:focus-within {
+  padding-right: 2rem;
 }
 
 .workspace-segment.active {
@@ -667,16 +675,6 @@ webview {
 
 .workspace-segment-meta {
   @apply inline-flex items-center gap-1 overflow-hidden;
-  max-width: 0;
-  opacity: 0;
-  transition: max-width 190ms ease, opacity 150ms ease;
-}
-
-.workspace-segment:hover .workspace-segment-meta,
-.workspace-segment:focus-visible .workspace-segment-meta,
-.workspace-segment:focus-within .workspace-segment-meta {
-  max-width: 10rem;
-  opacity: 1;
 }
 
 .workspace-segment-count {
@@ -699,9 +697,12 @@ webview {
 }
 
 .workspace-segment-settings {
-  @apply ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 transition;
+  @apply inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 transition;
+  position: absolute;
+  right: 5px;
+  top: 50%;
   opacity: 0;
-  transform: translateX(3px);
+  transform: translateY(-50%) translateX(3px);
   pointer-events: none;
 }
 
@@ -709,7 +710,7 @@ webview {
 .workspace-segment:focus-visible .workspace-segment-settings,
 .workspace-segment:focus-within .workspace-segment-settings {
   opacity: 1;
-  transform: translateX(0);
+  transform: translateY(-50%) translateX(0);
   pointer-events: auto;
 }
 
@@ -1364,44 +1365,18 @@ webview {
 .composer-tooltip-target::after,
 .app-tooltip-target::before,
 .app-tooltip-target::after {
-  opacity: 0;
+  content: none;
+}
+
+.app-global-tooltip {
+  position: fixed;
   pointer-events: none;
-  transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.composer-tooltip-target::before,
-.app-tooltip-target::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  z-index: 60;
-}
-
-.composer-tooltip-target::before {
-  bottom: calc(100% + 4px);
-  transform: translate(-50%, 4px);
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 5px solid var(--theme-tooltip-bg);
-}
-
-.app-tooltip-target::before {
-  top: calc(100% + 4px);
-  transform: translate(-50%, -4px);
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-bottom: 5px solid var(--theme-tooltip-bg);
-}
-
-.composer-tooltip-target::after,
-.app-tooltip-target::after {
-  position: absolute;
-  left: 50%;
+  z-index: 9999;
   max-width: min(24rem, 70vw);
   min-width: 13rem;
   padding: 0.45rem 0.55rem;
   border-radius: 0.45rem;
-  border: 1px solid var(--theme-tooltip-border);
+  border: 1px solid color-mix(in srgb, var(--theme-tooltip-border) 35%, transparent);
   background: var(--theme-tooltip-bg);
   color: var(--theme-tooltip-text);
   font-size: 11px;
@@ -1409,34 +1384,45 @@ webview {
   white-space: pre-line;
   text-align: left;
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.42);
-  z-index: 60;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 130ms ease, visibility 130ms step-end;
+  will-change: transform, opacity;
 }
 
-.composer-tooltip-target::after {
-  bottom: calc(100% + 9px);
-  transform: translate(-50%, 4px);
-}
-
-.composer-tooltip-target::after {
-  content: attr(data-composer-tooltip);
-}
-
-.app-tooltip-target::after {
-  content: attr(data-app-tooltip);
-  top: calc(100% + 9px);
-  transform: translate(-50%, -4px);
-}
-
-.composer-tooltip-target:hover::before,
-.composer-tooltip-target:hover::after,
-.composer-tooltip-target:focus-visible::before,
-.composer-tooltip-target:focus-visible::after,
-.app-tooltip-target:hover::before,
-.app-tooltip-target:hover::after,
-.app-tooltip-target:focus-visible::before,
-.app-tooltip-target:focus-visible::after {
+.app-global-tooltip.is-visible {
   opacity: 1;
+  visibility: visible;
+  transition: opacity 130ms ease;
+}
+
+.app-global-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+}
+
+.app-global-tooltip.is-above {
+  transform: translate(-50%, -100%);
+}
+
+.app-global-tooltip.is-above::after {
+  top: 100%;
+  border-top: 5px solid var(--theme-tooltip-bg);
+}
+
+.app-global-tooltip.is-below {
   transform: translate(-50%, 0);
+}
+
+.app-global-tooltip.is-below::after {
+  bottom: 100%;
+  border-bottom: 5px solid var(--theme-tooltip-bg);
 }
 
 .settings-toggle-btn {

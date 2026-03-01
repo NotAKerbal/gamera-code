@@ -200,6 +200,8 @@ const platformHints = `${navigator.platform} ${navigator.userAgent}`.toLowerCase
 const isMacOS = platformHints.includes("mac");
 const isWindows = platformHints.includes("win");
 const useWindowsStyleHeader = !isMacOS;
+type TooltipPlacement = "above" | "below";
+const TOOLTIP_HOVER_DELAY_MS = 500;
 
 export const App = () => {
   const isSettingsWindow = isSettingsWindowContext();
@@ -240,9 +242,15 @@ export const App = () => {
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
   const [workspaceModalMode, setWorkspaceModalMode] = useState<"create" | "edit">("create");
   const [workspaceEditingId, setWorkspaceEditingId] = useState<string | null>(null);
-  const [workspaceDraftName, setWorkspaceDraftName] = useState("");
-  const [workspaceDraftColor, setWorkspaceDraftColor] = useState("#64748b");
-  const [workspaceDraftMoveProjectIds, setWorkspaceDraftMoveProjectIds] = useState<string[]>([]);
+  const [workspaceModalInitialDraft, setWorkspaceModalInitialDraft] = useState<{
+    name: string;
+    color: string;
+    moveProjectIds: string[];
+  }>({
+    name: "",
+    color: "#64748b",
+    moveProjectIds: []
+  });
   const [showImportProjectModal, setShowImportProjectModal] = useState(false);
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -258,6 +266,13 @@ export const App = () => {
   const [updateMessage, setUpdateMessage] = useState<string>("");
   const [settingsEnvText, setSettingsEnvText] = useState("{}");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const tooltipTargetRef = useRef<HTMLElement | null>(null);
+  const tooltipElementRef = useRef<HTMLDivElement | null>(null);
+  const tooltipVisibleRef = useRef(false);
+  const tooltipAnimationFrameRef = useRef<number | null>(null);
+  const tooltipHoverTimeoutRef = useRef<number | null>(null);
+  const tooltipTextRef = useRef("");
+  const tooltipPlacementRef = useRef<TooltipPlacement>("below");
   const [expandedActivityGroups, setExpandedActivityGroups] = useState<Record<string, boolean>>({});
   const [, setExpandedActivityChildren] = useState<Record<string, boolean>>({});
   const [threadHistoryCursorById, setThreadHistoryCursorById] = useState<Record<string, number | undefined>>({});
@@ -384,6 +399,9 @@ export const App = () => {
   const terminalDashboardWindowRef = useRef<Window | null>(null);
   const isLightTheme = (settings.theme ?? "midnight") === "dawn" || (settings.theme ?? "midnight") === "linen";
   const appIconSrc = isLightTheme ? appIconLight : appIconDark;
+  const appendLog = useCallback((line: string) => {
+    setLogs((prev) => [...prev, line]);
+  }, []);
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
   const selectedProject = useMemo(
@@ -632,6 +650,101 @@ export const App = () => {
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
   const composerTooltipText = (label: string, detail: string, shortcut?: string) =>
     [label, detail, shortcut ? `Shortcut: ${shortcut}` : null].filter(Boolean).join("\n");
+  const clearPendingTooltipHover = useCallback(() => {
+    if (tooltipHoverTimeoutRef.current !== null) {
+      window.clearTimeout(tooltipHoverTimeoutRef.current);
+      tooltipHoverTimeoutRef.current = null;
+    }
+  }, []);
+  const clearGlobalTooltip = useCallback(() => {
+    clearPendingTooltipHover();
+    tooltipTargetRef.current = null;
+    tooltipVisibleRef.current = false;
+    const tooltip = tooltipElementRef.current;
+    if (!tooltip) {
+      return;
+    }
+    tooltip.classList.remove("is-visible", "is-above", "is-below");
+    tooltip.setAttribute("aria-hidden", "true");
+  }, [clearPendingTooltipHover]);
+  const updateGlobalTooltip = useCallback(() => {
+    const target = tooltipTargetRef.current;
+    if (!target || !target.isConnected) {
+      clearGlobalTooltip();
+      return;
+    }
+    const text = tooltipTextRef.current;
+    if (!text) {
+      clearGlobalTooltip();
+      return;
+    }
+    const tooltip = tooltipElementRef.current;
+    if (!tooltip) {
+      return;
+    }
+    const rect = target.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+      clearGlobalTooltip();
+      return;
+    }
+    let placement = tooltipPlacementRef.current;
+    if (placement === "above" && rect.top < 72) {
+      placement = "below";
+    } else if (placement === "below" && window.innerHeight - rect.bottom < 72) {
+      placement = "above";
+    }
+    const centerX = rect.left + rect.width / 2;
+    const left = Math.min(window.innerWidth - 16, Math.max(16, centerX));
+    const top = placement === "above" ? rect.top - 9 : rect.bottom + 9;
+    tooltip.textContent = text;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+    tooltip.classList.remove("is-above", "is-below");
+    tooltip.classList.add(placement === "above" ? "is-above" : "is-below");
+    tooltip.classList.add("is-visible");
+    tooltip.setAttribute("aria-hidden", "false");
+    tooltipVisibleRef.current = true;
+  }, [clearGlobalTooltip]);
+  const scheduleTooltipPositionUpdate = useCallback(() => {
+    if (tooltipAnimationFrameRef.current !== null) {
+      return;
+    }
+    tooltipAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      tooltipAnimationFrameRef.current = null;
+      updateGlobalTooltip();
+    });
+  }, [updateGlobalTooltip]);
+  const activateGlobalTooltip = useCallback(
+    (target: HTMLElement | null, hoverDelayMs = 0) => {
+      if (!target) {
+        clearGlobalTooltip();
+        return;
+      }
+      const appTooltipText = target.getAttribute("data-app-tooltip")?.trim();
+      const composerTooltip = target.getAttribute("data-composer-tooltip")?.trim();
+      const text = appTooltipText || composerTooltip;
+      if (!text) {
+        clearGlobalTooltip();
+        return;
+      }
+      if (tooltipTargetRef.current === target && tooltipTextRef.current === text && tooltipVisibleRef.current) {
+        return;
+      }
+      clearPendingTooltipHover();
+      tooltipTargetRef.current = target;
+      tooltipTextRef.current = text;
+      tooltipPlacementRef.current = appTooltipText ? "below" : "above";
+      if (hoverDelayMs > 0) {
+        tooltipHoverTimeoutRef.current = window.setTimeout(() => {
+          tooltipHoverTimeoutRef.current = null;
+          scheduleTooltipPositionUpdate();
+        }, hoverDelayMs);
+        return;
+      }
+      scheduleTooltipPositionUpdate();
+    },
+    [clearGlobalTooltip, clearPendingTooltipHover, scheduleTooltipPositionUpdate]
+  );
   const importQuery = importProjectQuery.trim();
   const shouldShowCloneAction = isLikelyGitRepositoryUrl(importQuery);
   const importCandidatesFiltered = useMemo(() => {
@@ -745,6 +858,79 @@ export const App = () => {
       // Ignore audio failures so run completion never breaks the UI.
     }
   };
+  useEffect(() => {
+    const resolveTooltipTarget = (value: EventTarget | null): HTMLElement | null => {
+      if (!(value instanceof Element)) {
+        return null;
+      }
+      return value.closest<HTMLElement>("[data-app-tooltip], [data-composer-tooltip]");
+    };
+
+    const handleMouseOver = (event: MouseEvent) => {
+      const target = resolveTooltipTarget(event.target);
+      if (!target) {
+        return;
+      }
+      activateGlobalTooltip(target, TOOLTIP_HOVER_DELAY_MS);
+    };
+    const handleMouseOut = (event: MouseEvent) => {
+      const currentTarget = tooltipTargetRef.current;
+      if (!currentTarget) {
+        return;
+      }
+      const relatedTarget = event.relatedTarget;
+      if (relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
+        return;
+      }
+      const nextTarget = resolveTooltipTarget(relatedTarget);
+      if (nextTarget) {
+        activateGlobalTooltip(nextTarget);
+        return;
+      }
+      clearGlobalTooltip();
+    };
+    const handleFocusIn = (event: FocusEvent) => {
+      activateGlobalTooltip(resolveTooltipTarget(event.target));
+    };
+    const handleFocusOut = (event: FocusEvent) => {
+      const currentTarget = tooltipTargetRef.current;
+      if (!currentTarget) {
+        return;
+      }
+      const relatedTarget = event.relatedTarget;
+      if (relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
+        return;
+      }
+      const nextTarget = resolveTooltipTarget(relatedTarget);
+      if (nextTarget) {
+        activateGlobalTooltip(nextTarget);
+        return;
+      }
+      clearGlobalTooltip();
+    };
+
+    document.addEventListener("mouseover", handleMouseOver);
+    document.addEventListener("mouseout", handleMouseOut);
+    document.addEventListener("focusin", handleFocusIn);
+    document.addEventListener("focusout", handleFocusOut);
+    document.addEventListener("scroll", scheduleTooltipPositionUpdate, { capture: true, passive: true });
+    window.addEventListener("resize", scheduleTooltipPositionUpdate);
+    window.addEventListener("blur", clearGlobalTooltip);
+    return () => {
+      document.removeEventListener("mouseover", handleMouseOver);
+      document.removeEventListener("mouseout", handleMouseOut);
+      document.removeEventListener("focusin", handleFocusIn);
+      document.removeEventListener("focusout", handleFocusOut);
+      document.removeEventListener("scroll", scheduleTooltipPositionUpdate, true);
+      window.removeEventListener("resize", scheduleTooltipPositionUpdate);
+      window.removeEventListener("blur", clearGlobalTooltip);
+      if (tooltipAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(tooltipAnimationFrameRef.current);
+        tooltipAnimationFrameRef.current = null;
+      }
+      clearPendingTooltipHover();
+    };
+  }, [activateGlobalTooltip, clearGlobalTooltip, clearPendingTooltipHover, scheduleTooltipPositionUpdate]);
   const flashCompletedThread = (threadId: string) => {
     setThreadCompletionFlashById((prev) => ({ ...prev, [threadId]: true }));
     setThreadFinishedUnreadById((prev) => ({ ...prev, [threadId]: true }));
@@ -3939,9 +4125,11 @@ export const App = () => {
   const openCreateWorkspaceModal = () => {
     setWorkspaceModalMode("create");
     setWorkspaceEditingId(null);
-    setWorkspaceDraftName("");
-    setWorkspaceDraftColor("#64748b");
-    setWorkspaceDraftMoveProjectIds([]);
+    setWorkspaceModalInitialDraft({
+      name: "",
+      color: "#64748b",
+      moveProjectIds: []
+    });
     setShowWorkspaceModal(true);
   };
 
@@ -3952,15 +4140,17 @@ export const App = () => {
     }
     setWorkspaceModalMode("edit");
     setWorkspaceEditingId(workspace.id);
-    setWorkspaceDraftName(workspace.name);
-    setWorkspaceDraftColor(workspace.color);
-    setWorkspaceDraftMoveProjectIds([]);
+    setWorkspaceModalInitialDraft({
+      name: workspace.name,
+      color: workspace.color,
+      moveProjectIds: []
+    });
     setShowWorkspaceModal(true);
   };
 
-  const saveWorkspaceFromModal = async () => {
-    const name = workspaceDraftName.trim();
-    const color = workspaceDraftColor.trim() || "#64748b";
+  const saveWorkspaceFromModal = async (draft: { name: string; color: string; moveProjectIds: string[] }) => {
+    const name = draft.name.trim();
+    const color = draft.color.trim() || "#64748b";
     if (!name) {
       setLogs((prev) => [...prev, "Workspace name is required."]);
       return;
@@ -3970,7 +4160,7 @@ export const App = () => {
         name,
         icon: "grid",
         color,
-        moveProjectIds: workspaceDraftMoveProjectIds
+        moveProjectIds: draft.moveProjectIds
       });
       await Promise.all([loadWorkspaces(), loadProjects(), loadThreads()]);
       setShowWorkspaceModal(false);
@@ -4514,7 +4704,7 @@ export const App = () => {
       return;
     }
     navigator.clipboard.writeText(plan.markdown).catch((error) => {
-      setLogs((prev) => [...prev, `Copy plan failed: ${String(error)}`]);
+      appendLog(`Copy plan failed: ${String(error)}`);
     });
   };
 
@@ -4536,7 +4726,7 @@ export const App = () => {
 
     const popout = window.open("", "codeapp-plan-viewer", "popup=yes,width=1080,height=820,resizable=yes,scrollbars=yes");
     if (!popout) {
-      setLogs((prev) => [...prev, "Plan pop-out blocked."]);
+      appendLog("Plan pop-out blocked.");
       return;
     }
 
@@ -5829,6 +6019,36 @@ const stopActiveRun = async () => {
     [planArtifacts]
   );
   const todoPlans = useMemo(() => planArtifacts.filter((plan) => plan.source === "todo"), [planArtifacts]);
+  const getTodoPlanByActivityId = useCallback(
+    (activityId: string) => todoPlans.find((plan) => plan.activityId === activityId),
+    [todoPlans]
+  );
+  const handleBuildPlan = useCallback(
+    (planId: string) => {
+      buildNowFromPlan(planId).catch((error) => {
+        appendLog(`Build now failed: ${String(error)}`);
+      });
+    },
+    [appendLog, buildNowFromPlan]
+  );
+  const togglePreviewPanel = useCallback(() => {
+    setIsPreviewOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsGitPanelOpen(false);
+      }
+      return next;
+    });
+  }, []);
+  const toggleGitPanel = useCallback(() => {
+    setIsGitPanelOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsPreviewOpen(false);
+      }
+      return next;
+    });
+  }, []);
 
   const timelineItems = useMemo(() => {
     const messageItems: TimelineMessageItem[] = messages.map((message, idx) => {
@@ -6251,24 +6471,8 @@ const stopActiveRun = async () => {
               activeProjectBrowserEnabled={activeProjectBrowserEnabled}
               isPreviewOpen={isPreviewOpen}
               isGitPanelOpen={isGitPanelOpen}
-              onTogglePreviewPanel={() => {
-                setIsPreviewOpen((prev) => {
-                  const next = !prev;
-                  if (next) {
-                    setIsGitPanelOpen(false);
-                  }
-                  return next;
-                });
-              }}
-              onToggleGitPanel={() => {
-                setIsGitPanelOpen((prev) => {
-                  const next = !prev;
-                  if (next) {
-                    setIsPreviewOpen(false);
-                  }
-                  return next;
-                });
-              }}
+              onTogglePreviewPanel={togglePreviewPanel}
+              onToggleGitPanel={toggleGitPanel}
               showHeaderGitDiffStats={Boolean(showHeaderGitDiffStats)}
               activeGitAddedLines={activeGitAddedLines}
               activeGitRemovedLines={activeGitRemovedLines}
@@ -6276,7 +6480,7 @@ const stopActiveRun = async () => {
               onMinimizeWindow={minimizeWindow}
               onToggleMaximizeWindow={toggleMaximizeWindow}
               onCloseWindow={closeWindow}
-              appendLog={(line) => setLogs((prev) => [...prev, line])}
+              appendLog={appendLog}
             />
           )}
 
@@ -6891,11 +7095,7 @@ const stopActiveRun = async () => {
                               content={item.message.content}
                               plansById={plansById}
                               onViewPlan={openPlanDrawerFor}
-                              onBuildPlan={(planId) => {
-                                buildNowFromPlan(planId).catch((error) => {
-                                  setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
-                                });
-                              }}
+                              onBuildPlan={handleBuildPlan}
                               onCopyPlan={copyPlanToClipboard}
                             />
                           </article>
@@ -6911,13 +7111,9 @@ const stopActiveRun = async () => {
                             key={row.id}
                             timelineItems={[row.item]}
                             plansById={plansById}
-                            getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                            getTodoPlanByActivityId={getTodoPlanByActivityId}
                             onViewPlan={openPlanDrawerFor}
-                            onBuildPlan={(planId) => {
-                              buildNowFromPlan(planId).catch((error) => {
-                                setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
-                              });
-                            }}
+                            onBuildPlan={handleBuildPlan}
                             onCopyPlan={copyPlanToClipboard}
                             expandedActivityGroups={expandedActivityGroups}
                             setExpandedActivityGroups={setExpandedActivityGroups}
@@ -6952,13 +7148,9 @@ const stopActiveRun = async () => {
                                 <MemoizedTimelineItemsList
                                   timelineItems={row.items}
                                   plansById={plansById}
-                                  getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                                  getTodoPlanByActivityId={getTodoPlanByActivityId}
                                   onViewPlan={openPlanDrawerFor}
-                                  onBuildPlan={(planId) => {
-                                    buildNowFromPlan(planId).catch((error) => {
-                                      setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
-                                    });
-                                  }}
+                                  onBuildPlan={handleBuildPlan}
                                   onCopyPlan={copyPlanToClipboard}
                                   expandedActivityGroups={expandedActivityGroups}
                                   setExpandedActivityGroups={setExpandedActivityGroups}
@@ -6974,13 +7166,9 @@ const stopActiveRun = async () => {
                     <MemoizedTimelineItemsList
                       timelineItems={timelineItems}
                       plansById={plansById}
-                      getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                      getTodoPlanByActivityId={getTodoPlanByActivityId}
                       onViewPlan={openPlanDrawerFor}
-                      onBuildPlan={(planId) => {
-                        buildNowFromPlan(planId).catch((error) => {
-                          setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
-                        });
-                      }}
+                      onBuildPlan={handleBuildPlan}
                       onCopyPlan={copyPlanToClipboard}
                       expandedActivityGroups={expandedActivityGroups}
                       setExpandedActivityGroups={setExpandedActivityGroups}
@@ -8077,7 +8265,7 @@ const stopActiveRun = async () => {
         gitBranchInput={gitBranchInput}
         gitBusyAction={gitBusyAction}
         onSwitchOrCreateBranch={switchOrCreateBranch}
-        appendLog={(line) => setLogs((prev) => [...prev, line])}
+        appendLog={appendLog}
       />
 
       <ComposerDropdownPortal
@@ -8087,6 +8275,8 @@ const stopActiveRun = async () => {
         setComposerOptions={setComposerOptions}
         setComposerDropdown={setComposerDropdown}
       />
+
+      <div ref={tooltipElementRef} className="app-global-tooltip" role="tooltip" aria-hidden="true" />
 
       {showSetupModal && installStatus && (
         <SetupModal
@@ -8102,7 +8292,7 @@ const stopActiveRun = async () => {
           }}
           onRefreshStatus={loadInstallerStatus}
           onRunAutomaticSetup={runAutomaticSetup}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8147,7 +8337,7 @@ const stopActiveRun = async () => {
               defaultProjectDirectory: picked
             }));
           }}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8200,7 +8390,7 @@ const stopActiveRun = async () => {
             await loadProjectSkills(activeProjectId);
           }}
           onOpenSkillEditor={openSkillEditor}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8213,7 +8403,7 @@ const stopActiveRun = async () => {
           isNameValid={Boolean(sanitizeProjectDirName(newProjectName))}
           onClose={() => setShowNewProjectModal(false)}
           onSubmit={submitNewProject}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8223,16 +8413,11 @@ const stopActiveRun = async () => {
           workspaces={workspaces}
           projects={projects}
           editingWorkspaceId={workspaceEditingId}
-          draftName={workspaceDraftName}
-          setDraftName={setWorkspaceDraftName}
-          draftColor={workspaceDraftColor}
-          setDraftColor={setWorkspaceDraftColor}
-          draftMoveProjectIds={workspaceDraftMoveProjectIds}
-          setDraftMoveProjectIds={setWorkspaceDraftMoveProjectIds}
+          initialDraft={workspaceModalInitialDraft}
           onClose={() => setShowWorkspaceModal(false)}
           onSave={saveWorkspaceFromModal}
           onDelete={deleteWorkspaceFromModal}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8251,7 +8436,7 @@ const stopActiveRun = async () => {
           onLoadImportCandidates={loadImportCandidates}
           onCloneProjectFromQuery={cloneProjectFromQuery}
           onImportProjectFromPath={importProjectFromPath}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8260,7 +8445,7 @@ const stopActiveRun = async () => {
           renameDialog={renameDialog}
           setRenameDialog={setRenameDialog}
           submitRenameDialog={submitRenameDialog}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8268,6 +8453,7 @@ const stopActiveRun = async () => {
     </div>
   );
 };
+
 
 
 
