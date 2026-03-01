@@ -789,10 +789,6 @@ webview {
   @apply max-w-[7rem] truncate;
 }
 
-.workspace-segment-summary {
-  @apply rounded bg-black/45 px-1.5 py-0.5 text-[10px] text-slate-300;
-}
-
 .workspace-segment-meta {
   @apply inline-flex items-center gap-1 overflow-hidden;
 }

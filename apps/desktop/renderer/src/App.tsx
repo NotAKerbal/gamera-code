@@ -651,8 +651,11 @@ export const App = () => {
     REASONING_OPTIONS.find((option) => option.value === (composerOptions.modelReasoningEffort ?? "medium"))?.label ?? "Medium";
   const modeLabel =
     COLLABORATION_OPTIONS.find((option) => option.value === (composerOptions.collaborationMode ?? "plan"))?.label ?? "Plan";
-  const sandboxLabel = SANDBOX_OPTIONS.find((option) => option.value === (composerOptions.sandboxMode ?? "workspace-write"))?.label ?? "Workspace write";
-  const approvalLabel = APPROVAL_OPTIONS.find((option) => option.value === (composerOptions.approvalPolicy ?? "on-request"))?.label ?? "On request";
+  const sandboxLabel =
+    SANDBOX_OPTIONS.find((option) => option.value === (composerOptions.sandboxMode ?? "workspace-write"))?.label ??
+    "Read + Write";
+  const approvalLabel =
+    APPROVAL_OPTIONS.find((option) => option.value === (composerOptions.approvalPolicy ?? "on-request"))?.label ?? "AI decides";
   const webSearchLabel = WEB_SEARCH_OPTIONS.find((option) => option.value === (composerOptions.webSearchMode ?? "cached"))?.label ?? "Cached";
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
   const composerTooltipText = (label: string, detail: string, shortcut?: string) =>
@@ -7889,7 +7892,7 @@ const stopActiveRun = async () => {
                             onClick={() => openComposerDropdown("sandbox", composerSandboxTriggerRef.current)}
                             disabled={!activeThreadId}
                           >
-                            <span>{sandboxLabel.toLowerCase()}</span>
+                            <span>{sandboxLabel}</span>
                             <FaChevronDown className="text-[10px] text-slate-500" />
                           </button>
                         </span>
@@ -7903,7 +7906,7 @@ const stopActiveRun = async () => {
                             onClick={() => openComposerDropdown("approval", composerApprovalTriggerRef.current)}
                             disabled={!activeThreadId}
                           >
-                            <span>{approvalLabel.toLowerCase()}</span>
+                            <span>{approvalLabel}</span>
                             <FaChevronDown className="text-[10px] text-slate-500" />
                           </button>
                         </span>
@@ -7936,14 +7939,14 @@ const stopActiveRun = async () => {
                             }))
                           }
                           disabled={!activeThreadId}
-                        >
-                          <FaNetworkWired className="composer-option-icon" />
-                          network
+                          >
+                            <FaNetworkWired className="composer-option-icon" />
+                          Network
                         </button>
                         <button
                           className="composer-toggle-btn composer-tooltip-target"
-                          data-composer-tooltip={composerTooltipText("Compact Context", "Summarize older thread history to reduce context size.")}
-                          aria-label="Compact thread context"
+                          data-composer-tooltip={composerTooltipText("Summarize Context", "Summarize older thread history to reduce context size.")}
+                          aria-label="Summarize thread context"
                           onClick={() => {
                             if (!activeThreadId) {
                               return;
@@ -7955,7 +7958,7 @@ const stopActiveRun = async () => {
                           disabled={!activeThreadId}
                         >
                           <FaSyncAlt className="composer-option-icon" />
-                          compact
+                          Summarize
                         </button>
                         <div className="branch-inline" ref={branchTriggerRef}>
                           <button

@@ -15,8 +15,10 @@ import type {
   SkillRecord
 } from "@code-app/shared";
 import {
+  acknowledgeDangerFullAccessWarning,
   APPROVAL_OPTIONS,
   COLLABORATION_OPTIONS,
+  hasDangerFullAccessWarningAcknowledged,
   MODEL_SUGGESTIONS,
   PROJECT_SWITCH_BEHAVIOR_OPTIONS,
   SUBTHREAD_POLICY_OPTIONS,
@@ -67,6 +69,7 @@ type ToggleButtonProps = {
 type SelectOption = {
   value: string;
   label: string;
+  triggerLabel?: string;
 };
 
 type CustomSelectProps = {
@@ -115,7 +118,7 @@ const CustomSelect = ({ value, options, onChange, className = "" }: CustomSelect
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >
-        <span className="truncate">{selected?.label ?? "Select"}</span>
+        <span className="truncate">{selected?.triggerLabel ?? selected?.label ?? "Select"}</span>
         <FaChevronDown className={`settings-select-icon ${isOpen ? "is-open" : ""}`} />
       </button>
       {isOpen && (
@@ -226,6 +229,7 @@ export const SettingsModal = memo(({
   const [settings, setSettings] = useState<AppSettings>(initialDraft.settings);
   const [composerOptions, setComposerOptions] = useState<CodexThreadOptions>(initialDraft.composerOptions);
   const [settingsEnvText, setSettingsEnvText] = useState(initialDraft.settingsEnvText);
+  const [pendingDangerSandboxMode, setPendingDangerSandboxMode] = useState<CodexSandboxMode | null>(null);
 
   useEffect(() => {
     setSettingsTab(initialDraft.settingsTab);
@@ -508,13 +512,21 @@ export const SettingsModal = memo(({
                   <div className="text-sm text-muted">Sandbox mode</div>
                   <CustomSelect
                     value={composerOptions.sandboxMode ?? "workspace-write"}
-                    options={SANDBOX_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                    onChange={(value) =>
+                    options={SANDBOX_OPTIONS.map((option) => ({
+                      value: option.value,
+                      label: option.dropdownLabel ?? option.label,
+                      triggerLabel: option.label
+                    }))}
+                    onChange={(value) => {
+                      if (value === "danger-full-access" && !hasDangerFullAccessWarningAcknowledged()) {
+                        setPendingDangerSandboxMode("danger-full-access");
+                        return;
+                      }
                       setComposerOptions((prev) => ({
                         ...prev,
                         sandboxMode: value as CodexSandboxMode
-                      }))
-                    }
+                      }));
+                    }}
                   />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
@@ -522,7 +534,11 @@ export const SettingsModal = memo(({
                   <div className="text-sm text-muted">Approval policy</div>
                   <CustomSelect
                     value={composerOptions.approvalPolicy ?? "on-request"}
-                    options={APPROVAL_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    options={APPROVAL_OPTIONS.map((option) => ({
+                      value: option.value,
+                      label: option.dropdownLabel ?? option.label,
+                      triggerLabel: option.label
+                    }))}
                     onChange={(value) =>
                       setComposerOptions((prev) => ({
                         ...prev,
@@ -759,6 +775,35 @@ export const SettingsModal = memo(({
           {settingsSaving ? "Saving..." : "Save"}
         </button>
       </div>
+      {pendingDangerSandboxMode && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-surface p-4 shadow-neon">
+            <h3 className="text-base font-semibold text-slate-100">Allow Full Access to Computer?</h3>
+            <p className="mt-2 text-sm text-slate-300">
+              This setting lets the agent run commands with very broad access on your machine. Continue only if you trust this
+              project and prompt.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => setPendingDangerSandboxMode(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  acknowledgeDangerFullAccessWarning();
+                  setComposerOptions((prev) => ({
+                    ...prev,
+                    sandboxMode: pendingDangerSandboxMode
+                  }));
+                  setPendingDangerSandboxMode(null);
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   </div>
   );

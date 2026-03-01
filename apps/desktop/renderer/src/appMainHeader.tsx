@@ -244,7 +244,6 @@ const MainHeaderComponent = ({
         {workspaces.map((workspace) => {
           const isActive = workspace.id === activeWorkspaceId;
           const workspaceLabel = workspace.name.trim() || "Workspace";
-          const workspaceTotal = workspace.runningCount + workspace.reviewCount + workspace.finishedCount;
           const hasAnyStatus = workspace.runningCount > 0 || workspace.reviewCount > 0 || workspace.finishedCount > 0;
           return (
             <button
@@ -270,9 +269,6 @@ const MainHeaderComponent = ({
                     <span className="workspace-segment-count count-finished">{workspace.finishedCount}</span>
                   ) : null}
                 </span>
-              ) : null}
-              {workspaceTotal > 0 ? (
-                <span className="workspace-segment-summary">{workspaceTotal}</span>
               ) : null}
               <span
                 className="workspace-segment-settings"
