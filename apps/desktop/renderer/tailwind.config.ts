@@ -5,12 +5,12 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        bg: "#0a0a0a",
-        surface: "#121212",
-        panel: "#161616",
-        accent: "#f5f5f5",
-        muted: "#9ca3af",
-        border: "#2a2a2a"
+        bg: "rgb(var(--theme-bg) / <alpha-value>)",
+        surface: "rgb(var(--theme-surface) / <alpha-value>)",
+        panel: "rgb(var(--theme-panel) / <alpha-value>)",
+        accent: "rgb(var(--theme-accent) / <alpha-value>)",
+        muted: "rgb(var(--theme-muted) / <alpha-value>)",
+        border: "rgb(var(--theme-border) / <alpha-value>)"
       },
       fontFamily: {
         sans: ["'Space Grotesk'", "'Avenir Next'", "Segoe UI", "sans-serif"],

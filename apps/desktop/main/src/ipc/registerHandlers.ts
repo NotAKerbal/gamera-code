@@ -2,9 +2,10 @@ import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "e
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   IPC_CHANNELS,
+  type AppSettings,
   type CodexThreadOptions,
   type PermissionMode,
   type ProjectTerminalEvent,
@@ -52,6 +53,7 @@ export interface HandlerDeps {
 export const registerIpcHandlers = (deps: HandlerDeps) => {
   const FILE_INDEX_DEFAULT_LIMIT = 3000;
   const FILE_INDEX_MAX_LIMIT = 8000;
+  const SKILL_DOC_MAX_BYTES = 256 * 1024;
   const FILE_INDEX_IGNORED_DIRS = new Set([
     ".git",
     "node_modules",
@@ -83,6 +85,50 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   const orchestrationRetryChildChannel =
     (IPC_CHANNELS as Record<string, string>).orchestrationRetryChild ?? "orchestration:retryChild";
   const normalizePath = (path: string) => resolve(path);
+  const isPathInside = (rootPath: string, candidatePath: string) => {
+    const relativePath = relative(rootPath, candidatePath);
+    if (!relativePath) {
+      return true;
+    }
+    return !relativePath.startsWith("..") && relativePath !== ".." && !isAbsolute(relativePath);
+  };
+  const resolveSkillDocumentPath = (inputPath: string) => {
+    const trimmed = inputPath.trim();
+    if (!trimmed) {
+      throw new Error("Skill document path is required.");
+    }
+
+    const normalizedPath = normalizePath(trimmed);
+    const lowerPath = normalizedPath.toLowerCase();
+    if (!lowerPath.endsWith(".md")) {
+      throw new Error("Only markdown skill documents are supported.");
+    }
+
+    const skillRoots = new Set<string>();
+    const codexHome = process.env["CODEX_HOME"]?.trim();
+    if (codexHome) {
+      skillRoots.add(normalizePath(join(codexHome, "skills")));
+    }
+
+    const userHome = process.env["USERPROFILE"]?.trim() || process.env["HOME"]?.trim();
+    if (userHome) {
+      skillRoots.add(normalizePath(join(userHome, ".codex", "skills")));
+    }
+
+    deps.repository
+      .listProjects()
+      .map((project) => normalizePath(project.path))
+      .forEach((projectPath) => {
+        skillRoots.add(projectPath);
+      });
+
+    const allowed = Array.from(skillRoots).some((root) => isPathInside(root, normalizedPath));
+    if (!allowed) {
+      throw new Error("Skill document path is outside allowed roots.");
+    }
+
+    return normalizedPath;
+  };
   const findProjectByPath = (path: string) => {
     const normalized = normalizePath(path);
     return deps.repository.listProjects().find((project) => normalizePath(project.path) === normalized) ?? null;
@@ -377,6 +423,13 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     BrowserWindow.getAllWindows().forEach((window) => {
       if (!window.isDestroyed()) {
         window.webContents.send(IPC_CHANNELS.installerInstallLog, line);
+      }
+    });
+  };
+  const pushSettingsChanged = (settings: AppSettings) => {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.settingsChanged, settings);
       }
     });
   };
@@ -769,7 +822,8 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(IPC_CHANNELS.permissionsSetMode, async (_event, input: { mode: PermissionMode }) => {
     deps.permissionEngine.setMode(input.mode);
-    deps.repository.setSettings({ permissionMode: input.mode });
+    const settings = deps.repository.setSettings({ permissionMode: input.mode });
+    pushSettingsChanged(settings);
     return { ok: true };
   });
 
@@ -777,7 +831,12 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(IPC_CHANNELS.settingsGet, async () => deps.repository.getSettings());
 
-  ipcMain.handle(IPC_CHANNELS.settingsSet, async (_event, input) => deps.repository.setSettings(input));
+  ipcMain.handle(IPC_CHANNELS.settingsSet, async (_event, input) => {
+    const settings = deps.repository.setSettings(input);
+    deps.permissionEngine.setMode(settings.permissionMode);
+    pushSettingsChanged(settings);
+    return settings;
+  });
 
   const settingsOpenWindowChannel =
     (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
@@ -911,14 +970,26 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   const skillsReadDocumentChannel =
     (IPC_CHANNELS as Record<string, string>).skillsReadDocument ?? "skills:readDocument";
   ipcMain.handle(skillsReadDocumentChannel, async (_event, input: { path: string }) => {
-    const content = await readFile(input.path, "utf8");
+    const filePath = resolveSkillDocumentPath(input.path);
+    const metadata = await stat(filePath);
+    if (!metadata.isFile()) {
+      throw new Error("Skill document path is not a file.");
+    }
+    if (metadata.size > SKILL_DOC_MAX_BYTES) {
+      throw new Error("Skill document is too large.");
+    }
+    const content = await readFile(filePath, "utf8");
     return { content };
   });
 
   const skillsWriteDocumentChannel =
     (IPC_CHANNELS as Record<string, string>).skillsWriteDocument ?? "skills:writeDocument";
   ipcMain.handle(skillsWriteDocumentChannel, async (_event, input: { path: string; content: string }) => {
-    await writeFile(input.path, input.content, "utf8");
+    const filePath = resolveSkillDocumentPath(input.path);
+    if (Buffer.byteLength(input.content, "utf8") > SKILL_DOC_MAX_BYTES) {
+      throw new Error("Skill document is too large.");
+    }
+    await writeFile(filePath, input.content, "utf8");
     return { ok: true };
   });
 

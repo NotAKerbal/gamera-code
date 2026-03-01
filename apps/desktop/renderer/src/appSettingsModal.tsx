@@ -1,6 +1,7 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, SetStateAction } from "react";
 import { FaTimes } from "react-icons/fa";
 import type {
+  AppTheme,
   AppSettings,
   CodexApprovalMode,
   CodexCollaborationMode,
@@ -19,6 +20,7 @@ import {
   MODEL_SUGGESTIONS,
   PROJECT_SWITCH_BEHAVIOR_OPTIONS,
   SUBTHREAD_POLICY_OPTIONS,
+  THEME_OPTIONS,
   REASONING_OPTIONS,
   SANDBOX_OPTIONS,
   WEB_SEARCH_OPTIONS,
@@ -77,6 +79,31 @@ const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLa
   </button>
 );
 
+const THEME_PREVIEW_STYLES: Record<AppTheme, CSSProperties> = {
+  midnight: {
+    ["--preview-shell-start" as string]: "#1b1b1b",
+    ["--preview-shell-end" as string]: "#0a0a0a",
+    ["--preview-sidebar-start" as string]: "#151515",
+    ["--preview-sidebar-end" as string]: "#121212",
+    ["--preview-border" as string]: "rgba(82, 82, 91, 0.9)",
+    ["--preview-thread" as string]: "rgba(39, 39, 42, 0.85)",
+    ["--preview-thread-active" as string]: "rgba(63, 63, 70, 0.95)",
+    ["--preview-text" as string]: "rgba(241, 245, 249, 0.95)",
+    ["--preview-muted" as string]: "rgba(148, 163, 184, 0.8)"
+  },
+  graphite: {
+    ["--preview-shell-start" as string]: "#1d2433",
+    ["--preview-shell-end" as string]: "#0b1220",
+    ["--preview-sidebar-start" as string]: "#172030",
+    ["--preview-sidebar-end" as string]: "#111827",
+    ["--preview-border" as string]: "rgba(100, 116, 139, 0.95)",
+    ["--preview-thread" as string]: "rgba(30, 41, 59, 0.88)",
+    ["--preview-thread-active" as string]: "rgba(51, 65, 85, 0.98)",
+    ["--preview-text" as string]: "rgba(241, 245, 249, 0.96)",
+    ["--preview-muted" as string]: "rgba(148, 163, 184, 0.88)"
+  }
+};
+
 export const SettingsModal = ({
   isSettingsWindow,
   isMacOS,
@@ -107,8 +134,8 @@ export const SettingsModal = ({
   onPickDefaultProjectDirectory,
   appendLog
 }: SettingsModalProps) => (
-  <div className={isSettingsWindow ? "fixed inset-0 z-40 bg-[#0f0f10]" : "fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"}>
-    <div className={isSettingsWindow ? "flex h-full w-full flex-col bg-[#0f0f10]" : "flex w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon"}>
+  <div className={isSettingsWindow ? "fixed inset-0 z-40 theme-settings-surface" : "fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"}>
+    <div className={isSettingsWindow ? "flex h-full w-full flex-col theme-settings-surface" : "flex w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon"}>
       {isSettingsWindow ? (
         <header
           className={`drag-region window-header flex h-12 shrink-0 items-center justify-between border-b border-border/90 px-3 ${
@@ -222,6 +249,62 @@ export const SettingsModal = ({
 
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
                 <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Theme</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">App theme</div>
+                  <select
+                    className="input"
+                    value={settings.theme ?? "midnight"}
+                    onChange={(event) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        theme: event.target.value as AppTheme
+                      }))
+                    }
+                  >
+                    {THEME_OPTIONS.map((theme) => (
+                      <option key={theme.value} value={theme.value}>
+                        {theme.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mx-2 px-2 pb-3">
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    {THEME_OPTIONS.map((theme) => {
+                      const isActive = (settings.theme ?? "midnight") === theme.value;
+                      return (
+                        <button
+                          key={theme.value}
+                          type="button"
+                          className={`theme-preview-option ${isActive ? "is-selected" : ""}`}
+                          onClick={() =>
+                            setSettings((prev) => ({
+                              ...prev,
+                              theme: theme.value
+                            }))
+                          }
+                        >
+                          <div className="theme-preview-canvas" style={THEME_PREVIEW_STYLES[theme.value]}>
+                            <div className="theme-preview-sidebar">
+                              <div className="theme-preview-sidebar-title" />
+                              <div className="theme-preview-thread is-active" />
+                              <div className="theme-preview-thread" />
+                            </div>
+                            <div className="theme-preview-main">
+                              <div className="theme-preview-message" />
+                              <div className="theme-preview-message short" />
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-center justify-between text-xs">
+                            <span className="font-medium">{theme.label}</span>
+                            <span className="text-muted">{isActive ? "Selected" : "Preview"}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Use turtle spinners</div>
                   <ToggleButton

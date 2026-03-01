@@ -57,6 +57,7 @@ export const IPC_CHANNELS = {
   permissionsGetMode: "permissions:getMode",
   settingsGet: "settings:get",
   settingsSet: "settings:set",
+  settingsChanged: "settings:changed",
   settingsOpenWindow: "settings:openWindow",
   updatesCheck: "updates:check",
   updatesApply: "updates:apply",

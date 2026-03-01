@@ -148,6 +148,7 @@ export interface DesktopApi {
   settings: {
     get: () => Promise<AppSettings>;
     set: (input: Partial<AppSettings>) => Promise<AppSettings>;
+    onChanged: (listener: (settings: AppSettings) => void) => () => void;
     openWindow: () => Promise<{ ok: boolean }>;
   };
   updates: {

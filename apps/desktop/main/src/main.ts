@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { app, BrowserWindow, nativeImage } from "electron";
+import { app, BrowserWindow, nativeImage, shell } from "electron";
 import log from "electron-log";
 import { IPC_CHANNELS, type ProjectTerminalEvent, type SessionEvent } from "@code-app/shared";
 import { initializeDatabase } from "./services/database";
@@ -84,6 +84,24 @@ const isAllowedWebLinkUrl = (value: string): boolean => {
   try {
     const url = new URL(value);
     return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+const isAllowedRendererNavigationUrl = (value: string): boolean => {
+  if (value.startsWith("file://")) {
+    return true;
+  }
+
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (!devServerUrl) {
+    return false;
+  }
+
+  try {
+    const allowedOrigin = new URL(devServerUrl).origin;
+    return new URL(value).origin === allowedOrigin;
   } catch {
     return false;
   }
@@ -228,11 +246,21 @@ const createWindow = () => {
   mainWindow.webContents.once("did-finish-load", revealMainWindow);
   mainWindow.webContents.once("did-fail-load", revealMainWindow);
 
-  mainWindow.webContents.setWindowOpenHandler(({ frameName }) => {
+  mainWindow.webContents.on("will-navigate", (event, nextUrl) => {
+    if (isAllowedRendererNavigationUrl(nextUrl)) {
+      return;
+    }
+    event.preventDefault();
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ frameName, url }) => {
     const isCustomCodeWindow =
       frameName.startsWith("codeapp-terminal-") || frameName === "codeapp-plan-viewer";
     if (!isCustomCodeWindow) {
-      return { action: "allow" };
+      if (isAllowedWebLinkUrl(url)) {
+        void shell.openExternal(url);
+      }
+      return { action: "deny" };
     }
     return {
       action: "allow",

@@ -1,6 +1,7 @@
 export type Provider = "codex" | "gemini";
 
 export type PermissionMode = "prompt_on_risk" | "always_ask" | "auto_allow";
+export type AppTheme = "midnight" | "graphite";
 
 export type ThreadStatus = "created" | "running" | "stopped" | "exited" | "error";
 
@@ -226,6 +227,7 @@ export interface ThreadMetadataSuggestion {
 
 export interface AppSettings {
   permissionMode: PermissionMode;
+  theme?: AppTheme;
   binaryOverrides: Partial<Record<Provider, string>>;
   envVars: Record<string, string>;
   codexDefaults: CodexThreadOptions;

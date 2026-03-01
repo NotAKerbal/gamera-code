@@ -154,6 +154,12 @@ const api: DesktopApiWithGitExtras = {
   settings: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),
     set: (input) => ipcRenderer.invoke(IPC_CHANNELS.settingsSet, input),
+    onChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, settings: Awaited<ReturnType<DesktopApi["settings"]["get"]>>) =>
+        listener(settings);
+      ipcRenderer.on(IPC_CHANNELS.settingsChanged, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.settingsChanged, wrapped);
+    },
     openWindow: () => ipcRenderer.invoke(settingsOpenWindowChannel)
   },
   updates: {

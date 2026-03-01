@@ -33,6 +33,7 @@ const DEFAULT_DEV_COMMAND: ProjectDevCommand = {
 
 const DEFAULT_SETTINGS: AppSettings = {
   permissionMode: "prompt_on_risk",
+  theme: "midnight",
   binaryOverrides: {},
   envVars: {},
   defaultProjectDirectory: "",

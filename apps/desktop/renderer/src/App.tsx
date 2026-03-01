@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -601,6 +602,9 @@ export const App = () => {
   const sandboxLabel = SANDBOX_OPTIONS.find((option) => option.value === (composerOptions.sandboxMode ?? "workspace-write"))?.label ?? "Workspace write";
   const approvalLabel = APPROVAL_OPTIONS.find((option) => option.value === (composerOptions.approvalPolicy ?? "on-request"))?.label ?? "On request";
   const webSearchLabel = WEB_SEARCH_OPTIONS.find((option) => option.value === (composerOptions.webSearchMode ?? "cached"))?.label ?? "Cached";
+  const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
+  const composerTooltipText = (label: string, detail: string, shortcut?: string) =>
+    [label, detail, shortcut ? `Shortcut: ${shortcut}` : null].filter(Boolean).join("\n");
   const importQuery = importProjectQuery.trim();
   const shouldShowCloneAction = isLikelyGitRepositoryUrl(importQuery);
   const importCandidatesFiltered = useMemo(() => {
@@ -774,11 +778,15 @@ export const App = () => {
 
   const loadSettings = async () => {
     const current = await api.settings.get();
-    setSettings(current);
-    setSettingsEnvText(envVarsToText(current.envVars));
-    setComposerOptions(current.codexDefaults);
+    applySettings(current);
     setSettingsSaveNotice("");
     await loadAppSkills();
+  };
+
+  const applySettings = (next: AppSettings) => {
+    setSettings(next);
+    setSettingsEnvText(envVarsToText(next.envVars));
+    setComposerOptions(next.codexDefaults);
   };
 
   const loadOrchestrationRuns = async (parentThreadId: string) => {
@@ -1000,6 +1008,10 @@ export const App = () => {
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
   }, [activeThreadId]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", settings.theme ?? "midnight");
+  }, [settings.theme]);
 
   useEffect(() => {
     if (!activeThreadId) {
@@ -1351,6 +1363,17 @@ export const App = () => {
     initialize().catch((error) => {
       setLogs((prev) => [...prev, `Init failed: ${String(error)}`]);
     });
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = api.settings.onChanged((next) => {
+      applySettings(next);
+      void loadSystemTerminals();
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -3483,8 +3506,8 @@ export const App = () => {
     setThreadDraftTitle("New thread");
   };
 
-  useEffect(() => {
-    const openThreadCreationMenu = (projectId = activeProjectId) => {
+  const openThreadCreationMenu = useCallback(
+    (projectId = activeProjectId) => {
       if (!projectId) {
         setLogs((prev) => [...prev, "Create or select a project first."]);
         return;
@@ -3496,24 +3519,44 @@ export const App = () => {
         threadCreateInputRef.current?.focus();
         threadCreateInputRef.current?.select();
       });
-    };
+    },
+    [activeProjectId]
+  );
 
-    const openTerminalMenu = () => {
-      if (!activeProjectId) {
-        setLogs((prev) => [...prev, "Create or select a project first."]);
+  const openTerminalMenu = useCallback(() => {
+    if (!activeProjectId) {
+      setLogs((prev) => [...prev, "Create or select a project first."]);
+      return;
+    }
+    setIsTerminalMenuOpen(true);
+    window.requestAnimationFrame(() => {
+      const firstFocusable = terminalMenuContentRef.current?.querySelector<HTMLElement>("button:not([disabled]), [tabindex=\"0\"]");
+      if (firstFocusable) {
+        firstFocusable.focus();
         return;
       }
-      setIsTerminalMenuOpen(true);
-      window.requestAnimationFrame(() => {
-        const firstFocusable = terminalMenuContentRef.current?.querySelector<HTMLElement>("button:not([disabled]), [tabindex=\"0\"]");
-        if (firstFocusable) {
-          firstFocusable.focus();
-          return;
-        }
-        terminalMenuTriggerRef.current?.focus();
-      });
-    };
+      terminalMenuTriggerRef.current?.focus();
+    });
+  }, [activeProjectId]);
 
+  const runShortcutByKey = useCallback(
+    (key: string) => {
+      if (key === "n") {
+        openThreadCreationMenu();
+        return;
+      }
+      if (key === "t") {
+        openTerminalMenu();
+        return;
+      }
+      openAppSettingsWindow().catch((error) => {
+        setLogs((prev) => [...prev, `Open settings window failed: ${String(error)}`]);
+      });
+    },
+    [openTerminalMenu, openThreadCreationMenu]
+  );
+
+  useEffect(() => {
     const onGlobalShortcut = (event: KeyboardEvent) => {
       const usesPlatformModifier = isMacOS ? event.metaKey : event.ctrlKey;
       if (!usesPlatformModifier || event.shiftKey || event.altKey || event.isComposing || event.repeat) {
@@ -3528,24 +3571,14 @@ export const App = () => {
       }
 
       event.preventDefault();
-      if (key === "n") {
-        openThreadCreationMenu();
-        return;
-      }
-      if (key === "t") {
-        openTerminalMenu();
-        return;
-      }
-      openAppSettingsWindow().catch((error) => {
-        setLogs((prev) => [...prev, `Open settings window failed: ${String(error)}`]);
-      });
+      runShortcutByKey(key);
     };
 
     window.addEventListener("keydown", onGlobalShortcut);
     return () => {
       window.removeEventListener("keydown", onGlobalShortcut);
     };
-  }, [activeProjectId]);
+  }, [runShortcutByKey]);
 
   useEffect(() => {
     if (!isWindows) {
@@ -5010,6 +5043,42 @@ const stopActiveRun = async () => {
   };
 
   const onComposerKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+    const usesPlatformModifier = isMacOS ? event.metaKey : event.ctrlKey;
+    if (
+      usesPlatformModifier &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.nativeEvent.isComposing &&
+      !event.repeat
+    ) {
+      const key = event.key.toLowerCase();
+      if (key === "n" || key === "t" || key === "i") {
+        event.preventDefault();
+        runShortcutByKey(key);
+        return;
+      }
+    }
+
+    if (
+      usesPlatformModifier &&
+      event.shiftKey &&
+      !event.altKey &&
+      !event.nativeEvent.isComposing &&
+      event.key.toLowerCase() === "p"
+    ) {
+      event.preventDefault();
+      setComposerOptions((prev) =>
+        prev.collaborationMode === "plan"
+          ? prev
+          : {
+              ...prev,
+              collaborationMode: "plan"
+            }
+      );
+      setComposerDropdown(null);
+      return;
+    }
+
     if (event.key === "Tab" && skillMention && skillMentionMatches.length > 0) {
       event.preventDefault();
       const target = skillMentionMatches[skillMentionHighlightIndex] ?? skillMentionMatches[0];
@@ -5264,6 +5333,7 @@ const stopActiveRun = async () => {
 
       const saved = await api.settings.set({
         permissionMode: mode,
+        theme: settings.theme ?? "midnight",
         envVars,
         defaultProjectDirectory: settings.defaultProjectDirectory?.trim() ?? "",
         autoRenameThreadTitles: settings.autoRenameThreadTitles ?? true,
@@ -5758,9 +5828,9 @@ const stopActiveRun = async () => {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-bg text-white">
-      <div className={isSettingsWindow ? "h-full w-full bg-[#0f0f10]" : `h-full w-full bg-[radial-gradient(circle_at_top_left,#1b1b1b_0%,#111111_40%,#0a0a0a_100%)] ${isWindows ? "" : "pl-2"}`}>
-        <div className={isSettingsWindow ? "flex h-full flex-col overflow-hidden bg-[#0f0f10]" : "flex h-full flex-col overflow-hidden rounded-2xl bg-black/40 shadow-neon backdrop-blur-xl"}>
+    <div className="h-screen overflow-hidden bg-bg text-white theme-text">
+      <div className={isSettingsWindow ? "h-full w-full theme-app-shell" : `h-full w-full theme-app-shell ${isWindows ? "" : "pl-2"}`}>
+        <div className={isSettingsWindow ? "flex h-full flex-col overflow-hidden theme-settings-surface" : "flex h-full flex-col overflow-hidden rounded-2xl bg-black/40 shadow-neon backdrop-blur-xl"}>
           {!isSettingsWindow && (
             <MainHeader
               isMacOS={isMacOS}
@@ -5835,14 +5905,14 @@ const stopActiveRun = async () => {
                   }`
             }
           >
-            <aside className="relative flex h-full min-h-0 flex-col border-r border-border/90 bg-[linear-gradient(180deg,#151515_0%,#121212_100%)] px-3 py-3">
+            <aside className="main-layout-sidebar relative flex h-full min-h-0 flex-col border-r border-border/90 px-3 py-3">
 	              <div className="projects-header">
 	                <h2 className="projects-title">Projects</h2>
 	                <div className="relative">
 	                  <button
-	                    className="btn-ghost h-7 w-7 p-0 text-sm"
+	                    className="btn-ghost app-tooltip-target h-7 w-7 p-0 text-sm"
+	                    data-app-tooltip={composerTooltipText("Add Project", "Open project creation and import actions.")}
 	                    onClick={() => setIsProjectMenuOpen((prev) => !prev)}
-	                    title="Add project"
 	                    aria-label="Add project"
 	                  >
 	                    <FaPlus className="mx-auto text-[12px]" />
@@ -5938,13 +6008,18 @@ const stopActiveRun = async () => {
                           <FaCog className="text-[12px]" />
                         </button>
                         <button
-                          className="project-action-btn"
+                          className="project-action-btn app-tooltip-target"
                           data-thread-menu-trigger={project.id}
+                          data-app-tooltip={composerTooltipText(
+                            "New Thread",
+                            "Create a new thread in this project.",
+                            `${platformShortcutModifier}+N`
+                          )}
                           onClick={() => {
                             setActiveProjectId(project.id);
                             setThreadMenuProjectId((prev) => (prev === project.id ? null : project.id));
                           }}
-                          title="New thread"
+                          aria-label="New thread"
                         >
                           <FaPlus className="text-[12px]" />
                         </button>
@@ -6329,7 +6404,7 @@ const stopActiveRun = async () => {
               </div>
             </aside>
 
-            <main className="flex h-full min-h-0 min-w-0 flex-col bg-[linear-gradient(180deg,rgba(14,14,14,.95)_0%,rgba(10,10,10,.98)_100%)]">
+            <main className="main-layout-content flex h-full min-h-0 min-w-0 flex-col">
               {hasUserPromptInThread && installStatus && setupBlocked && (
                 <section className="mx-4 mt-3 rounded-xl border border-border bg-panel/70 p-3">
                   <h3 className="mb-2 text-sm font-semibold tracking-wide text-slate-100">Setup Required</h3>
@@ -6897,8 +6972,9 @@ const stopActiveRun = async () => {
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="composer-toolbar">
                       <button
-                        className="composer-plus-btn"
-                        title="Attach images"
+                        className="composer-plus-btn composer-tooltip-target"
+                        data-composer-tooltip={composerTooltipText("Attach Images", "Add up to 4 images to this prompt.")}
+                        aria-label="Attach images"
                         disabled={!activeThreadId || activeThreadSendPending}
                         onClick={() => imagePickerRef.current?.click()}
                       >
@@ -6906,30 +6982,37 @@ const stopActiveRun = async () => {
                       </button>
                       <button
                         ref={composerModelTriggerRef}
-                        className="composer-dropdown-trigger"
+                        className="composer-dropdown-trigger composer-tooltip-target"
+                        data-composer-tooltip={composerTooltipText("Model", "Choose which model handles this request.")}
+                        aria-label="Choose model"
                         onClick={() => openComposerDropdown("model", composerModelTriggerRef.current)}
                         disabled={!activeThreadId || activeThreadSendPending}
-                        title="Model"
                       >
                         <span>{modelLabel.toLowerCase()}</span>
                         <FaChevronDown className="text-[10px] text-slate-500" />
                       </button>
                       <button
                         ref={composerEffortTriggerRef}
-                        className="composer-dropdown-trigger"
+                        className="composer-dropdown-trigger composer-tooltip-target"
+                        data-composer-tooltip={composerTooltipText("Reasoning Effort", "Set how deeply the model reasons.")}
+                        aria-label="Choose reasoning effort"
                         onClick={() => openComposerDropdown("effort", composerEffortTriggerRef.current)}
                         disabled={!activeThreadId || activeThreadSendPending}
-                        title="Reasoning effort"
                       >
                         <span>{effortLabel.toLowerCase()}</span>
                         <FaChevronDown className="text-[10px] text-slate-500" />
                       </button>
                       <button
                         ref={composerModeTriggerRef}
-                        className="composer-dropdown-trigger"
+                        className="composer-dropdown-trigger composer-tooltip-target"
+                        data-composer-tooltip={composerTooltipText(
+                          "Collaboration Mode",
+                          "Switch between coding and plan workflows.",
+                          `${platformShortcutModifier}+Shift+P sets Plan mode`
+                        )}
+                        aria-label="Choose collaboration mode"
                         onClick={() => openComposerDropdown("mode", composerModeTriggerRef.current)}
                         disabled={!activeThreadId || activeThreadSendPending}
-                        title="Collaboration mode"
                       >
                         <span>{modeLabel.toLowerCase()}</span>
                         <FaChevronDown className="text-[10px] text-slate-500" />
@@ -6942,14 +7025,18 @@ const stopActiveRun = async () => {
                       hasComposerPayload ? (
                         <div className="inline-flex items-center gap-1">
                           <button
-                            className="btn-primary"
+                            className="btn-primary composer-tooltip-target"
+                            data-composer-tooltip={composerTooltipText(
+                              "Steer Active Run",
+                              "Inject this prompt into the currently running turn."
+                            )}
+                            aria-label="Steer active run"
                             onClick={() => {
                               steerPrompt().catch((error) => {
                                 setLogs((prev) => [...prev, `Steer failed: ${String(error)}`]);
                               });
                             }}
                             disabled={!activeThreadId}
-                            title="Steer active turn"
                           >
                             <span className="inline-flex items-center gap-1.5">
                               <FaPaperPlane className="text-[11px]" />
@@ -6957,28 +7044,34 @@ const stopActiveRun = async () => {
                             </span>
                           </button>
                           <button
-                            className="btn-secondary"
+                            className="btn-secondary composer-tooltip-target"
+                            data-composer-tooltip={composerTooltipText(
+                              "Queue Prompt",
+                              "Add this prompt to the queue while the agent is running.",
+                              "Enter queues while running"
+                            )}
+                            aria-label="Queue prompt"
                             onClick={() => {
                               sendPrompt().catch((error) => {
                                 setLogs((prev) => [...prev, `Queue failed: ${String(error)}`]);
                               });
                             }}
                             disabled={!activeThreadId || activeThreadSendPending}
-                            title="Queue prompt"
                           >
                             {activeThreadSendPending ? "Queueing..." : "Queue"}
                           </button>
                         </div>
                       ) : (
                         <button
-                          className="btn-danger"
+                          className="btn-danger composer-tooltip-target"
+                          data-composer-tooltip={composerTooltipText("Stop Run", "Stop the active run for this thread.")}
+                          aria-label="Stop current run"
                           onClick={() => {
                             stopActiveRun().catch((error) => {
                               setLogs((prev) => [...prev, `Stop failed: ${String(error)}`]);
                             });
                           }}
                           disabled={!activeThreadId}
-                          title="Stop current run"
                         >
                           <span className="inline-flex items-center gap-1.5">
                             <FaStop className="text-[11px]" />
@@ -6988,14 +7081,19 @@ const stopActiveRun = async () => {
                       )
                     ) : (
                       <button
-                        className="btn-primary"
+                        className="btn-primary composer-tooltip-target"
+                        data-composer-tooltip={composerTooltipText(
+                          "Send Prompt",
+                          "Submit this prompt to the selected thread.",
+                          "Enter"
+                        )}
+                        aria-label="Send prompt"
                         onClick={() => {
                           sendPrompt().catch((error) => {
                             setLogs((prev) => [...prev, `Send failed: ${String(error)}`]);
                           });
                         }}
                         disabled={!activeThreadId || !hasComposerPayload || activeThreadSendPending}
-                        title="Send prompt"
                       >
                         <span className="inline-flex items-center gap-1.5">
                           <FaPaperPlane className="text-[11px]" />
@@ -7031,7 +7129,13 @@ const stopActiveRun = async () => {
                                   </div>
                                   <div className="inline-flex items-center gap-1">
                                     <button
-                                      className="btn-secondary px-2 py-1 text-[11px]"
+                                      className="btn-secondary composer-tooltip-target px-2 py-1 text-[11px]"
+                                      data-composer-tooltip={
+                                        activeRunState === "running"
+                                          ? composerTooltipText("Steer Queued Prompt", "Inject this queued prompt into the active run.")
+                                          : composerTooltipText("Steer Queued Prompt", "Start a run first, then steer this queued prompt.")
+                                      }
+                                      aria-label="Steer queued prompt"
                                       onClick={() => {
                                         if (!activeThreadId) {
                                           return;
@@ -7041,11 +7145,6 @@ const stopActiveRun = async () => {
                                         });
                                       }}
                                       disabled={!activeThreadId || activeRunState !== "running"}
-                                      title={
-                                        activeRunState === "running"
-                                          ? "Steer this queued prompt into the active run"
-                                          : "Start a run to steer queued prompts"
-                                      }
                                     >
                                       <span className="inline-flex items-center gap-1">
                                         <FaPaperPlane className="text-[10px]" />
@@ -7053,7 +7152,9 @@ const stopActiveRun = async () => {
                                       </span>
                                     </button>
                                     <button
-                                      className="btn-danger px-2 py-1 text-[11px]"
+                                      className="btn-danger composer-tooltip-target px-2 py-1 text-[11px]"
+                                      data-composer-tooltip={composerTooltipText("Cancel Queued Prompt", "Remove this prompt from the queue.")}
+                                      aria-label="Cancel queued prompt"
                                       onClick={() => {
                                         if (!activeThreadId) {
                                           return;
@@ -7061,7 +7162,6 @@ const stopActiveRun = async () => {
                                         cancelQueuedPrompt(activeThreadId, prompt.id);
                                       }}
                                       disabled={!activeThreadId}
-                                      title="Remove from queue"
                                     >
                                       <span className="inline-flex items-center gap-1">
                                         <FaTimes className="text-[10px]" />
@@ -7082,10 +7182,11 @@ const stopActiveRun = async () => {
                           <FaTerminal className="composer-option-icon" />
                           <button
                             ref={composerSandboxTriggerRef}
-                            className="composer-dropdown-trigger"
+                            className="composer-dropdown-trigger composer-tooltip-target"
+                            data-composer-tooltip={composerTooltipText("Sandbox Mode", "Control filesystem and command isolation.")}
+                            aria-label="Choose sandbox mode"
                             onClick={() => openComposerDropdown("sandbox", composerSandboxTriggerRef.current)}
                             disabled={!activeThreadId}
-                            title="Command behavior (sandbox mode)"
                           >
                             <span>{sandboxLabel.toLowerCase()}</span>
                             <FaChevronDown className="text-[10px] text-slate-500" />
@@ -7095,10 +7196,11 @@ const stopActiveRun = async () => {
                           <FaUserShield className="composer-option-icon" />
                           <button
                             ref={composerApprovalTriggerRef}
-                            className="composer-dropdown-trigger"
+                            className="composer-dropdown-trigger composer-tooltip-target"
+                            data-composer-tooltip={composerTooltipText("Approval Policy", "Decide when actions need manual approval.")}
+                            aria-label="Choose approval policy"
                             onClick={() => openComposerDropdown("approval", composerApprovalTriggerRef.current)}
                             disabled={!activeThreadId}
-                            title="Permission policy"
                           >
                             <span>{approvalLabel.toLowerCase()}</span>
                             <FaChevronDown className="text-[10px] text-slate-500" />
@@ -7108,18 +7210,23 @@ const stopActiveRun = async () => {
                           <FaGlobeAmericas className="composer-option-icon" />
                           <button
                             ref={composerWebSearchTriggerRef}
-                            className="composer-dropdown-trigger"
+                            className="composer-dropdown-trigger composer-tooltip-target"
+                            data-composer-tooltip={composerTooltipText("Web Search Mode", "Choose how the agent can use web search.")}
+                            aria-label="Choose web search mode"
                             onClick={() => openComposerDropdown("websearch", composerWebSearchTriggerRef.current)}
                             disabled={!activeThreadId}
-                            title="Web search mode"
                           >
                             <span>{webSearchLabel.toLowerCase()}</span>
                             <FaChevronDown className="text-[10px] text-slate-500" />
                           </button>
                         </span>
                         <button
-                          className={`composer-toggle-btn ${(composerOptions.networkAccessEnabled ?? true) ? "enabled" : ""}`}
-                          title="Allow or block network access"
+                          className={`composer-toggle-btn composer-tooltip-target ${(composerOptions.networkAccessEnabled ?? true) ? "enabled" : ""}`}
+                          data-composer-tooltip={composerTooltipText(
+                            "Network Access",
+                            "Toggle whether commands may access the network."
+                          )}
+                          aria-label="Toggle network access"
                           aria-pressed={composerOptions.networkAccessEnabled ?? true}
                           onClick={() =>
                             setComposerOptions((prev) => ({
@@ -7133,8 +7240,9 @@ const stopActiveRun = async () => {
                           network
                         </button>
                         <button
-                          className="composer-toggle-btn"
-                          title="Compact thread context"
+                          className="composer-toggle-btn composer-tooltip-target"
+                          data-composer-tooltip={composerTooltipText("Compact Context", "Summarize older thread history to reduce context size.")}
+                          aria-label="Compact thread context"
                           onClick={() => {
                             if (!activeThreadId) {
                               return;
@@ -7150,7 +7258,9 @@ const stopActiveRun = async () => {
                         </button>
                         <div className="branch-inline" ref={branchTriggerRef}>
                           <button
-                            className="branch-trigger"
+                            className="branch-trigger composer-tooltip-target"
+                            data-composer-tooltip={composerTooltipText("Switch Branch", "Open the git branch picker for this project.")}
+                            aria-label="Switch git branch"
                             onClick={() => {
                               if (!activeProjectId || !activeGitState?.insideRepo || gitBusyAction) {
                                 return;
@@ -7159,7 +7269,6 @@ const stopActiveRun = async () => {
                               setGitBranchSearch("");
                             }}
                             disabled={!activeProjectId || !activeGitState?.insideRepo || Boolean(gitBusyAction)}
-                            title="Switch branches"
                           >
                             <span className="inline-flex items-center gap-1 truncate">
                               <FaCodeBranch className="shrink-0 text-[10px] text-slate-500" />

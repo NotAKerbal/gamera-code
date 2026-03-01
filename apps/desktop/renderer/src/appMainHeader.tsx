@@ -142,6 +142,9 @@ export const MainHeader = ({
 }: MainHeaderProps) => {
   const [showTerminalAlternatives, setShowTerminalAlternatives] = useState(false);
   const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
+  const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
+  const tooltipText = (label: string, detail: string, shortcut?: string) =>
+    [label, detail, shortcut ? `Shortcut: ${shortcut}` : null].filter(Boolean).join("\n");
   const availableSystemTerminals = useMemo(
     () => systemTerminals.filter((terminal) => terminal.available),
     [systemTerminals]
@@ -177,9 +180,10 @@ export const MainHeader = ({
       <span>GameraCode</span>
       <div className="relative no-drag" ref={changelogRef}>
         <button
-          className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 transition hover:bg-zinc-700/90 hover:text-slate-200"
+          className="app-tooltip-target rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 transition hover:bg-zinc-700/90 hover:text-slate-200"
+          data-app-tooltip={tooltipText("What's New", `Open release notes for ${appVersionLabel}.`)}
+          aria-label={`What's new in ${appVersionLabel}`}
           onClick={() => setIsChangelogOpen((prev) => !prev)}
-          title={`What's new in ${appVersionLabel}`}
         >
           {appVersionLabel}
         </button>
@@ -200,8 +204,9 @@ export const MainHeader = ({
       {activeProjectWebLinks.map((link) => (
         <button
           key={link.id}
-          className="btn-ghost"
-          title={`${link.name || link.url} (${link.url})`}
+          className="btn-ghost app-tooltip-target"
+          data-app-tooltip={tooltipText(link.name || "Open Link", `Open: ${link.url}`)}
+          aria-label={link.name || link.url}
           onClick={() =>
             onOpenProjectWebLink(link).catch((error) => appendLog(`Open web link failed: ${String(error)}`))
           }
@@ -212,14 +217,20 @@ export const MainHeader = ({
           </span>
         </button>
       ))}
-      <button className="btn-ghost" onClick={onCheckUpdates} title="Check for updates">
+      <button
+        className="btn-ghost app-tooltip-target"
+        data-app-tooltip={tooltipText("Check for Updates", "Check for the latest app version.")}
+        aria-label="Check for updates"
+        onClick={onCheckUpdates}
+      >
         <span className="inline-flex items-center gap-1"><FaSyncAlt className="text-[10px]" />Updates</span>
       </button>
       <div className="relative" ref={terminalMenuRef}>
         <button
           ref={terminalMenuTriggerRef}
-          className="btn-ghost inline-flex items-center gap-1"
-          title="Select project terminal"
+          className="btn-ghost app-tooltip-target inline-flex items-center gap-1"
+          data-app-tooltip={tooltipText("Terminal Menu", "Open, switch, and manage project terminals.", `${platformShortcutModifier}+T`)}
+          aria-label="Open terminal menu"
           onClick={() => setIsTerminalMenuOpen((prev) => !prev)}
           disabled={!activeProjectId}
         >
@@ -257,8 +268,13 @@ export const MainHeader = ({
               {alternativeSystemTerminals.length > 0 ? (
                 <button
                   type="button"
-                  className="btn-ghost h-6 px-1.5 py-0 text-[10px]"
-                  title={showTerminalAlternatives ? "Hide terminal options" : "Show terminal options"}
+                  className="btn-ghost app-tooltip-target h-6 px-1.5 py-0 text-[10px]"
+                  data-app-tooltip={
+                    showTerminalAlternatives
+                      ? tooltipText("Terminal Options", "Hide alternative terminal launchers.")
+                      : tooltipText("Terminal Options", "Show alternative terminal launchers.")
+                  }
+                  aria-label={showTerminalAlternatives ? "Hide terminal options" : "Show terminal options"}
                   onClick={() => {
                     setShowTerminalAlternatives((prev) => !prev);
                   }}
@@ -310,7 +326,8 @@ export const MainHeader = ({
                 {activeProjectTerminals.map((terminal) => (
                   <div
                     key={`menu-${terminal.commandId}`}
-                    className="terminal-menu-item"
+                    className="terminal-menu-item app-tooltip-target"
+                    data-app-tooltip={tooltipText("Pop Out Terminal", "Open this terminal in a dedicated window.")}
                     role="button"
                     tabIndex={0}
                     onClick={() => {
@@ -325,7 +342,6 @@ export const MainHeader = ({
                       onOpenTerminalPopout(terminal);
                       setIsTerminalMenuOpen(false);
                     }}
-                    title="Pop out terminal"
                   >
                     <div className="terminal-menu-row">
                       <span className="truncate">
@@ -378,19 +394,36 @@ export const MainHeader = ({
         )}
       </div>
       <button
-        className="btn-ghost"
-        title="Open project folder in file explorer"
+        className="btn-ghost app-tooltip-target"
+        data-app-tooltip={tooltipText("Project Files", "Open the active project folder in your file explorer.")}
+        aria-label="Open project files"
         onClick={() => onOpenProjectFiles().catch((error) => appendLog(`Open files failed: ${String(error)}`))}
         disabled={!activeProjectId}
       >
         <span className="inline-flex items-center gap-1"><FaFolderOpen className="text-[10px]" />Files</span>
       </button>
       {activeProjectBrowserEnabled && (
-        <button className="btn-ghost" title={isPreviewOpen ? "Hide preview panel" : "Show preview panel"} onClick={onTogglePreviewPanel}>
+        <button
+          className="btn-ghost app-tooltip-target"
+          data-app-tooltip={
+            isPreviewOpen
+              ? tooltipText("Preview Panel", "Hide the live preview panel.")
+              : tooltipText("Preview Panel", "Show the live preview panel.")
+          }
+          aria-label={isPreviewOpen ? "Hide preview panel" : "Show preview panel"}
+          onClick={onTogglePreviewPanel}
+        >
           <span className="inline-flex items-center gap-1"><FaEye className="text-[10px]" />{isPreviewOpen ? "Hide Preview" : "Preview"}</span>
         </button>
       )}
-      <button className="btn-ghost" title={isGitPanelOpen ? "Hide git panel" : "Show git panel"} onClick={onToggleGitPanel}>
+      <button
+        className="btn-ghost app-tooltip-target"
+        data-app-tooltip={
+          isGitPanelOpen ? tooltipText("Git Panel", "Hide the git panel.") : tooltipText("Git Panel", "Show the git panel.")
+        }
+        aria-label={isGitPanelOpen ? "Hide git panel" : "Show git panel"}
+        onClick={onToggleGitPanel}
+      >
         <span className="inline-flex items-center gap-1">
           <FaCodeBranch className="text-[10px]" />
           {isGitPanelOpen ? "Hide Git" : "Git"}
@@ -404,25 +437,41 @@ export const MainHeader = ({
         </span>
       </button>
       <button
-        className="sidebar-settings-btn"
+        className="sidebar-settings-btn app-tooltip-target"
+        data-app-tooltip={tooltipText("Settings", "Open application settings.", `${platformShortcutModifier}+I`)}
+        aria-label="Open app settings"
         onClick={() => {
           onOpenSettingsWindow().catch((error) => {
             appendLog(`Open settings window failed: ${String(error)}`);
           });
         }}
-        title="Open app settings"
       >
         <span className="inline-flex items-center gap-1"><FaCog className="text-[11px]" />Settings</span>
       </button>
       {isWindows ? (
         <div className="window-controls ml-1">
-          <button className="window-control-btn" onClick={() => void onMinimizeWindow()} title="Minimize">
+          <button
+            className="window-control-btn app-tooltip-target"
+            data-app-tooltip={tooltipText("Minimize", "Minimize the app window.")}
+            aria-label="Minimize window"
+            onClick={() => void onMinimizeWindow()}
+          >
             <FaWindowMinimize className="window-control-icon" />
           </button>
-          <button className="window-control-btn" onClick={() => void onToggleMaximizeWindow()} title="Maximize or restore">
+          <button
+            className="window-control-btn app-tooltip-target"
+            data-app-tooltip={tooltipText("Maximize / Restore", "Toggle maximized window state.")}
+            aria-label="Maximize or restore window"
+            onClick={() => void onToggleMaximizeWindow()}
+          >
             {isWindowMaximized ? <FaWindowRestore className="window-control-icon" /> : <FaWindowMaximize className="window-control-icon" />}
           </button>
-          <button className="window-control-btn window-control-close" onClick={() => void onCloseWindow()} title="Close">
+          <button
+            className="window-control-btn window-control-close app-tooltip-target"
+            data-app-tooltip={tooltipText("Close", "Close the app window.")}
+            aria-label="Close window"
+            onClick={() => void onCloseWindow()}
+          >
             <FaTimes className="window-control-icon" />
           </button>
         </div>

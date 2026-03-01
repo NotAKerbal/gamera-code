@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4
+- Improved tooltips
+- Fixed requirement of restart to make settings apply
+
 ## 0.2.3
 - Pinnacle feature: subagents
 
