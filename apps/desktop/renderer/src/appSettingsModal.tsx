@@ -1,5 +1,5 @@
-import { memo, useEffect, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
-import { FaTimes } from "react-icons/fa";
+import { memo, useEffect, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
+import { FaChevronDown, FaTimes } from "react-icons/fa";
 import type {
   AppTheme,
   AppSettings,
@@ -64,6 +64,18 @@ type ToggleButtonProps = {
   offLabel?: string;
 };
 
+type SelectOption = {
+  value: string;
+  label: string;
+};
+
+type CustomSelectProps = {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  className?: string;
+};
+
 const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLabel = "Off" }: ToggleButtonProps) => (
   <button
     type="button"
@@ -76,6 +88,58 @@ const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLa
     <span>{enabled ? onLabel : offLabel}</span>
   </button>
 );
+
+const CustomSelect = ({ value, options, onChange, className = "" }: CustomSelectProps) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0] ?? null;
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, []);
+
+  return (
+    <div ref={wrapperRef} className={`settings-select ${className}`.trim()}>
+      <button
+        type="button"
+        className="settings-select-trigger input text-xs"
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span className="truncate">{selected?.label ?? "Select"}</span>
+        <FaChevronDown className={`settings-select-icon ${isOpen ? "is-open" : ""}`} />
+      </button>
+      {isOpen && (
+        <div className="settings-select-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={`settings-select-option ${option.value === value ? "is-active" : ""}`}
+              onClick={() => {
+                onChange(option.value);
+                setIsOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const THEME_PREVIEW_STYLES: Record<AppTheme, CSSProperties> = {
   midnight: {
@@ -220,7 +284,7 @@ export const SettingsModal = memo(({
               className={settingsTab === "codex" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
               onClick={() => setSettingsTab("codex")}
             >
-              <span className="settings-nav-label">Codex Defaults</span>
+              <span className="settings-nav-label">Agent Defaults</span>
             </button>
             <button
               className={settingsTab === "env" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
@@ -237,79 +301,11 @@ export const SettingsModal = memo(({
           </div>
         </aside>
 
-        <div key={`settings-tab-${settingsTab}`} className="settings-tab-panel min-h-0 flex-1 overflow-y-auto pr-1">
+        <div key={`settings-tab-${settingsTab}`} className="settings-tab-panel min-h-0 flex-1 overflow-y-auto pr-1 pb-20">
           {settingsTab === "general" && (
             <div className="space-y-3">
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">App</div>
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Permission mode</div>
-                  <select
-                    className="input"
-                    value={settings.permissionMode}
-                    onChange={(event) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        permissionMode: event.target.value as PermissionMode
-                      }))
-                    }
-                  >
-                    <option value="prompt_on_risk">Prompt on risk</option>
-                    <option value="always_ask">Always ask</option>
-                    <option value="auto_allow">Auto allow</option>
-                  </select>
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Auto-rename new threads</div>
-                  <ToggleButton
-                    enabled={settings.autoRenameThreadTitles ?? true}
-                    className="md:justify-self-end"
-                    onToggle={(enabled) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        autoRenameThreadTitles: enabled
-                      }))
-                    }
-                  />
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Show thread descriptions</div>
-                  <ToggleButton
-                    enabled={settings.showThreadSummaries ?? true}
-                    className="md:justify-self-end"
-                    onToggle={(enabled) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        showThreadSummaries: enabled
-                      }))
-                    }
-                  />
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
                 <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Theme</div>
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">App theme</div>
-                  <select
-                    className="input"
-                    value={settings.theme ?? "midnight"}
-                    onChange={(event) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        theme: event.target.value as AppTheme
-                      }))
-                    }
-                  >
-                    {THEME_OPTIONS.map((theme) => (
-                      <option key={theme.value} value={theme.value}>
-                        {theme.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div className="mx-2 px-2 pb-3">
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                     {THEME_OPTIONS.map((theme) => {
@@ -346,7 +342,41 @@ export const SettingsModal = memo(({
                     })}
                   </div>
                 </div>
+              </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Thread UX</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Auto-rename new threads</div>
+                  <ToggleButton
+                    enabled={settings.autoRenameThreadTitles ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        autoRenameThreadTitles: enabled
+                      }))
+                    }
+                  />
+                </div>
                 <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Show thread descriptions</div>
+                  <ToggleButton
+                    enabled={settings.showThreadSummaries ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        showThreadSummaries: enabled
+                      }))
+                    }
+                  />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Interface</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Use turtle spinners</div>
                   <ToggleButton
@@ -370,6 +400,42 @@ export const SettingsModal = memo(({
                       setSettings((prev) => ({
                         ...prev,
                         condenseActivityTimeline: enabled
+                      }))
+                    }
+                  />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Terminal</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Project switch terminal behavior</div>
+                  <CustomSelect
+                    value={settings.projectTerminalSwitchBehaviorDefault ?? "start_stop"}
+                    options={PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        projectTerminalSwitchBehaviorDefault: value as ProjectTerminalSwitchBehavior
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Preferred system terminal</div>
+                  <CustomSelect
+                    value={settings.preferredSystemTerminalId ?? ""}
+                    options={[
+                      { value: "", label: "Auto (first available)" },
+                      ...systemTerminals
+                        .filter((terminal) => terminal.available)
+                        .map((terminal) => ({ value: terminal.id, label: terminal.label }))
+                    ]}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        preferredSystemTerminalId: value
                       }))
                     }
                   />
@@ -419,121 +485,65 @@ export const SettingsModal = memo(({
           {settingsTab === "codex" && (
             <div className="space-y-3">
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Defaults For New Threads</div>
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Access & Safety</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Model</div>
-                  <input
-                    list="model-suggestions"
-                    className="input text-xs"
-                    value={composerOptions.model ?? ""}
-                    placeholder="Model (default)"
-                    onChange={(event) =>
-                      setComposerOptions((prev) => ({
+                  <div className="text-sm text-muted">Permission mode</div>
+                  <CustomSelect
+                    value={settings.permissionMode}
+                    options={[
+                      { value: "prompt_on_risk", label: "Prompt on risk" },
+                      { value: "always_ask", label: "Always ask" },
+                      { value: "auto_allow", label: "Auto allow" }
+                    ]}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
                         ...prev,
-                        model: event.target.value.trim() || undefined
+                        permissionMode: value as PermissionMode
                       }))
                     }
                   />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Collaboration mode</div>
-                  <select
-                    className="input text-xs"
-                    value={composerOptions.collaborationMode ?? "plan"}
-                    onChange={(event) =>
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        collaborationMode: event.target.value as CodexCollaborationMode
-                      }))
-                    }
-                  >
-                    {COLLABORATION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Reasoning effort</div>
-                  <select
-                    className="input text-xs"
-                    value={composerOptions.modelReasoningEffort ?? "medium"}
-                    onChange={(event) =>
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        modelReasoningEffort: event.target.value as CodexModelReasoningEffort
-                      }))
-                    }
-                  >
-                    {REASONING_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Sandbox mode</div>
-                  <select
-                    className="input text-xs"
+                  <CustomSelect
                     value={composerOptions.sandboxMode ?? "workspace-write"}
-                    onChange={(event) =>
+                    options={SANDBOX_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
                       setComposerOptions((prev) => ({
                         ...prev,
-                        sandboxMode: event.target.value as CodexSandboxMode
+                        sandboxMode: value as CodexSandboxMode
                       }))
                     }
-                  >
-                    {SANDBOX_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Approval policy</div>
-                  <select
-                    className="input text-xs"
+                  <CustomSelect
                     value={composerOptions.approvalPolicy ?? "on-request"}
-                    onChange={(event) =>
+                    options={APPROVAL_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
                       setComposerOptions((prev) => ({
                         ...prev,
-                        approvalPolicy: event.target.value as CodexApprovalMode
+                        approvalPolicy: value as CodexApprovalMode
                       }))
                     }
-                  >
-                    {APPROVAL_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Web search mode</div>
-                  <select
-                    className="input text-xs"
+                  <CustomSelect
                     value={composerOptions.webSearchMode ?? "cached"}
-                    onChange={(event) =>
+                    options={WEB_SEARCH_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
                       setComposerOptions((prev) => ({
                         ...prev,
-                        webSearchMode: event.target.value as CodexWebSearchMode
+                        webSearchMode: value as CodexWebSearchMode
                       }))
                     }
-                  >
-                    {WEB_SEARCH_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -552,70 +562,83 @@ export const SettingsModal = memo(({
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Sub-thread spawn policy</div>
-                  <select
-                    className="input text-xs"
+                  <CustomSelect
                     value={settings.subthreadPolicyDefault ?? "ask"}
-                    onChange={(event) =>
+                    options={SUBTHREAD_POLICY_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
                       setSettings((prev) => ({
                         ...prev,
-                        subthreadPolicyDefault: event.target.value as "manual" | "ask" | "auto"
+                        subthreadPolicyDefault: value as "manual" | "ask" | "auto"
                       }))
                     }
-                  >
-                    {SUBTHREAD_POLICY_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </section>
 
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Terminal</div>
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Model</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Project switch terminal behavior</div>
-                  <select
+                  <div className="text-sm text-muted">Model</div>
+                  <input
+                    list="model-suggestions"
                     className="input text-xs"
-                    value={settings.projectTerminalSwitchBehaviorDefault ?? "start_stop"}
+                    value={composerOptions.model ?? ""}
+                    placeholder="Model (default)"
                     onChange={(event) =>
-                      setSettings((prev) => ({
+                      setComposerOptions((prev) => ({
                         ...prev,
-                        projectTerminalSwitchBehaviorDefault: event.target.value as ProjectTerminalSwitchBehavior
+                        model: event.target.value.trim() || undefined
                       }))
                     }
-                  >
-                    {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Preferred system terminal</div>
-                  <select
-                    className="input text-xs"
-                    value={settings.preferredSystemTerminalId ?? ""}
-                    onChange={(event) =>
-                      setSettings((prev) => ({
+                  <div className="text-sm text-muted">Reasoning effort</div>
+                  <CustomSelect
+                    value={composerOptions.modelReasoningEffort ?? "medium"}
+                    options={REASONING_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
+                      setComposerOptions((prev) => ({
                         ...prev,
-                        preferredSystemTerminalId: event.target.value
+                        modelReasoningEffort: value as CodexModelReasoningEffort
                       }))
                     }
-                  >
-                    <option value="">Auto (first available)</option>
-                    {systemTerminals
-                      .filter((terminal) => terminal.available)
-                      .map((terminal) => (
-                        <option key={terminal.id} value={terminal.id}>
-                          {terminal.label}
-                        </option>
-                      ))}
-                  </select>
+                  />
                 </div>
               </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Collaboration</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Collaboration mode</div>
+                  <CustomSelect
+                    value={composerOptions.collaborationMode ?? "plan"}
+                    options={COLLABORATION_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
+                      setComposerOptions((prev) => ({
+                        ...prev,
+                        collaborationMode: value as CodexCollaborationMode
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Sub-thread spawn policy</div>
+                  <CustomSelect
+                    value={settings.subthreadPolicyDefault ?? "ask"}
+                    options={SUBTHREAD_POLICY_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        subthreadPolicyDefault: value as "manual" | "ask" | "auto"
+                      }))
+                    }
+                  />
+                </div>
+              </section>
+
             </div>
           )}
 

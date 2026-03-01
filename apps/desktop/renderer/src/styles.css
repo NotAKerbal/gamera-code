@@ -461,6 +461,54 @@ webview {
   letter-spacing: 0.01em;
 }
 
+.settings-select {
+  position: relative;
+}
+
+.settings-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.settings-select-icon {
+  font-size: 10px;
+  color: rgb(var(--theme-muted));
+  transition: transform 180ms ease;
+}
+
+.settings-select-icon.is-open {
+  transform: rotate(180deg);
+}
+
+.settings-select-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.3rem);
+  z-index: 30;
+  border: 1px solid rgb(var(--theme-border) / 0.85);
+  border-radius: 0.7rem;
+  background: rgb(var(--theme-surface));
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
+  padding: 0.3rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settings-select-option {
+  @apply w-full rounded-md px-2 py-1.5 text-left text-xs text-muted transition;
+}
+
+.settings-select-option:hover {
+  @apply bg-panel text-accent;
+}
+
+.settings-select-option.is-active {
+  @apply bg-panel text-accent;
+}
+
 .settings-floating-actions {
   position: absolute;
   right: 1rem;
@@ -1121,7 +1169,8 @@ webview {
   .settings-tab-panel,
   .settings-nav-btn,
   .settings-nav-label,
-  .settings-floating-actions {
+  .settings-floating-actions,
+  .settings-select-icon {
     animation: none;
     transition: none;
   }

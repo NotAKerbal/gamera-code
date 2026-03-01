@@ -1548,6 +1548,26 @@ export const App = () => {
     });
   };
 
+  const appendLocalUserMessage = (threadId: string, input: string, attachments: PromptAttachment[]) => {
+    const sentAt = new Date().toISOString();
+    setThreads((prev) => bumpThreadToFrontById(prev, threadId, sentAt));
+    if (activeThreadIdRef.current !== threadId) {
+      return;
+    }
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        threadId,
+        role: "user",
+        content: buildUserPromptContent(input, attachments),
+        attachments,
+        ts: sentAt,
+        streamSeq: prev.length + 1
+      }
+    ]);
+  };
+
   const dispatchPromptToThread = async (threadId: string, prompt: QueuedPrompt) => {
     const optionKey = codexOptionsKey(prompt.options);
     if (optionKey !== lastStartedOptionsKeyRef.current) {
@@ -1573,22 +1593,7 @@ export const App = () => {
       return next;
     });
 
-    const sentAt = new Date().toISOString();
-    setThreads((prev) => bumpThreadToFrontById(prev, threadId, sentAt));
-    if (activeThreadIdRef.current === threadId) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          threadId,
-          role: "user",
-          content: buildUserPromptContent(prompt.input, prompt.attachments),
-          attachments: prompt.attachments,
-          ts: sentAt,
-          streamSeq: prev.length + 1
-        }
-      ]);
-    }
+    appendLocalUserMessage(threadId, prompt.input, prompt.attachments);
     setRunStateByThreadId((prev) => {
       const next = {
         ...prev,
@@ -1688,6 +1693,7 @@ export const App = () => {
       setLogs((prev) => [...prev, "Queued steer failed."]);
       return;
     }
+    appendLocalUserMessage(threadId, prompt.input, prompt.attachments);
     removeQueuedPrompt(threadId, prompt.id);
   };
 
@@ -4655,6 +4661,7 @@ export const App = () => {
     if (!activeThreadId) {
       return;
     }
+    const threadId = activeThreadId;
     const trimmed = composerRef.current.trim();
     const mentionedFiles = composerMentionedFiles;
     if (!trimmed && composerAttachments.length === 0 && mentionedFiles.length === 0) {
@@ -4671,7 +4678,7 @@ export const App = () => {
     }));
 
     const result = await api.sessions.steer({
-      threadId: activeThreadId,
+      threadId,
       input: promptInput,
       attachments: sendAttachments,
       skills: slashSkills.skills
@@ -4680,6 +4687,7 @@ export const App = () => {
       setLogs((prev) => [...prev, "Steer failed."]);
       return;
     }
+    appendLocalUserMessage(threadId, promptInput, sendAttachments);
 
     applyComposerText("");
     scheduleComposerResize();
@@ -4689,7 +4697,7 @@ export const App = () => {
     setSkillMention(null);
     setComposerDraftByThreadId((prev) => ({
       ...prev,
-      [activeThreadId]: ""
+      [threadId]: ""
     }));
     setComposerAttachments((prev) => {
       prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
