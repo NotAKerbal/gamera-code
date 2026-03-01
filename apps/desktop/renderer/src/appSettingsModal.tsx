@@ -1,4 +1,4 @@
-import type { CSSProperties, Dispatch, SetStateAction } from "react";
+import { memo, useEffect, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
 import { FaTimes } from "react-icons/fa";
 import type {
   AppTheme,
@@ -28,18 +28,16 @@ import {
 } from "./appCore";
 
 type SettingsModalProps = {
+  initialDraft: {
+    settings: AppSettings;
+    composerOptions: CodexThreadOptions;
+    settingsEnvText: string;
+    settingsTab: AppSettingsTab;
+  };
   isSettingsWindow: boolean;
   isMacOS: boolean;
   isWindows: boolean;
   appIconSrc: string;
-  settingsTab: AppSettingsTab;
-  setSettingsTab: Dispatch<SetStateAction<AppSettingsTab>>;
-  settings: AppSettings;
-  setSettings: Dispatch<SetStateAction<AppSettings>>;
-  composerOptions: CodexThreadOptions;
-  setComposerOptions: Dispatch<SetStateAction<CodexThreadOptions>>;
-  settingsEnvText: string;
-  setSettingsEnvText: Dispatch<SetStateAction<string>>;
   appSkills: SkillRecord[];
   systemTerminals: SystemTerminalOption[];
   skillEditorPath: string;
@@ -50,11 +48,11 @@ type SettingsModalProps = {
   settingsSaving: boolean;
   onClose: () => void;
   onCloseWindow: () => void | Promise<void>;
-  onSaveSettings: () => void | Promise<void>;
+  onSaveSettings: (draft: { settings: AppSettings; composerOptions: CodexThreadOptions; settingsEnvText: string }) => void | Promise<void>;
   onSaveSkillEditor: () => void | Promise<void>;
   onToggleAppSkillEnabled: (path: string, enabled: boolean) => Promise<void>;
   onOpenSkillEditor: (path: string) => Promise<void>;
-  onPickDefaultProjectDirectory: () => Promise<void>;
+  onPickDefaultProjectDirectory: () => Promise<string | null>;
   appendLog: (line: string) => void;
 };
 
@@ -137,19 +135,12 @@ const THEME_PREVIEW_STYLES: Record<AppTheme, CSSProperties> = {
   }
 };
 
-export const SettingsModal = ({
+export const SettingsModal = memo(({
+  initialDraft,
   isSettingsWindow,
   isMacOS,
   isWindows,
   appIconSrc,
-  settingsTab,
-  setSettingsTab,
-  settings,
-  setSettings,
-  composerOptions,
-  setComposerOptions,
-  settingsEnvText,
-  setSettingsEnvText,
   appSkills,
   systemTerminals,
   skillEditorPath,
@@ -167,6 +158,18 @@ export const SettingsModal = ({
   onPickDefaultProjectDirectory,
   appendLog
 }: SettingsModalProps) => {
+  const [settingsTab, setSettingsTab] = useState<AppSettingsTab>(initialDraft.settingsTab);
+  const [settings, setSettings] = useState<AppSettings>(initialDraft.settings);
+  const [composerOptions, setComposerOptions] = useState<CodexThreadOptions>(initialDraft.composerOptions);
+  const [settingsEnvText, setSettingsEnvText] = useState(initialDraft.settingsEnvText);
+
+  useEffect(() => {
+    setSettingsTab(initialDraft.settingsTab);
+    setSettings(initialDraft.settings);
+    setComposerOptions(initialDraft.composerOptions);
+    setSettingsEnvText(initialDraft.settingsEnvText);
+  }, [initialDraft]);
+
   const useWindowsStyleHeader = isWindows || !isMacOS;
   return (
     <div
@@ -174,7 +177,7 @@ export const SettingsModal = ({
         isSettingsWindow ? "fixed inset-0 z-40 theme-settings-surface" : "fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
       }
     >
-    <div className={isSettingsWindow ? "flex h-full w-full flex-col theme-settings-surface" : "flex w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon"}>
+    <div className={isSettingsWindow ? "relative flex h-full w-full flex-col theme-settings-surface" : "relative flex h-[42rem] max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon"}>
       {isSettingsWindow ? (
         <header
           className={`drag-region window-header flex h-12 shrink-0 items-center justify-between border-b border-border/90 px-3 ${
@@ -208,33 +211,33 @@ export const SettingsModal = ({
         <aside className="shrink-0 md:w-52">
           <div className="rounded-xl border border-border bg-black/20 p-2">
             <button
-              className={settingsTab === "general" ? "btn-secondary w-full justify-start text-left text-xs" : "btn-ghost w-full justify-start text-left text-xs"}
+              className={settingsTab === "general" ? "settings-nav-btn is-active" : "settings-nav-btn"}
               onClick={() => setSettingsTab("general")}
             >
-              General
+              <span className="settings-nav-label">General</span>
             </button>
             <button
-              className={settingsTab === "codex" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              className={settingsTab === "codex" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
               onClick={() => setSettingsTab("codex")}
             >
-              Codex Defaults
+              <span className="settings-nav-label">Codex Defaults</span>
             </button>
             <button
-              className={settingsTab === "env" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              className={settingsTab === "env" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
               onClick={() => setSettingsTab("env")}
             >
-              Environment
+              <span className="settings-nav-label">Environment</span>
             </button>
             <button
-              className={settingsTab === "skills" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              className={settingsTab === "skills" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
               onClick={() => setSettingsTab("skills")}
             >
-              Skills
+              <span className="settings-nav-label">Skills</span>
             </button>
           </div>
         </aside>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div key={`settings-tab-${settingsTab}`} className="settings-tab-panel min-h-0 flex-1 overflow-y-auto pr-1">
           {settingsTab === "general" && (
             <div className="space-y-3">
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
@@ -392,7 +395,15 @@ export const SettingsModal = ({
                     <button
                       className="btn-secondary whitespace-nowrap"
                       onClick={() => {
-                        onPickDefaultProjectDirectory().catch((error) => {
+                        onPickDefaultProjectDirectory().then((picked) => {
+                          if (!picked) {
+                            return;
+                          }
+                          setSettings((prev) => ({
+                            ...prev,
+                            defaultProjectDirectory: picked
+                          }));
+                        }).catch((error) => {
                           appendLog(`Pick project directory failed: ${String(error)}`);
                         });
                       }}
@@ -695,24 +706,37 @@ export const SettingsModal = ({
         ))}
       </datalist>
 
-      <div className="mt-4 flex shrink-0 items-center gap-2 border-t border-border pt-4">
-        <div
-          className={`mr-auto text-xs ${
-            settingsSaveNotice.startsWith("Settings save failed:") ? "text-rose-300" : "text-emerald-300"
-          }`}
+      <div className="settings-floating-actions">
+        {settingsSaveNotice ? (
+          <div
+            className={`settings-floating-notice ${
+              settingsSaveNotice.startsWith("Settings save failed:") ? "is-error" : "is-success"
+            }`}
+          >
+            {settingsSaveNotice}
+          </div>
+        ) : null}
+        <button
+          className="btn-secondary"
+          onClick={() => {
+            if (isSettingsWindow) {
+              void onCloseWindow();
+              return;
+            }
+            onClose();
+          }}
         >
-          {settingsSaveNotice}
-        </div>
-        {!isSettingsWindow && (
-          <button className="btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-        )}
-        <button className="btn-primary" onClick={onSaveSettings} disabled={settingsSaving}>
+          Cancel
+        </button>
+        <button
+          className="btn-primary"
+          onClick={() => onSaveSettings({ settings, composerOptions, settingsEnvText })}
+          disabled={settingsSaving}
+        >
           {settingsSaving ? "Saving..." : "Save"}
         </button>
       </div>
     </div>
   </div>
   );
-};
+});

@@ -64,10 +64,10 @@ import type {
   Project,
   ProjectFileEntry,
   ProjectSettings,
+  ProjectTerminalSwitchBehavior,
   ProjectWebLink,
   ProjectTerminalEvent,
   ProjectTerminalState,
-  ProjectTerminalSwitchBehavior,
   SystemTerminalOption,
   SessionEvent,
   SkillRecord,
@@ -160,7 +160,6 @@ import {
   writeStoredActiveProjectId,
   writeStoredActiveWorkspaceId,
   type ActivityEntry,
-  type AppSettingsTab,
   type ComposerAttachment,
   type ComposerDropdownKind,
   type FileMentionState,
@@ -233,11 +232,30 @@ export const App = () => {
   const setupLiveFlushTimeoutRef = useRef<number | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(() => isSettingsWindowContext());
-  const [settingsTab, setSettingsTab] = useState<AppSettingsTab>("general");
+  const [appSettingsInitialDraft, setAppSettingsInitialDraft] = useState<{
+    settings: AppSettings;
+    composerOptions: CodexThreadOptions;
+    settingsEnvText: string;
+    settingsTab: "general" | "codex" | "env" | "skills";
+  }>({
+    settings: DEFAULT_SETTINGS,
+    composerOptions: DEFAULT_SETTINGS.codexDefaults,
+    settingsEnvText: envVarsToText(DEFAULT_SETTINGS.envVars),
+    settingsTab: "general"
+  });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaveNotice, setSettingsSaveNotice] = useState("");
   const [showProjectSettings, setShowProjectSettings] = useState(false);
-  const [projectSettingsTab, setProjectSettingsTab] = useState<"general" | "env" | "commands" | "links" | "skills">("general");
+  const [projectSettingsInitialDraft, setProjectSettingsInitialDraft] = useState<{
+    projectName: string;
+    projectWorkspaceTargetId: string;
+    projectSettingsBrowserEnabled: boolean;
+    projectSettingsEnvText: string;
+    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>;
+    projectSettingsWebLinks: ProjectWebLink[];
+    projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
+    projectSubthreadPolicyOverride: SubthreadPolicy | "";
+  } | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
   const [workspaceModalMode, setWorkspaceModalMode] = useState<"create" | "edit">("create");
@@ -264,7 +282,6 @@ export const App = () => {
   const [creatingProject, setCreatingProject] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [updateMessage, setUpdateMessage] = useState<string>("");
-  const [settingsEnvText, setSettingsEnvText] = useState("{}");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const tooltipTargetRef = useRef<HTMLElement | null>(null);
   const tooltipElementRef = useRef<HTMLDivElement | null>(null);
@@ -326,16 +343,6 @@ export const App = () => {
   const [isGitPoppedOut, setIsGitPoppedOut] = useState(false);
   const [isTerminalDashboardPoppedOut, setIsTerminalDashboardPoppedOut] = useState(false);
   const planPopoutWindowRef = useRef<Window | null>(null);
-  const [projectSettingsEnvText, setProjectSettingsEnvText] = useState("{}");
-  const [projectSettingsProjectName, setProjectSettingsProjectName] = useState("");
-  const [projectSettingsCommands, setProjectSettingsCommands] = useState<
-    Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>
-  >([]);
-  const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>([]);
-  const [projectSettingsBrowserEnabled, setProjectSettingsBrowserEnabled] = useState(true);
-  const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">("");
-  const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">("");
-  const [projectWorkspaceTargetId, setProjectWorkspaceTargetId] = useState<string>("");
   const [orchestrationRunsByParentId, setOrchestrationRunsByParentId] = useState<Record<string, OrchestrationRun[]>>({});
   const [orchestrationChildrenByRunId, setOrchestrationChildrenByRunId] = useState<Record<string, OrchestrationChild[]>>({});
   const [showRunningSubthreadsByThreadId, setShowRunningSubthreadsByThreadId] = useState<Record<string, boolean>>({});
@@ -1083,13 +1090,18 @@ export const App = () => {
   const loadSettings = async () => {
     const current = await api.settings.get();
     applySettings(current);
+    setAppSettingsInitialDraft({
+      settings: current,
+      composerOptions: current.codexDefaults,
+      settingsEnvText: envVarsToText(current.envVars),
+      settingsTab: "general"
+    });
     setSettingsSaveNotice("");
     await loadAppSkills();
   };
 
   const applySettings = (next: AppSettings) => {
     setSettings(next);
-    setSettingsEnvText(envVarsToText(next.envVars));
     setComposerOptions(next.codexDefaults);
   };
 
@@ -2807,6 +2819,12 @@ export const App = () => {
       if (!errorText.includes("No handler registered")) {
         setLogs((prev) => [...prev, `Open settings window failed: ${errorText}`]);
       }
+      setAppSettingsInitialDraft({
+        settings,
+        composerOptions: settings.codexDefaults,
+        settingsEnvText: envVarsToText(settings.envVars),
+        settingsTab: "general"
+      });
       setShowSettings(true);
     }
   };
@@ -2926,40 +2944,48 @@ export const App = () => {
       return;
     }
     const current = projectSettingsById[projectId] ?? (await loadProjectSettings(projectId));
-    setProjectSettingsEnvText(envVarsToText(current.envVars));
-    setProjectSettingsCommands(
-      current.devCommands.map((command, index) => ({
-        ...command,
-        autoStart: command.autoStart ?? index === 0,
-        useForPreview: command.useForPreview ?? index === 0
-      }))
-    );
-    setProjectSettingsWebLinks(
-      (current.webLinks ?? []).map((link, index) => ({
-        id: link.id?.trim() || `link-${index + 1}`,
-        name: link.name ?? "",
-        url: link.url ?? ""
-      }))
-    );
+    const nextCommands = current.devCommands.map((command, index) => ({
+      ...command,
+      autoStart: command.autoStart ?? index === 0,
+      useForPreview: command.useForPreview ?? index === 0
+    }));
+    const nextWebLinks = (current.webLinks ?? []).map((link, index) => ({
+      id: link.id?.trim() || `link-${index + 1}`,
+      name: link.name ?? "",
+      url: link.url ?? ""
+    }));
     const projectName = projects.find((project) => project.id === projectId)?.name ?? "";
     const projectWorkspaceId = projects.find((project) => project.id === projectId)?.workspaceId ?? "";
-    setProjectSettingsProjectName(projectName);
-    setProjectWorkspaceTargetId(projectWorkspaceId);
-    setProjectSettingsBrowserEnabled(current.browserEnabled ?? true);
-    setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
-    setProjectSubthreadPolicyOverride(current.subthreadPolicyOverride ?? "");
-    setProjectSettingsTab("general");
+    setProjectSettingsInitialDraft({
+      projectName,
+      projectWorkspaceTargetId: projectWorkspaceId,
+      projectSettingsBrowserEnabled: current.browserEnabled ?? true,
+      projectSettingsEnvText: envVarsToText(current.envVars),
+      projectSettingsCommands: nextCommands,
+      projectSettingsWebLinks: nextWebLinks,
+      projectSwitchBehaviorOverride: current.switchBehaviorOverride ?? "",
+      projectSubthreadPolicyOverride: current.subthreadPolicyOverride ?? ""
+    });
     if (activeProjectId !== projectId) {
       setActiveProjectId(projectId);
     }
     setShowProjectSettings(true);
   };
 
-  const saveProjectSettings = async () => {
+  const saveProjectSettings = async (draft: {
+    projectName: string;
+    projectWorkspaceTargetId: string;
+    projectSettingsBrowserEnabled: boolean;
+    projectSettingsEnvText: string;
+    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>;
+    projectSettingsWebLinks: ProjectWebLink[];
+    projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
+    projectSubthreadPolicyOverride: SubthreadPolicy | "";
+  }) => {
     if (!activeProjectId) {
       return;
     }
-    const nextProjectName = projectSettingsProjectName.trim();
+    const nextProjectName = draft.projectName.trim();
     if (!nextProjectName) {
       setLogs((prev) => [...prev, "Project settings save failed: project name is required."]);
       return;
@@ -2967,13 +2993,13 @@ export const App = () => {
 
     let envVars: Record<string, string> = {};
     try {
-      envVars = parseEnvText(projectSettingsEnvText);
+      envVars = parseEnvText(draft.projectSettingsEnvText);
     } catch (error) {
       setLogs((prev) => [...prev, `Project settings save failed: ${String(error)}`]);
       return;
     }
 
-    const sanitizedCommands = projectSettingsCommands
+    const sanitizedCommands = draft.projectSettingsCommands
       .map((command) => ({
         id: command.id.trim(),
         name: command.name.trim(),
@@ -2993,7 +3019,7 @@ export const App = () => {
     }
 
     const sanitizedWebLinks: ProjectWebLink[] = [];
-    for (const [index, link] of projectSettingsWebLinks.entries()) {
+    for (const [index, link] of draft.projectSettingsWebLinks.entries()) {
       const name = link.name.trim();
       const rawUrl = link.url.trim();
       if (!name && !rawUrl) {
@@ -3018,7 +3044,7 @@ export const App = () => {
     const updatedProject = await api.projects.update({
       id: activeProjectId,
       name: nextProjectName,
-      workspaceId: projectWorkspaceTargetId || undefined
+      workspaceId: draft.projectWorkspaceTargetId || undefined
     });
     setProjects((prev) => prev.map((project) => (project.id === updatedProject.id ? updatedProject : project)));
     if (activeProjectId === updatedProject.id) {
@@ -3030,9 +3056,9 @@ export const App = () => {
       envVars,
       devCommands: sanitizedCommands,
       webLinks: sanitizedWebLinks,
-      browserEnabled: projectSettingsBrowserEnabled,
-      switchBehaviorOverride: projectSwitchBehaviorOverride || undefined,
-      subthreadPolicyOverride: projectSubthreadPolicyOverride || undefined
+      browserEnabled: draft.projectSettingsBrowserEnabled,
+      switchBehaviorOverride: draft.projectSwitchBehaviorOverride || undefined,
+      subthreadPolicyOverride: draft.projectSubthreadPolicyOverride || undefined
     });
 
     setProjectSettingsById((prev) => ({
@@ -3046,6 +3072,7 @@ export const App = () => {
       }));
     }
     setShowProjectSettings(false);
+    setProjectSettingsInitialDraft(null);
   };
 
   const removeActiveProject = async () => {
@@ -3067,6 +3094,7 @@ export const App = () => {
     try {
       await api.projects.delete({ id: projectIdToRemove });
       setShowProjectSettings(false);
+      setProjectSettingsInitialDraft(null);
       setProjectSettingsById((prev) => {
         const next = { ...prev };
         delete next[projectIdToRemove];
@@ -5867,14 +5895,14 @@ const stopActiveRun = async () => {
     []
   );
 
-  const saveSettings = async () => {
+  const saveSettings = async (draft: { settings: AppSettings; composerOptions: CodexThreadOptions; settingsEnvText: string }) => {
     if (settingsSaving) {
       return;
     }
 
     let envVars: Record<string, string> = {};
     try {
-      envVars = parseEnvText(settingsEnvText);
+      envVars = parseEnvText(draft.settingsEnvText);
     } catch (error) {
       const message = `Settings save failed: ${String(error)}`;
       setLogs((prev) => [...prev, message]);
@@ -5885,26 +5913,32 @@ const stopActiveRun = async () => {
     setSettingsSaving(true);
     setSettingsSaveNotice("");
     try {
-      const mode = settings.permissionMode as PermissionMode;
+      const mode = draft.settings.permissionMode as PermissionMode;
 
       const saved = await api.settings.set({
         permissionMode: mode,
-        theme: settings.theme ?? "midnight",
+        theme: draft.settings.theme ?? "midnight",
         envVars,
-        defaultProjectDirectory: settings.defaultProjectDirectory?.trim() ?? "",
-        autoRenameThreadTitles: settings.autoRenameThreadTitles ?? true,
-        showThreadSummaries: settings.showThreadSummaries ?? true,
-        useTurtleSpinners: settings.useTurtleSpinners ?? false,
-        condenseActivityTimeline: settings.condenseActivityTimeline ?? true,
-        projectTerminalSwitchBehaviorDefault: settings.projectTerminalSwitchBehaviorDefault ?? "start_stop",
-        preferredSystemTerminalId: settings.preferredSystemTerminalId?.trim() ?? "",
-        codexDefaults: composerOptions
+        defaultProjectDirectory: draft.settings.defaultProjectDirectory?.trim() ?? "",
+        autoRenameThreadTitles: draft.settings.autoRenameThreadTitles ?? true,
+        showThreadSummaries: draft.settings.showThreadSummaries ?? true,
+        useTurtleSpinners: draft.settings.useTurtleSpinners ?? false,
+        condenseActivityTimeline: draft.settings.condenseActivityTimeline ?? true,
+        projectTerminalSwitchBehaviorDefault: draft.settings.projectTerminalSwitchBehaviorDefault ?? "start_stop",
+        preferredSystemTerminalId: draft.settings.preferredSystemTerminalId?.trim() ?? "",
+        codexDefaults: draft.composerOptions
       });
 
       await api.permissions.setMode({ mode });
 
       setSettings(saved);
       setComposerOptions(saved.codexDefaults);
+      setAppSettingsInitialDraft({
+        settings: saved,
+        composerOptions: saved.codexDefaults,
+        settingsEnvText: envVarsToText(saved.envVars),
+        settingsTab: "general"
+      });
       setSettingsSaveNotice("Settings saved.");
       if (!isSettingsWindow) {
         setShowSettings(false);
@@ -6417,6 +6451,58 @@ const stopActiveRun = async () => {
       await loadOrchestrationRuns(activeThreadId);
     }
   };
+
+  const closeSettingsModal = useCallback(() => {
+    setShowSettings(false);
+    setAppSettingsInitialDraft({
+      settings,
+      composerOptions: settings.codexDefaults,
+      settingsEnvText: envVarsToText(settings.envVars),
+      settingsTab: "general"
+    });
+  }, [settings]);
+
+  const toggleAppSkillEnabled = useCallback(
+    async (path: string, enabled: boolean) => {
+      await api.skills.setEnabled({ path, enabled });
+      await loadAppSkills();
+    },
+    [loadAppSkills]
+  );
+
+  const pickDefaultProjectDirectory = useCallback(async () => api.projects.pickPath(), []);
+
+  const closeProjectSettingsModal = useCallback(() => {
+    setShowProjectSettings(false);
+    setProjectSettingsInitialDraft(null);
+  }, []);
+
+  const moveProjectWorkspace = useCallback(
+    async (workspaceId: string) => {
+      if (!activeProjectId || !workspaceId) {
+        return;
+      }
+      const updated = await api.projects.update({
+        id: activeProjectId,
+        workspaceId
+      });
+      setProjects((prev) => prev.map((project) => (project.id === updated.id ? updated : project)));
+      setActiveWorkspaceId(updated.workspaceId);
+      await loadThreads();
+    },
+    [activeProjectId, loadThreads]
+  );
+
+  const toggleProjectSkillEnabled = useCallback(
+    async (path: string, enabled: boolean) => {
+      if (!activeProjectId) {
+        return;
+      }
+      await api.skills.setEnabled({ projectId: activeProjectId, path, enabled });
+      await loadProjectSkills(activeProjectId);
+    },
+    [activeProjectId, loadProjectSkills]
+  );
 
   return (
     <div className="h-screen overflow-hidden bg-bg text-white theme-text">
@@ -8298,18 +8384,11 @@ const stopActiveRun = async () => {
 
       {(showSettings || isSettingsWindow) && (
         <SettingsModal
+          initialDraft={appSettingsInitialDraft}
           isSettingsWindow={isSettingsWindow}
           isMacOS={isMacOS}
           isWindows={isWindows}
           appIconSrc={appIconSrc}
-          settingsTab={settingsTab}
-          setSettingsTab={setSettingsTab}
-          settings={settings}
-          setSettings={setSettings}
-          composerOptions={composerOptions}
-          setComposerOptions={setComposerOptions}
-          settingsEnvText={settingsEnvText}
-          setSettingsEnvText={setSettingsEnvText}
           appSkills={appSkills}
           systemTerminals={systemTerminals}
           skillEditorPath={skillEditorPath}
@@ -8318,49 +8397,22 @@ const stopActiveRun = async () => {
           skillEditorSaving={skillEditorSaving}
           settingsSaveNotice={settingsSaveNotice}
           settingsSaving={settingsSaving}
-          onClose={() => setShowSettings(false)}
+          onClose={closeSettingsModal}
           onCloseWindow={closeWindow}
           onSaveSettings={saveSettings}
           onSaveSkillEditor={saveSkillEditor}
-          onToggleAppSkillEnabled={async (path, enabled) => {
-            await api.skills.setEnabled({ path, enabled });
-            await loadAppSkills();
-          }}
+          onToggleAppSkillEnabled={toggleAppSkillEnabled}
           onOpenSkillEditor={openSkillEditor}
-          onPickDefaultProjectDirectory={async () => {
-            const picked = await api.projects.pickPath();
-            if (!picked) {
-              return;
-            }
-            setSettings((prev) => ({
-              ...prev,
-              defaultProjectDirectory: picked
-            }));
-          }}
+          onPickDefaultProjectDirectory={pickDefaultProjectDirectory}
           appendLog={appendLog}
         />
       )}
 
-      {showProjectSettings && activeProjectId && (
+      {showProjectSettings && activeProjectId && projectSettingsInitialDraft && (
         <ProjectSettingsModal
           activeProjectId={activeProjectId}
-          projectSettingsProjectName={projectSettingsProjectName}
-          setProjectSettingsProjectName={setProjectSettingsProjectName}
-          projectSwitchBehaviorOverride={projectSwitchBehaviorOverride}
-          setProjectSwitchBehaviorOverride={setProjectSwitchBehaviorOverride}
-          projectSubthreadPolicyOverride={projectSubthreadPolicyOverride}
-          setProjectSubthreadPolicyOverride={setProjectSubthreadPolicyOverride}
-          projectSettingsBrowserEnabled={projectSettingsBrowserEnabled}
-          setProjectSettingsBrowserEnabled={setProjectSettingsBrowserEnabled}
-          projectSettingsEnvText={projectSettingsEnvText}
-          setProjectSettingsEnvText={setProjectSettingsEnvText}
-          projectSettingsCommands={projectSettingsCommands}
-          setProjectSettingsCommands={setProjectSettingsCommands}
-          projectSettingsWebLinks={projectSettingsWebLinks}
-          setProjectSettingsWebLinks={setProjectSettingsWebLinks}
+          initialDraft={projectSettingsInitialDraft}
           workspaces={workspaces}
-          projectWorkspaceTargetId={projectWorkspaceTargetId}
-          setProjectWorkspaceTargetId={setProjectWorkspaceTargetId}
           skillsByProjectId={skillsByProjectId}
           skillEditorPath={skillEditorPath}
           skillEditorContent={skillEditorContent}
@@ -8368,27 +8420,11 @@ const stopActiveRun = async () => {
           skillEditorSaving={skillEditorSaving}
           saveSkillEditor={saveSkillEditor}
           removingProject={removingProject}
-          onClose={() => setShowProjectSettings(false)}
-          projectSettingsTab={projectSettingsTab}
-          setProjectSettingsTab={setProjectSettingsTab}
+          onClose={closeProjectSettingsModal}
           onRemoveProject={removeActiveProject}
           onSaveProjectSettings={saveProjectSettings}
-          onMoveProjectWorkspace={async () => {
-            if (!activeProjectId || !projectWorkspaceTargetId) {
-              return;
-            }
-            const updated = await api.projects.update({
-              id: activeProjectId,
-              workspaceId: projectWorkspaceTargetId
-            });
-            setProjects((prev) => prev.map((project) => (project.id === updated.id ? updated : project)));
-            setActiveWorkspaceId(updated.workspaceId);
-            await loadThreads();
-          }}
-          onToggleProjectSkillEnabled={async (path, enabled) => {
-            await api.skills.setEnabled({ projectId: activeProjectId, path, enabled });
-            await loadProjectSkills(activeProjectId);
-          }}
+          onMoveProjectWorkspace={moveProjectWorkspace}
+          onToggleProjectSkillEnabled={toggleProjectSkillEnabled}
           onOpenSkillEditor={openSkillEditor}
           appendLog={appendLog}
         />

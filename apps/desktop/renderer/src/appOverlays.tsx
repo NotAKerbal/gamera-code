@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { FaTimes, FaTrashAlt } from "react-icons/fa";
 import type {
@@ -14,6 +14,16 @@ import { PROJECT_SWITCH_BEHAVIOR_OPTIONS, SUBTHREAD_POLICY_OPTIONS, type RenameD
 
 type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean };
 type ProjectSettingsTab = "general" | "env" | "commands" | "links" | "skills";
+type ProjectSettingsDraft = {
+  projectName: string;
+  projectWorkspaceTargetId: string;
+  projectSettingsBrowserEnabled: boolean;
+  projectSettingsEnvText: string;
+  projectSettingsCommands: ProjectCommand[];
+  projectSettingsWebLinks: ProjectWebLink[];
+  projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
+  projectSubthreadPolicyOverride: SubthreadPolicy | "";
+};
 
 type ToggleButtonProps = {
   enabled: boolean;
@@ -47,23 +57,8 @@ const WORKSPACE_COLOR_PRESETS = [
 
 type ProjectSettingsModalProps = {
   activeProjectId: string;
-  projectSettingsProjectName: string;
-  setProjectSettingsProjectName: Dispatch<SetStateAction<string>>;
-  projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
-  setProjectSwitchBehaviorOverride: Dispatch<SetStateAction<ProjectTerminalSwitchBehavior | "">>;
-  projectSubthreadPolicyOverride: SubthreadPolicy | "";
-  setProjectSubthreadPolicyOverride: Dispatch<SetStateAction<SubthreadPolicy | "">>;
-  projectSettingsBrowserEnabled: boolean;
-  setProjectSettingsBrowserEnabled: Dispatch<SetStateAction<boolean>>;
-  projectSettingsEnvText: string;
-  setProjectSettingsEnvText: Dispatch<SetStateAction<string>>;
-  projectSettingsCommands: ProjectCommand[];
-  setProjectSettingsCommands: Dispatch<SetStateAction<ProjectCommand[]>>;
-  projectSettingsWebLinks: ProjectWebLink[];
-  setProjectSettingsWebLinks: Dispatch<SetStateAction<ProjectWebLink[]>>;
+  initialDraft: ProjectSettingsDraft;
   workspaces: Workspace[];
-  projectWorkspaceTargetId: string;
-  setProjectWorkspaceTargetId: Dispatch<SetStateAction<string>>;
   skillsByProjectId: Record<string, SkillRecord[]>;
   skillEditorPath: string;
   skillEditorContent: string;
@@ -71,36 +66,19 @@ type ProjectSettingsModalProps = {
   skillEditorSaving: boolean;
   saveSkillEditor: () => Promise<void>;
   removingProject: boolean;
-  projectSettingsTab: ProjectSettingsTab;
-  setProjectSettingsTab: Dispatch<SetStateAction<ProjectSettingsTab>>;
   onClose: () => void;
   onRemoveProject: () => Promise<void>;
-  onSaveProjectSettings: () => Promise<void>;
-  onMoveProjectWorkspace: () => Promise<void>;
+  onSaveProjectSettings: (draft: ProjectSettingsDraft) => Promise<void>;
+  onMoveProjectWorkspace: (workspaceId: string) => Promise<void>;
   onToggleProjectSkillEnabled: (path: string, enabled: boolean) => Promise<void>;
   onOpenSkillEditor: (path: string) => Promise<void>;
   appendLog: (line: string) => void;
 };
 
-export const ProjectSettingsModal = ({
+export const ProjectSettingsModal = memo(({
   activeProjectId,
-  projectSettingsProjectName,
-  setProjectSettingsProjectName,
-  projectSwitchBehaviorOverride,
-  setProjectSwitchBehaviorOverride,
-  projectSubthreadPolicyOverride,
-  setProjectSubthreadPolicyOverride,
-  projectSettingsBrowserEnabled,
-  setProjectSettingsBrowserEnabled,
-  projectSettingsEnvText,
-  setProjectSettingsEnvText,
-  projectSettingsCommands,
-  setProjectSettingsCommands,
-  projectSettingsWebLinks,
-  setProjectSettingsWebLinks,
+  initialDraft,
   workspaces,
-  projectWorkspaceTargetId,
-  setProjectWorkspaceTargetId,
   skillsByProjectId,
   skillEditorPath,
   skillEditorContent,
@@ -108,8 +86,6 @@ export const ProjectSettingsModal = ({
   skillEditorSaving,
   saveSkillEditor,
   removingProject,
-  projectSettingsTab,
-  setProjectSettingsTab,
   onClose,
   onRemoveProject,
   onSaveProjectSettings,
@@ -117,53 +93,68 @@ export const ProjectSettingsModal = ({
   onToggleProjectSkillEnabled,
   onOpenSkillEditor,
   appendLog
-}: ProjectSettingsModalProps) => (
-  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-    <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon">
-      <div className="mb-4 flex shrink-0 items-center justify-between">
-        <h3 className="text-lg font-semibold">Project Settings</h3>
-        <button className="btn-secondary" onClick={onClose}>
-          <span className="inline-flex items-center gap-1"><FaTimes className="text-[11px]" />Close</span>
-        </button>
-      </div>
+}: ProjectSettingsModalProps) => {
+  const [projectSettingsTab, setProjectSettingsTab] = useState<ProjectSettingsTab>("general");
+  const [projectSettingsProjectName, setProjectSettingsProjectName] = useState(initialDraft.projectName);
+  const [projectWorkspaceTargetId, setProjectWorkspaceTargetId] = useState(initialDraft.projectWorkspaceTargetId);
+  const [projectSettingsBrowserEnabled, setProjectSettingsBrowserEnabled] = useState(initialDraft.projectSettingsBrowserEnabled);
+  const [projectSettingsEnvText, setProjectSettingsEnvText] = useState(initialDraft.projectSettingsEnvText);
+  const [projectSettingsCommands, setProjectSettingsCommands] = useState<ProjectCommand[]>(initialDraft.projectSettingsCommands);
+  const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>(initialDraft.projectSettingsWebLinks);
+  const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">(
+    initialDraft.projectSwitchBehaviorOverride
+  );
+  const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">(
+    initialDraft.projectSubthreadPolicyOverride
+  );
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
-        <aside className="shrink-0 md:w-52">
-          <div className="rounded-xl border border-border bg-black/20 p-2">
-            <button
-              className={projectSettingsTab === "general" ? "btn-secondary w-full justify-start text-left text-xs" : "btn-ghost w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("general")}
-            >
-              General
-            </button>
-            <button
-              className={projectSettingsTab === "env" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("env")}
-            >
-              Environment
-            </button>
-            <button
-              className={projectSettingsTab === "commands" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("commands")}
-            >
-              Dev Commands
-            </button>
-            <button
-              className={projectSettingsTab === "links" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("links")}
-            >
-              Web Links
-            </button>
-            <button
-              className={projectSettingsTab === "skills" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("skills")}
-            >
-              Skills
-            </button>
-          </div>
-        </aside>
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+      <div className="flex h-[42rem] max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon">
+        <div className="mb-4 flex shrink-0 items-center justify-between">
+          <h3 className="text-lg font-semibold">Project Settings</h3>
+          <button className="btn-secondary" onClick={onClose}>
+            <span className="inline-flex items-center gap-1"><FaTimes className="text-[11px]" />Close</span>
+          </button>
+        </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
+          <aside className="shrink-0 md:w-52">
+            <div className="rounded-xl border border-border bg-black/20 p-2">
+              <button
+                className={projectSettingsTab === "general" ? "settings-nav-btn is-active" : "settings-nav-btn"}
+                onClick={() => setProjectSettingsTab("general")}
+              >
+                <span className="settings-nav-label">General</span>
+              </button>
+              <button
+                className={projectSettingsTab === "env" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
+                onClick={() => setProjectSettingsTab("env")}
+              >
+                <span className="settings-nav-label">Environment</span>
+              </button>
+              <button
+                className={projectSettingsTab === "commands" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
+                onClick={() => setProjectSettingsTab("commands")}
+              >
+                <span className="settings-nav-label">Dev Commands</span>
+              </button>
+              <button
+                className={projectSettingsTab === "links" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
+                onClick={() => setProjectSettingsTab("links")}
+              >
+                <span className="settings-nav-label">Web Links</span>
+              </button>
+              <button
+                className={projectSettingsTab === "skills" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
+                onClick={() => setProjectSettingsTab("skills")}
+              >
+                <span className="settings-nav-label">Skills</span>
+              </button>
+            </div>
+          </aside>
+
+          <div key={`project-settings-tab-${projectSettingsTab}`} className="settings-tab-panel min-h-0 flex-1 overflow-y-auto pr-1">
           {projectSettingsTab === "general" && (
             <section className="rounded-xl border border-border/80 bg-black/20 py-2">
               <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Project</div>
@@ -226,7 +217,7 @@ export const ProjectSettingsModal = ({
                   <button
                     className="btn-secondary h-8 px-2 py-0 text-xs whitespace-nowrap"
                     onClick={() => {
-                      onMoveProjectWorkspace().catch((error) => {
+                      onMoveProjectWorkspace(projectWorkspaceTargetId).catch((error) => {
                         appendLog(`Move workspace failed: ${String(error)}`);
                       });
                     }}
@@ -502,7 +493,16 @@ export const ProjectSettingsModal = ({
           <button
             className="btn-primary"
             onClick={() => {
-              onSaveProjectSettings().catch((error) => {
+              onSaveProjectSettings({
+                projectName: projectSettingsProjectName,
+                projectWorkspaceTargetId,
+                projectSettingsBrowserEnabled,
+                projectSettingsEnvText,
+                projectSettingsCommands,
+                projectSettingsWebLinks,
+                projectSwitchBehaviorOverride,
+                projectSubthreadPolicyOverride
+              }).catch((error) => {
                 appendLog(`Project settings save failed: ${String(error)}`);
               });
             }}
@@ -514,7 +514,8 @@ export const ProjectSettingsModal = ({
       </div>
     </div>
   </div>
-);
+  );
+});
 
 type NewProjectModalProps = {
   defaultProjectDirectory?: string;

@@ -424,10 +424,76 @@ webview {
   animation: dropdown-fade 120ms ease-out;
 }
 
+.settings-tab-panel {
+  animation: settings-tab-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.settings-nav-btn {
+  @apply flex w-full items-center justify-start rounded-lg border border-transparent bg-transparent px-3 py-2 text-left text-slate-300;
+  transition:
+    background-color 260ms ease,
+    border-color 260ms ease,
+    color 260ms ease;
+}
+
+.settings-nav-btn:hover {
+  @apply border-border/70 bg-panel/55 text-slate-100;
+}
+
+.settings-nav-label {
+  @apply text-xs font-medium;
+  transform-origin: left center;
+  transition: transform 260ms ease, letter-spacing 260ms ease;
+}
+
+.settings-nav-btn.is-active {
+  @apply border-border/90 bg-panel/80 text-white;
+}
+
+.settings-nav-btn.is-active .settings-nav-label {
+  transform: scale(1.08);
+  letter-spacing: 0.01em;
+}
+
+.settings-floating-actions {
+  position: absolute;
+  right: 1rem;
+  bottom: 0.5rem;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-floating-notice {
+  font-size: 11px;
+  max-width: 21rem;
+  padding: 0 0.4rem;
+}
+
+.settings-floating-notice.is-error {
+  color: rgb(252 165 165);
+}
+
+.settings-floating-notice.is-success {
+  color: rgb(110 231 183);
+}
+
 @keyframes dropdown-fade {
   from {
     opacity: 0;
     transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes settings-tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -1045,8 +1111,13 @@ webview {
   .thinking-indicator-text,
   .thinking-indicator-ring,
   .turtle-spinner,
-  .git-header-diff-badge {
+  .git-header-diff-badge,
+  .settings-tab-panel,
+  .settings-nav-btn,
+  .settings-nav-label,
+  .settings-floating-actions {
     animation: none;
+    transition: none;
   }
 }
 
