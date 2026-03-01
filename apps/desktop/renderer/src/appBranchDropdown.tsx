@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import { memo, type Dispatch, type RefObject, type SetStateAction } from "react";
 
 type BranchDropdownPosition = {
   bottom: number;
@@ -40,7 +40,7 @@ type BranchDropdownPortalProps = {
   appendLog: (line: string) => void;
 };
 
-export const BranchDropdownPortal = ({
+const BranchDropdownPortalComponent = ({
   isOpen,
   activeProjectId,
   activeInsideRepo,
@@ -183,3 +183,5 @@ export const BranchDropdownPortal = ({
     document.body
   );
 };
+
+export const BranchDropdownPortal = memo(BranchDropdownPortalComponent);

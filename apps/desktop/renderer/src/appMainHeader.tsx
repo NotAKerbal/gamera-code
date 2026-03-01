@@ -1,4 +1,4 @@
-import { useMemo, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type RefObject, type SetStateAction } from "react";
+import { memo, useMemo, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type RefObject, type SetStateAction } from "react";
 import {
   FaApple,
   FaChevronDown,
@@ -81,6 +81,20 @@ type MainHeaderProps = {
   appendLog: (line: string) => void;
 };
 
+const hexToRgba = (hex: string, alpha: number) => {
+  const normalized = hex.trim().replace(/^#/, "");
+  const expanded = normalized.length === 3
+    ? normalized.split("").map((segment) => `${segment}${segment}`).join("")
+    : normalized;
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) {
+    return `rgba(100, 116, 139, ${alpha})`;
+  }
+  const r = Number.parseInt(expanded.slice(0, 2), 16);
+  const g = Number.parseInt(expanded.slice(2, 4), 16);
+  const b = Number.parseInt(expanded.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 const TerminalGlyph = ({ terminalId }: { terminalId: string }) => {
   if (
     terminalId === "windows-terminal" ||
@@ -99,15 +113,24 @@ const TerminalGlyph = ({ terminalId }: { terminalId: string }) => {
   if (
     terminalId === "x-terminal-emulator" ||
     terminalId === "gnome-terminal" ||
+    terminalId === "gnome-console" ||
     terminalId === "konsole" ||
-    terminalId === "xfce4-terminal"
+    terminalId === "xfce4-terminal" ||
+    terminalId === "tilix" ||
+    terminalId === "mate-terminal" ||
+    terminalId === "lxterminal" ||
+    terminalId === "terminator" ||
+    terminalId === "wezterm" ||
+    terminalId === "ghostty" ||
+    terminalId === "foot" ||
+    terminalId === "xterm"
   ) {
     return <FaLinux className="text-[10px] text-slate-400" />;
   }
   return <FaTerminal className="text-[10px] text-slate-400" />;
 };
 
-export const MainHeader = ({
+const MainHeaderComponent = ({
   isMacOS,
   isWindows,
   isWindowMaximized,
@@ -158,6 +181,7 @@ export const MainHeader = ({
   onCloseWindow,
   appendLog
 }: MainHeaderProps) => {
+  const useWindowsStyleHeader = isWindows || !isMacOS;
   const [showTerminalAlternatives, setShowTerminalAlternatives] = useState(false);
   const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
@@ -190,7 +214,7 @@ export const MainHeader = ({
   return (
     <header
     className={`drag-region window-header flex h-12 items-center justify-between border-b border-border/90 px-3 ${
-      isMacOS ? "window-header-macos" : isWindows ? "window-header-windows" : ""
+      isMacOS ? "window-header-macos" : useWindowsStyleHeader ? "window-header-windows" : ""
     }`}
   >
     <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-100">
@@ -220,6 +244,8 @@ export const MainHeader = ({
         {workspaces.map((workspace) => {
           const isActive = workspace.id === activeWorkspaceId;
           const workspaceLabel = workspace.name.trim() || "Workspace";
+          const workspaceTotal = workspace.runningCount + workspace.reviewCount + workspace.finishedCount;
+          const hasAnyStatus = workspace.runningCount > 0 || workspace.reviewCount > 0 || workspace.finishedCount > 0;
           return (
             <button
               key={workspace.id}
@@ -227,17 +253,27 @@ export const MainHeader = ({
               onClick={() => onSelectWorkspace(workspace.id)}
               title={workspaceLabel}
               type="button"
-              style={{ borderColor: isActive ? workspace.color : undefined }}
+              style={{
+                backgroundColor: isActive ? hexToRgba(workspace.color, 0.3) : hexToRgba(workspace.color, 0.15)
+              }}
             >
               <span className="workspace-segment-name">{workspaceLabel}</span>
-              <span className="workspace-segment-meta" aria-hidden="true">
-                <span className="workspace-segment-count count-running">{workspace.runningCount}</span>
-                <span className="workspace-segment-count count-review">{workspace.reviewCount}</span>
-                <span className="workspace-segment-count count-finished">{workspace.finishedCount}</span>
-              </span>
-              <span className="workspace-segment-summary">
-                {workspace.runningCount + workspace.reviewCount + workspace.finishedCount}
-              </span>
+              {hasAnyStatus ? (
+                <span className="workspace-segment-meta" aria-hidden="true">
+                  {workspace.runningCount > 0 ? (
+                    <span className="workspace-segment-count count-running">{workspace.runningCount}</span>
+                  ) : null}
+                  {workspace.reviewCount > 0 ? (
+                    <span className="workspace-segment-count count-review">{workspace.reviewCount}</span>
+                  ) : null}
+                  {workspace.finishedCount > 0 ? (
+                    <span className="workspace-segment-count count-finished">{workspace.finishedCount}</span>
+                  ) : null}
+                </span>
+              ) : null}
+              {workspaceTotal > 0 ? (
+                <span className="workspace-segment-summary">{workspaceTotal}</span>
+              ) : null}
               <span
                 className="workspace-segment-settings"
                 onClick={(event) => {
@@ -520,7 +556,7 @@ export const MainHeader = ({
       >
         <span className="inline-flex items-center gap-1"><FaCog className="text-[11px]" />Settings</span>
       </button>
-      {isWindows ? (
+      {useWindowsStyleHeader ? (
         <div className="window-controls ml-1">
           <button
             className="window-control-btn app-tooltip-target"
@@ -552,3 +588,5 @@ export const MainHeader = ({
   </header>
   );
 };
+
+export const MainHeader = memo(MainHeaderComponent);

@@ -1,5 +1,5 @@
-import type { CSSProperties, Dispatch, SetStateAction } from "react";
-import { FaTimes } from "react-icons/fa";
+import { memo, useEffect, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
+import { FaChevronDown, FaTimes } from "react-icons/fa";
 import type {
   AppTheme,
   AppSettings,
@@ -28,18 +28,16 @@ import {
 } from "./appCore";
 
 type SettingsModalProps = {
+  initialDraft: {
+    settings: AppSettings;
+    composerOptions: CodexThreadOptions;
+    settingsEnvText: string;
+    settingsTab: AppSettingsTab;
+  };
   isSettingsWindow: boolean;
   isMacOS: boolean;
   isWindows: boolean;
   appIconSrc: string;
-  settingsTab: AppSettingsTab;
-  setSettingsTab: Dispatch<SetStateAction<AppSettingsTab>>;
-  settings: AppSettings;
-  setSettings: Dispatch<SetStateAction<AppSettings>>;
-  composerOptions: CodexThreadOptions;
-  setComposerOptions: Dispatch<SetStateAction<CodexThreadOptions>>;
-  settingsEnvText: string;
-  setSettingsEnvText: Dispatch<SetStateAction<string>>;
   appSkills: SkillRecord[];
   systemTerminals: SystemTerminalOption[];
   skillEditorPath: string;
@@ -50,11 +48,11 @@ type SettingsModalProps = {
   settingsSaving: boolean;
   onClose: () => void;
   onCloseWindow: () => void | Promise<void>;
-  onSaveSettings: () => void | Promise<void>;
+  onSaveSettings: (draft: { settings: AppSettings; composerOptions: CodexThreadOptions; settingsEnvText: string }) => void | Promise<void>;
   onSaveSkillEditor: () => void | Promise<void>;
   onToggleAppSkillEnabled: (path: string, enabled: boolean) => Promise<void>;
   onOpenSkillEditor: (path: string) => Promise<void>;
-  onPickDefaultProjectDirectory: () => Promise<void>;
+  onPickDefaultProjectDirectory: () => Promise<string | null>;
   appendLog: (line: string) => void;
 };
 
@@ -64,6 +62,18 @@ type ToggleButtonProps = {
   className?: string;
   onLabel?: string;
   offLabel?: string;
+};
+
+type SelectOption = {
+  value: string;
+  label: string;
+};
+
+type CustomSelectProps = {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  className?: string;
 };
 
 const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLabel = "Off" }: ToggleButtonProps) => (
@@ -78,6 +88,58 @@ const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLa
     <span>{enabled ? onLabel : offLabel}</span>
   </button>
 );
+
+const CustomSelect = ({ value, options, onChange, className = "" }: CustomSelectProps) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0] ?? null;
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, []);
+
+  return (
+    <div ref={wrapperRef} className={`settings-select ${className}`.trim()}>
+      <button
+        type="button"
+        className="settings-select-trigger input text-xs"
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span className="truncate">{selected?.label ?? "Select"}</span>
+        <FaChevronDown className={`settings-select-icon ${isOpen ? "is-open" : ""}`} />
+      </button>
+      {isOpen && (
+        <div className="settings-select-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={`settings-select-option ${option.value === value ? "is-active" : ""}`}
+              onClick={() => {
+                onChange(option.value);
+                setIsOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const THEME_PREVIEW_STYLES: Record<AppTheme, CSSProperties> = {
   midnight: {
@@ -123,22 +185,26 @@ const THEME_PREVIEW_STYLES: Record<AppTheme, CSSProperties> = {
     ["--preview-thread-active" as string]: "rgba(203, 213, 225, 0.98)",
     ["--preview-text" as string]: "rgba(30, 41, 59, 0.95)",
     ["--preview-muted" as string]: "rgba(71, 85, 105, 0.7)"
+  },
+  "orange-cat": {
+    ["--preview-shell-start" as string]: "#41220f",
+    ["--preview-shell-end" as string]: "#1f1109",
+    ["--preview-sidebar-start" as string]: "#4b2811",
+    ["--preview-sidebar-end" as string]: "#311a0c",
+    ["--preview-border" as string]: "rgba(251, 146, 60, 0.55)",
+    ["--preview-thread" as string]: "rgba(120, 53, 15, 0.72)",
+    ["--preview-thread-active" as string]: "rgba(154, 52, 18, 0.92)",
+    ["--preview-text" as string]: "rgba(255, 237, 213, 0.98)",
+    ["--preview-muted" as string]: "rgba(254, 215, 170, 0.82)"
   }
 };
 
-export const SettingsModal = ({
+export const SettingsModal = memo(({
+  initialDraft,
   isSettingsWindow,
   isMacOS,
   isWindows,
   appIconSrc,
-  settingsTab,
-  setSettingsTab,
-  settings,
-  setSettings,
-  composerOptions,
-  setComposerOptions,
-  settingsEnvText,
-  setSettingsEnvText,
   appSkills,
   systemTerminals,
   skillEditorPath,
@@ -155,13 +221,31 @@ export const SettingsModal = ({
   onOpenSkillEditor,
   onPickDefaultProjectDirectory,
   appendLog
-}: SettingsModalProps) => (
-  <div className={isSettingsWindow ? "fixed inset-0 z-40 theme-settings-surface" : "fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"}>
-    <div className={isSettingsWindow ? "flex h-full w-full flex-col theme-settings-surface" : "flex w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon"}>
+}: SettingsModalProps) => {
+  const [settingsTab, setSettingsTab] = useState<AppSettingsTab>(initialDraft.settingsTab);
+  const [settings, setSettings] = useState<AppSettings>(initialDraft.settings);
+  const [composerOptions, setComposerOptions] = useState<CodexThreadOptions>(initialDraft.composerOptions);
+  const [settingsEnvText, setSettingsEnvText] = useState(initialDraft.settingsEnvText);
+
+  useEffect(() => {
+    setSettingsTab(initialDraft.settingsTab);
+    setSettings(initialDraft.settings);
+    setComposerOptions(initialDraft.composerOptions);
+    setSettingsEnvText(initialDraft.settingsEnvText);
+  }, [initialDraft]);
+
+  const useWindowsStyleHeader = isWindows || !isMacOS;
+  return (
+    <div
+      className={
+        isSettingsWindow ? "fixed inset-0 z-40 theme-settings-surface" : "fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
+      }
+    >
+    <div className={isSettingsWindow ? "relative flex h-full w-full flex-col theme-settings-surface" : "relative flex h-[42rem] max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon"}>
       {isSettingsWindow ? (
         <header
           className={`drag-region window-header flex h-12 shrink-0 items-center justify-between border-b border-border/90 px-3 ${
-            isMacOS ? "window-header-macos" : isWindows ? "window-header-windows" : ""
+            isMacOS ? "window-header-macos" : useWindowsStyleHeader ? "window-header-windows" : ""
           }`}
         >
           <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-100">
@@ -169,7 +253,7 @@ export const SettingsModal = ({
             <span>GameraCode - Settings</span>
           </div>
           <div className="no-drag flex items-center gap-2">
-            {isWindows ? (
+            {useWindowsStyleHeader ? (
               <div className="window-controls ml-1">
                 <button className="window-control-btn window-control-close" onClick={() => void onCloseWindow()} title="Close">
                   <FaTimes className="window-control-icon" />
@@ -191,105 +275,37 @@ export const SettingsModal = ({
         <aside className="shrink-0 md:w-52">
           <div className="rounded-xl border border-border bg-black/20 p-2">
             <button
-              className={settingsTab === "general" ? "btn-secondary w-full justify-start text-left text-xs" : "btn-ghost w-full justify-start text-left text-xs"}
+              className={settingsTab === "general" ? "settings-nav-btn is-active" : "settings-nav-btn"}
               onClick={() => setSettingsTab("general")}
             >
-              General
+              <span className="settings-nav-label">General</span>
             </button>
             <button
-              className={settingsTab === "codex" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              className={settingsTab === "codex" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
               onClick={() => setSettingsTab("codex")}
             >
-              Codex Defaults
+              <span className="settings-nav-label">Agent Defaults</span>
             </button>
             <button
-              className={settingsTab === "env" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              className={settingsTab === "env" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
               onClick={() => setSettingsTab("env")}
             >
-              Environment
+              <span className="settings-nav-label">Environment</span>
             </button>
             <button
-              className={settingsTab === "skills" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
+              className={settingsTab === "skills" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
               onClick={() => setSettingsTab("skills")}
             >
-              Skills
+              <span className="settings-nav-label">Skills</span>
             </button>
           </div>
         </aside>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div key={`settings-tab-${settingsTab}`} className="settings-tab-panel min-h-0 flex-1 overflow-y-auto pr-1 pb-20">
           {settingsTab === "general" && (
             <div className="space-y-3">
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">App</div>
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Permission mode</div>
-                  <select
-                    className="input"
-                    value={settings.permissionMode}
-                    onChange={(event) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        permissionMode: event.target.value as PermissionMode
-                      }))
-                    }
-                  >
-                    <option value="prompt_on_risk">Prompt on risk</option>
-                    <option value="always_ask">Always ask</option>
-                    <option value="auto_allow">Auto allow</option>
-                  </select>
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Auto-rename new threads</div>
-                  <ToggleButton
-                    enabled={settings.autoRenameThreadTitles ?? true}
-                    className="md:justify-self-end"
-                    onToggle={(enabled) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        autoRenameThreadTitles: enabled
-                      }))
-                    }
-                  />
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Show thread descriptions</div>
-                  <ToggleButton
-                    enabled={settings.showThreadSummaries ?? true}
-                    className="md:justify-self-end"
-                    onToggle={(enabled) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        showThreadSummaries: enabled
-                      }))
-                    }
-                  />
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
                 <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Theme</div>
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">App theme</div>
-                  <select
-                    className="input"
-                    value={settings.theme ?? "midnight"}
-                    onChange={(event) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        theme: event.target.value as AppTheme
-                      }))
-                    }
-                  >
-                    {THEME_OPTIONS.map((theme) => (
-                      <option key={theme.value} value={theme.value}>
-                        {theme.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div className="mx-2 px-2 pb-3">
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                     {THEME_OPTIONS.map((theme) => {
@@ -326,7 +342,41 @@ export const SettingsModal = ({
                     })}
                   </div>
                 </div>
+              </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Thread UX</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Auto-rename new threads</div>
+                  <ToggleButton
+                    enabled={settings.autoRenameThreadTitles ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        autoRenameThreadTitles: enabled
+                      }))
+                    }
+                  />
+                </div>
                 <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Show thread descriptions</div>
+                  <ToggleButton
+                    enabled={settings.showThreadSummaries ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        showThreadSummaries: enabled
+                      }))
+                    }
+                  />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Interface</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Use turtle spinners</div>
                   <ToggleButton
@@ -357,6 +407,42 @@ export const SettingsModal = ({
               </section>
 
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Terminal</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Project switch terminal behavior</div>
+                  <CustomSelect
+                    value={settings.projectTerminalSwitchBehaviorDefault ?? "start_stop"}
+                    options={PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        projectTerminalSwitchBehaviorDefault: value as ProjectTerminalSwitchBehavior
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Preferred system terminal</div>
+                  <CustomSelect
+                    value={settings.preferredSystemTerminalId ?? ""}
+                    options={[
+                      { value: "", label: "Auto (first available)" },
+                      ...systemTerminals
+                        .filter((terminal) => terminal.available)
+                        .map((terminal) => ({ value: terminal.id, label: terminal.label }))
+                    ]}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        preferredSystemTerminalId: value
+                      }))
+                    }
+                  />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
                 <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Projects</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Default project directory</div>
@@ -375,7 +461,15 @@ export const SettingsModal = ({
                     <button
                       className="btn-secondary whitespace-nowrap"
                       onClick={() => {
-                        onPickDefaultProjectDirectory().catch((error) => {
+                        onPickDefaultProjectDirectory().then((picked) => {
+                          if (!picked) {
+                            return;
+                          }
+                          setSettings((prev) => ({
+                            ...prev,
+                            defaultProjectDirectory: picked
+                          }));
+                        }).catch((error) => {
                           appendLog(`Pick project directory failed: ${String(error)}`);
                         });
                       }}
@@ -391,121 +485,65 @@ export const SettingsModal = ({
           {settingsTab === "codex" && (
             <div className="space-y-3">
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Defaults For New Threads</div>
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Access & Safety</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Model</div>
-                  <input
-                    list="model-suggestions"
-                    className="input text-xs"
-                    value={composerOptions.model ?? ""}
-                    placeholder="Model (default)"
-                    onChange={(event) =>
-                      setComposerOptions((prev) => ({
+                  <div className="text-sm text-muted">Permission mode</div>
+                  <CustomSelect
+                    value={settings.permissionMode}
+                    options={[
+                      { value: "prompt_on_risk", label: "Prompt on risk" },
+                      { value: "always_ask", label: "Always ask" },
+                      { value: "auto_allow", label: "Auto allow" }
+                    ]}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
                         ...prev,
-                        model: event.target.value.trim() || undefined
+                        permissionMode: value as PermissionMode
                       }))
                     }
                   />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Collaboration mode</div>
-                  <select
-                    className="input text-xs"
-                    value={composerOptions.collaborationMode ?? "plan"}
-                    onChange={(event) =>
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        collaborationMode: event.target.value as CodexCollaborationMode
-                      }))
-                    }
-                  >
-                    {COLLABORATION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Reasoning effort</div>
-                  <select
-                    className="input text-xs"
-                    value={composerOptions.modelReasoningEffort ?? "medium"}
-                    onChange={(event) =>
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        modelReasoningEffort: event.target.value as CodexModelReasoningEffort
-                      }))
-                    }
-                  >
-                    {REASONING_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Sandbox mode</div>
-                  <select
-                    className="input text-xs"
+                  <CustomSelect
                     value={composerOptions.sandboxMode ?? "workspace-write"}
-                    onChange={(event) =>
+                    options={SANDBOX_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
                       setComposerOptions((prev) => ({
                         ...prev,
-                        sandboxMode: event.target.value as CodexSandboxMode
+                        sandboxMode: value as CodexSandboxMode
                       }))
                     }
-                  >
-                    {SANDBOX_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Approval policy</div>
-                  <select
-                    className="input text-xs"
+                  <CustomSelect
                     value={composerOptions.approvalPolicy ?? "on-request"}
-                    onChange={(event) =>
+                    options={APPROVAL_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
                       setComposerOptions((prev) => ({
                         ...prev,
-                        approvalPolicy: event.target.value as CodexApprovalMode
+                        approvalPolicy: value as CodexApprovalMode
                       }))
                     }
-                  >
-                    {APPROVAL_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Web search mode</div>
-                  <select
-                    className="input text-xs"
+                  <CustomSelect
                     value={composerOptions.webSearchMode ?? "cached"}
-                    onChange={(event) =>
+                    options={WEB_SEARCH_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
                       setComposerOptions((prev) => ({
                         ...prev,
-                        webSearchMode: event.target.value as CodexWebSearchMode
+                        webSearchMode: value as CodexWebSearchMode
                       }))
                     }
-                  >
-                    {WEB_SEARCH_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -524,70 +562,83 @@ export const SettingsModal = ({
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Sub-thread spawn policy</div>
-                  <select
-                    className="input text-xs"
+                  <CustomSelect
                     value={settings.subthreadPolicyDefault ?? "ask"}
-                    onChange={(event) =>
+                    options={SUBTHREAD_POLICY_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
                       setSettings((prev) => ({
                         ...prev,
-                        subthreadPolicyDefault: event.target.value as "manual" | "ask" | "auto"
+                        subthreadPolicyDefault: value as "manual" | "ask" | "auto"
                       }))
                     }
-                  >
-                    {SUBTHREAD_POLICY_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </section>
 
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Terminal</div>
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Model</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Project switch terminal behavior</div>
-                  <select
+                  <div className="text-sm text-muted">Model</div>
+                  <input
+                    list="model-suggestions"
                     className="input text-xs"
-                    value={settings.projectTerminalSwitchBehaviorDefault ?? "start_stop"}
+                    value={composerOptions.model ?? ""}
+                    placeholder="Model (default)"
                     onChange={(event) =>
-                      setSettings((prev) => ({
+                      setComposerOptions((prev) => ({
                         ...prev,
-                        projectTerminalSwitchBehaviorDefault: event.target.value as ProjectTerminalSwitchBehavior
+                        model: event.target.value.trim() || undefined
                       }))
                     }
-                  >
-                    {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Preferred system terminal</div>
-                  <select
-                    className="input text-xs"
-                    value={settings.preferredSystemTerminalId ?? ""}
-                    onChange={(event) =>
-                      setSettings((prev) => ({
+                  <div className="text-sm text-muted">Reasoning effort</div>
+                  <CustomSelect
+                    value={composerOptions.modelReasoningEffort ?? "medium"}
+                    options={REASONING_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
+                      setComposerOptions((prev) => ({
                         ...prev,
-                        preferredSystemTerminalId: event.target.value
+                        modelReasoningEffort: value as CodexModelReasoningEffort
                       }))
                     }
-                  >
-                    <option value="">Auto (first available)</option>
-                    {systemTerminals
-                      .filter((terminal) => terminal.available)
-                      .map((terminal) => (
-                        <option key={terminal.id} value={terminal.id}>
-                          {terminal.label}
-                        </option>
-                      ))}
-                  </select>
+                  />
                 </div>
               </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Collaboration</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Collaboration mode</div>
+                  <CustomSelect
+                    value={composerOptions.collaborationMode ?? "plan"}
+                    options={COLLABORATION_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
+                      setComposerOptions((prev) => ({
+                        ...prev,
+                        collaborationMode: value as CodexCollaborationMode
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Sub-thread spawn policy</div>
+                  <CustomSelect
+                    value={settings.subthreadPolicyDefault ?? "ask"}
+                    options={SUBTHREAD_POLICY_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        subthreadPolicyDefault: value as "manual" | "ask" | "auto"
+                      }))
+                    }
+                  />
+                </div>
+              </section>
+
             </div>
           )}
 
@@ -678,23 +729,37 @@ export const SettingsModal = ({
         ))}
       </datalist>
 
-      <div className="mt-4 flex shrink-0 items-center gap-2 border-t border-border pt-4">
-        <div
-          className={`mr-auto text-xs ${
-            settingsSaveNotice.startsWith("Settings save failed:") ? "text-rose-300" : "text-emerald-300"
-          }`}
+      <div className="settings-floating-actions">
+        {settingsSaveNotice ? (
+          <div
+            className={`settings-floating-notice ${
+              settingsSaveNotice.startsWith("Settings save failed:") ? "is-error" : "is-success"
+            }`}
+          >
+            {settingsSaveNotice}
+          </div>
+        ) : null}
+        <button
+          className="btn-secondary"
+          onClick={() => {
+            if (isSettingsWindow) {
+              void onCloseWindow();
+              return;
+            }
+            onClose();
+          }}
         >
-          {settingsSaveNotice}
-        </div>
-        {!isSettingsWindow && (
-          <button className="btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-        )}
-        <button className="btn-primary" onClick={onSaveSettings} disabled={settingsSaving}>
+          Cancel
+        </button>
+        <button
+          className="btn-primary"
+          onClick={() => onSaveSettings({ settings, composerOptions, settingsEnvText })}
+          disabled={settingsSaving}
+        >
           {settingsSaving ? "Saving..." : "Save"}
         </button>
       </div>
     </div>
   </div>
-);
+  );
+});

@@ -64,10 +64,10 @@ import type {
   Project,
   ProjectFileEntry,
   ProjectSettings,
+  ProjectTerminalSwitchBehavior,
   ProjectWebLink,
   ProjectTerminalEvent,
   ProjectTerminalState,
-  ProjectTerminalSwitchBehavior,
   SystemTerminalOption,
   SessionEvent,
   SkillRecord,
@@ -160,7 +160,6 @@ import {
   writeStoredActiveProjectId,
   writeStoredActiveWorkspaceId,
   type ActivityEntry,
-  type AppSettingsTab,
   type ComposerAttachment,
   type ComposerDropdownKind,
   type FileMentionState,
@@ -199,6 +198,9 @@ const api = window.desktopAPI;
 const platformHints = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
 const isMacOS = platformHints.includes("mac");
 const isWindows = platformHints.includes("win");
+const useWindowsStyleHeader = !isMacOS;
+type TooltipPlacement = "above" | "below";
+const TOOLTIP_HOVER_DELAY_MS = 500;
 
 export const App = () => {
   const isSettingsWindow = isSettingsWindowContext();
@@ -224,23 +226,49 @@ export const App = () => {
   const [setupPermissionGranted, setSetupPermissionGranted] = useState(false);
   const [setupInstalling, setSetupInstalling] = useState(false);
   const [setupLiveLines, setSetupLiveLines] = useState<string[]>([]);
+  const [isSetupCardDismissed, setIsSetupCardDismissed] = useState(false);
   const setupLogEndRef = useRef<HTMLDivElement | null>(null);
   const setupLiveBufferRef = useRef<string[]>([]);
   const setupLiveFlushTimeoutRef = useRef<number | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(() => isSettingsWindowContext());
-  const [settingsTab, setSettingsTab] = useState<AppSettingsTab>("general");
+  const [appSettingsInitialDraft, setAppSettingsInitialDraft] = useState<{
+    settings: AppSettings;
+    composerOptions: CodexThreadOptions;
+    settingsEnvText: string;
+    settingsTab: "general" | "codex" | "env" | "skills";
+  }>({
+    settings: DEFAULT_SETTINGS,
+    composerOptions: DEFAULT_SETTINGS.codexDefaults,
+    settingsEnvText: envVarsToText(DEFAULT_SETTINGS.envVars),
+    settingsTab: "general"
+  });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaveNotice, setSettingsSaveNotice] = useState("");
   const [showProjectSettings, setShowProjectSettings] = useState(false);
-  const [projectSettingsTab, setProjectSettingsTab] = useState<"general" | "env" | "commands" | "links" | "skills">("general");
+  const [projectSettingsInitialDraft, setProjectSettingsInitialDraft] = useState<{
+    projectName: string;
+    projectWorkspaceTargetId: string;
+    projectSettingsBrowserEnabled: boolean;
+    projectSettingsEnvText: string;
+    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>;
+    projectSettingsWebLinks: ProjectWebLink[];
+    projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
+    projectSubthreadPolicyOverride: SubthreadPolicy | "";
+  } | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
   const [workspaceModalMode, setWorkspaceModalMode] = useState<"create" | "edit">("create");
   const [workspaceEditingId, setWorkspaceEditingId] = useState<string | null>(null);
-  const [workspaceDraftName, setWorkspaceDraftName] = useState("");
-  const [workspaceDraftColor, setWorkspaceDraftColor] = useState("#64748b");
-  const [workspaceDraftMoveProjectIds, setWorkspaceDraftMoveProjectIds] = useState<string[]>([]);
+  const [workspaceModalInitialDraft, setWorkspaceModalInitialDraft] = useState<{
+    name: string;
+    color: string;
+    moveProjectIds: string[];
+  }>({
+    name: "",
+    color: "#64748b",
+    moveProjectIds: []
+  });
   const [showImportProjectModal, setShowImportProjectModal] = useState(false);
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -254,8 +282,14 @@ export const App = () => {
   const [creatingProject, setCreatingProject] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [updateMessage, setUpdateMessage] = useState<string>("");
-  const [settingsEnvText, setSettingsEnvText] = useState("{}");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const tooltipTargetRef = useRef<HTMLElement | null>(null);
+  const tooltipElementRef = useRef<HTMLDivElement | null>(null);
+  const tooltipVisibleRef = useRef(false);
+  const tooltipAnimationFrameRef = useRef<number | null>(null);
+  const tooltipHoverTimeoutRef = useRef<number | null>(null);
+  const tooltipTextRef = useRef("");
+  const tooltipPlacementRef = useRef<TooltipPlacement>("below");
   const [expandedActivityGroups, setExpandedActivityGroups] = useState<Record<string, boolean>>({});
   const [, setExpandedActivityChildren] = useState<Record<string, boolean>>({});
   const [threadHistoryCursorById, setThreadHistoryCursorById] = useState<Record<string, number | undefined>>({});
@@ -309,16 +343,6 @@ export const App = () => {
   const [isGitPoppedOut, setIsGitPoppedOut] = useState(false);
   const [isTerminalDashboardPoppedOut, setIsTerminalDashboardPoppedOut] = useState(false);
   const planPopoutWindowRef = useRef<Window | null>(null);
-  const [projectSettingsEnvText, setProjectSettingsEnvText] = useState("{}");
-  const [projectSettingsProjectName, setProjectSettingsProjectName] = useState("");
-  const [projectSettingsCommands, setProjectSettingsCommands] = useState<
-    Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>
-  >([]);
-  const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>([]);
-  const [projectSettingsBrowserEnabled, setProjectSettingsBrowserEnabled] = useState(true);
-  const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">("");
-  const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">("");
-  const [projectWorkspaceTargetId, setProjectWorkspaceTargetId] = useState<string>("");
   const [orchestrationRunsByParentId, setOrchestrationRunsByParentId] = useState<Record<string, OrchestrationRun[]>>({});
   const [orchestrationChildrenByRunId, setOrchestrationChildrenByRunId] = useState<Record<string, OrchestrationChild[]>>({});
   const [showRunningSubthreadsByThreadId, setShowRunningSubthreadsByThreadId] = useState<Record<string, boolean>>({});
@@ -382,6 +406,9 @@ export const App = () => {
   const terminalDashboardWindowRef = useRef<Window | null>(null);
   const isLightTheme = (settings.theme ?? "midnight") === "dawn" || (settings.theme ?? "midnight") === "linen";
   const appIconSrc = isLightTheme ? appIconLight : appIconDark;
+  const appendLog = useCallback((line: string) => {
+    setLogs((prev) => [...prev, line]);
+  }, []);
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
   const selectedProject = useMemo(
@@ -630,6 +657,101 @@ export const App = () => {
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
   const composerTooltipText = (label: string, detail: string, shortcut?: string) =>
     [label, detail, shortcut ? `Shortcut: ${shortcut}` : null].filter(Boolean).join("\n");
+  const clearPendingTooltipHover = useCallback(() => {
+    if (tooltipHoverTimeoutRef.current !== null) {
+      window.clearTimeout(tooltipHoverTimeoutRef.current);
+      tooltipHoverTimeoutRef.current = null;
+    }
+  }, []);
+  const clearGlobalTooltip = useCallback(() => {
+    clearPendingTooltipHover();
+    tooltipTargetRef.current = null;
+    tooltipVisibleRef.current = false;
+    const tooltip = tooltipElementRef.current;
+    if (!tooltip) {
+      return;
+    }
+    tooltip.classList.remove("is-visible", "is-above", "is-below");
+    tooltip.setAttribute("aria-hidden", "true");
+  }, [clearPendingTooltipHover]);
+  const updateGlobalTooltip = useCallback(() => {
+    const target = tooltipTargetRef.current;
+    if (!target || !target.isConnected) {
+      clearGlobalTooltip();
+      return;
+    }
+    const text = tooltipTextRef.current;
+    if (!text) {
+      clearGlobalTooltip();
+      return;
+    }
+    const tooltip = tooltipElementRef.current;
+    if (!tooltip) {
+      return;
+    }
+    const rect = target.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+      clearGlobalTooltip();
+      return;
+    }
+    let placement = tooltipPlacementRef.current;
+    if (placement === "above" && rect.top < 72) {
+      placement = "below";
+    } else if (placement === "below" && window.innerHeight - rect.bottom < 72) {
+      placement = "above";
+    }
+    const centerX = rect.left + rect.width / 2;
+    const left = Math.min(window.innerWidth - 16, Math.max(16, centerX));
+    const top = placement === "above" ? rect.top - 9 : rect.bottom + 9;
+    tooltip.textContent = text;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+    tooltip.classList.remove("is-above", "is-below");
+    tooltip.classList.add(placement === "above" ? "is-above" : "is-below");
+    tooltip.classList.add("is-visible");
+    tooltip.setAttribute("aria-hidden", "false");
+    tooltipVisibleRef.current = true;
+  }, [clearGlobalTooltip]);
+  const scheduleTooltipPositionUpdate = useCallback(() => {
+    if (tooltipAnimationFrameRef.current !== null) {
+      return;
+    }
+    tooltipAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      tooltipAnimationFrameRef.current = null;
+      updateGlobalTooltip();
+    });
+  }, [updateGlobalTooltip]);
+  const activateGlobalTooltip = useCallback(
+    (target: HTMLElement | null, hoverDelayMs = 0) => {
+      if (!target) {
+        clearGlobalTooltip();
+        return;
+      }
+      const appTooltipText = target.getAttribute("data-app-tooltip")?.trim();
+      const composerTooltip = target.getAttribute("data-composer-tooltip")?.trim();
+      const text = appTooltipText || composerTooltip;
+      if (!text) {
+        clearGlobalTooltip();
+        return;
+      }
+      if (tooltipTargetRef.current === target && tooltipTextRef.current === text && tooltipVisibleRef.current) {
+        return;
+      }
+      clearPendingTooltipHover();
+      tooltipTargetRef.current = target;
+      tooltipTextRef.current = text;
+      tooltipPlacementRef.current = appTooltipText ? "below" : "above";
+      if (hoverDelayMs > 0) {
+        tooltipHoverTimeoutRef.current = window.setTimeout(() => {
+          tooltipHoverTimeoutRef.current = null;
+          scheduleTooltipPositionUpdate();
+        }, hoverDelayMs);
+        return;
+      }
+      scheduleTooltipPositionUpdate();
+    },
+    [clearGlobalTooltip, clearPendingTooltipHover, scheduleTooltipPositionUpdate]
+  );
   const importQuery = importProjectQuery.trim();
   const shouldShowCloneAction = isLikelyGitRepositoryUrl(importQuery);
   const importCandidatesFiltered = useMemo(() => {
@@ -661,10 +783,34 @@ export const App = () => {
     () => Object.fromEntries(workspaces.map((workspace) => [workspace.id, workspace])) as Record<string, Workspace>,
     [workspaces]
   );
-  const projectsInActiveWorkspace = useMemo(
-    () => projects.filter((project) => !activeWorkspaceId || project.workspaceId === activeWorkspaceId),
-    [projects, activeWorkspaceId]
-  );
+  const projectsInActiveWorkspace = useMemo(() => {
+    const toTimestamp = (value: string) => {
+      const ts = Date.parse(value);
+      return Number.isFinite(ts) ? ts : 0;
+    };
+    const latestThreadUpdatedAtByProjectId = threads.reduce<Record<string, number>>((acc, thread) => {
+      const ts = toTimestamp(thread.updatedAt);
+      if (ts <= 0) {
+        return acc;
+      }
+      const prev = acc[thread.projectId] ?? 0;
+      if (ts > prev) {
+        acc[thread.projectId] = ts;
+      }
+      return acc;
+    }, {});
+
+    return projects
+      .filter((project) => !activeWorkspaceId || project.workspaceId === activeWorkspaceId)
+      .sort((a, b) => {
+        const aLatest = latestThreadUpdatedAtByProjectId[a.id] ?? toTimestamp(a.updatedAt);
+        const bLatest = latestThreadUpdatedAtByProjectId[b.id] ?? toTimestamp(b.updatedAt);
+        if (aLatest !== bLatest) {
+          return bLatest - aLatest;
+        }
+        return a.name.localeCompare(b.name);
+      });
+  }, [projects, activeWorkspaceId, threads]);
   const hasPendingSubagentReviewByThreadId = useMemo(() => {
     const next: Record<string, boolean> = {};
     Object.entries(orchestrationRunsByParentId).forEach(([threadId, runs]) => {
@@ -743,6 +889,79 @@ export const App = () => {
       // Ignore audio failures so run completion never breaks the UI.
     }
   };
+  useEffect(() => {
+    const resolveTooltipTarget = (value: EventTarget | null): HTMLElement | null => {
+      if (!(value instanceof Element)) {
+        return null;
+      }
+      return value.closest<HTMLElement>("[data-app-tooltip], [data-composer-tooltip]");
+    };
+
+    const handleMouseOver = (event: MouseEvent) => {
+      const target = resolveTooltipTarget(event.target);
+      if (!target) {
+        return;
+      }
+      activateGlobalTooltip(target, TOOLTIP_HOVER_DELAY_MS);
+    };
+    const handleMouseOut = (event: MouseEvent) => {
+      const currentTarget = tooltipTargetRef.current;
+      if (!currentTarget) {
+        return;
+      }
+      const relatedTarget = event.relatedTarget;
+      if (relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
+        return;
+      }
+      const nextTarget = resolveTooltipTarget(relatedTarget);
+      if (nextTarget) {
+        activateGlobalTooltip(nextTarget);
+        return;
+      }
+      clearGlobalTooltip();
+    };
+    const handleFocusIn = (event: FocusEvent) => {
+      activateGlobalTooltip(resolveTooltipTarget(event.target));
+    };
+    const handleFocusOut = (event: FocusEvent) => {
+      const currentTarget = tooltipTargetRef.current;
+      if (!currentTarget) {
+        return;
+      }
+      const relatedTarget = event.relatedTarget;
+      if (relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) {
+        return;
+      }
+      const nextTarget = resolveTooltipTarget(relatedTarget);
+      if (nextTarget) {
+        activateGlobalTooltip(nextTarget);
+        return;
+      }
+      clearGlobalTooltip();
+    };
+
+    document.addEventListener("mouseover", handleMouseOver);
+    document.addEventListener("mouseout", handleMouseOut);
+    document.addEventListener("focusin", handleFocusIn);
+    document.addEventListener("focusout", handleFocusOut);
+    document.addEventListener("scroll", scheduleTooltipPositionUpdate, { capture: true, passive: true });
+    window.addEventListener("resize", scheduleTooltipPositionUpdate);
+    window.addEventListener("blur", clearGlobalTooltip);
+    return () => {
+      document.removeEventListener("mouseover", handleMouseOver);
+      document.removeEventListener("mouseout", handleMouseOut);
+      document.removeEventListener("focusin", handleFocusIn);
+      document.removeEventListener("focusout", handleFocusOut);
+      document.removeEventListener("scroll", scheduleTooltipPositionUpdate, true);
+      window.removeEventListener("resize", scheduleTooltipPositionUpdate);
+      window.removeEventListener("blur", clearGlobalTooltip);
+      if (tooltipAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(tooltipAnimationFrameRef.current);
+        tooltipAnimationFrameRef.current = null;
+      }
+      clearPendingTooltipHover();
+    };
+  }, [activateGlobalTooltip, clearGlobalTooltip, clearPendingTooltipHover, scheduleTooltipPositionUpdate]);
   const flashCompletedThread = (threadId: string) => {
     setThreadCompletionFlashById((prev) => ({ ...prev, [threadId]: true }));
     setThreadFinishedUnreadById((prev) => ({ ...prev, [threadId]: true }));
@@ -895,13 +1114,18 @@ export const App = () => {
   const loadSettings = async () => {
     const current = await api.settings.get();
     applySettings(current);
+    setAppSettingsInitialDraft({
+      settings: current,
+      composerOptions: current.codexDefaults,
+      settingsEnvText: envVarsToText(current.envVars),
+      settingsTab: "general"
+    });
     setSettingsSaveNotice("");
     await loadAppSkills();
   };
 
   const applySettings = (next: AppSettings) => {
     setSettings(next);
-    setSettingsEnvText(envVarsToText(next.envVars));
     setComposerOptions(next.codexDefaults);
   };
 
@@ -1324,6 +1548,26 @@ export const App = () => {
     });
   };
 
+  const appendLocalUserMessage = (threadId: string, input: string, attachments: PromptAttachment[]) => {
+    const sentAt = new Date().toISOString();
+    setThreads((prev) => bumpThreadToFrontById(prev, threadId, sentAt));
+    if (activeThreadIdRef.current !== threadId) {
+      return;
+    }
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        threadId,
+        role: "user",
+        content: buildUserPromptContent(input, attachments),
+        attachments,
+        ts: sentAt,
+        streamSeq: prev.length + 1
+      }
+    ]);
+  };
+
   const dispatchPromptToThread = async (threadId: string, prompt: QueuedPrompt) => {
     const optionKey = codexOptionsKey(prompt.options);
     if (optionKey !== lastStartedOptionsKeyRef.current) {
@@ -1349,22 +1593,7 @@ export const App = () => {
       return next;
     });
 
-    const sentAt = new Date().toISOString();
-    setThreads((prev) => bumpThreadToFrontById(prev, threadId, sentAt));
-    if (activeThreadIdRef.current === threadId) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          threadId,
-          role: "user",
-          content: buildUserPromptContent(prompt.input, prompt.attachments),
-          attachments: prompt.attachments,
-          ts: sentAt,
-          streamSeq: prev.length + 1
-        }
-      ]);
-    }
+    appendLocalUserMessage(threadId, prompt.input, prompt.attachments);
     setRunStateByThreadId((prev) => {
       const next = {
         ...prev,
@@ -1464,6 +1693,7 @@ export const App = () => {
       setLogs((prev) => [...prev, "Queued steer failed."]);
       return;
     }
+    appendLocalUserMessage(threadId, prompt.input, prompt.attachments);
     removeQueuedPrompt(threadId, prompt.id);
   };
 
@@ -2619,6 +2849,12 @@ export const App = () => {
       if (!errorText.includes("No handler registered")) {
         setLogs((prev) => [...prev, `Open settings window failed: ${errorText}`]);
       }
+      setAppSettingsInitialDraft({
+        settings,
+        composerOptions: settings.codexDefaults,
+        settingsEnvText: envVarsToText(settings.envVars),
+        settingsTab: "general"
+      });
       setShowSettings(true);
     }
   };
@@ -2738,40 +2974,48 @@ export const App = () => {
       return;
     }
     const current = projectSettingsById[projectId] ?? (await loadProjectSettings(projectId));
-    setProjectSettingsEnvText(envVarsToText(current.envVars));
-    setProjectSettingsCommands(
-      current.devCommands.map((command, index) => ({
-        ...command,
-        autoStart: command.autoStart ?? index === 0,
-        useForPreview: command.useForPreview ?? index === 0
-      }))
-    );
-    setProjectSettingsWebLinks(
-      (current.webLinks ?? []).map((link, index) => ({
-        id: link.id?.trim() || `link-${index + 1}`,
-        name: link.name ?? "",
-        url: link.url ?? ""
-      }))
-    );
+    const nextCommands = current.devCommands.map((command, index) => ({
+      ...command,
+      autoStart: command.autoStart ?? index === 0,
+      useForPreview: command.useForPreview ?? index === 0
+    }));
+    const nextWebLinks = (current.webLinks ?? []).map((link, index) => ({
+      id: link.id?.trim() || `link-${index + 1}`,
+      name: link.name ?? "",
+      url: link.url ?? ""
+    }));
     const projectName = projects.find((project) => project.id === projectId)?.name ?? "";
     const projectWorkspaceId = projects.find((project) => project.id === projectId)?.workspaceId ?? "";
-    setProjectSettingsProjectName(projectName);
-    setProjectWorkspaceTargetId(projectWorkspaceId);
-    setProjectSettingsBrowserEnabled(current.browserEnabled ?? true);
-    setProjectSwitchBehaviorOverride(current.switchBehaviorOverride ?? "");
-    setProjectSubthreadPolicyOverride(current.subthreadPolicyOverride ?? "");
-    setProjectSettingsTab("general");
+    setProjectSettingsInitialDraft({
+      projectName,
+      projectWorkspaceTargetId: projectWorkspaceId,
+      projectSettingsBrowserEnabled: current.browserEnabled ?? true,
+      projectSettingsEnvText: envVarsToText(current.envVars),
+      projectSettingsCommands: nextCommands,
+      projectSettingsWebLinks: nextWebLinks,
+      projectSwitchBehaviorOverride: current.switchBehaviorOverride ?? "",
+      projectSubthreadPolicyOverride: current.subthreadPolicyOverride ?? ""
+    });
     if (activeProjectId !== projectId) {
       setActiveProjectId(projectId);
     }
     setShowProjectSettings(true);
   };
 
-  const saveProjectSettings = async () => {
+  const saveProjectSettings = async (draft: {
+    projectName: string;
+    projectWorkspaceTargetId: string;
+    projectSettingsBrowserEnabled: boolean;
+    projectSettingsEnvText: string;
+    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>;
+    projectSettingsWebLinks: ProjectWebLink[];
+    projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
+    projectSubthreadPolicyOverride: SubthreadPolicy | "";
+  }) => {
     if (!activeProjectId) {
       return;
     }
-    const nextProjectName = projectSettingsProjectName.trim();
+    const nextProjectName = draft.projectName.trim();
     if (!nextProjectName) {
       setLogs((prev) => [...prev, "Project settings save failed: project name is required."]);
       return;
@@ -2779,13 +3023,13 @@ export const App = () => {
 
     let envVars: Record<string, string> = {};
     try {
-      envVars = parseEnvText(projectSettingsEnvText);
+      envVars = parseEnvText(draft.projectSettingsEnvText);
     } catch (error) {
       setLogs((prev) => [...prev, `Project settings save failed: ${String(error)}`]);
       return;
     }
 
-    const sanitizedCommands = projectSettingsCommands
+    const sanitizedCommands = draft.projectSettingsCommands
       .map((command) => ({
         id: command.id.trim(),
         name: command.name.trim(),
@@ -2805,7 +3049,7 @@ export const App = () => {
     }
 
     const sanitizedWebLinks: ProjectWebLink[] = [];
-    for (const [index, link] of projectSettingsWebLinks.entries()) {
+    for (const [index, link] of draft.projectSettingsWebLinks.entries()) {
       const name = link.name.trim();
       const rawUrl = link.url.trim();
       if (!name && !rawUrl) {
@@ -2830,7 +3074,7 @@ export const App = () => {
     const updatedProject = await api.projects.update({
       id: activeProjectId,
       name: nextProjectName,
-      workspaceId: projectWorkspaceTargetId || undefined
+      workspaceId: draft.projectWorkspaceTargetId || undefined
     });
     setProjects((prev) => prev.map((project) => (project.id === updatedProject.id ? updatedProject : project)));
     if (activeProjectId === updatedProject.id) {
@@ -2842,9 +3086,9 @@ export const App = () => {
       envVars,
       devCommands: sanitizedCommands,
       webLinks: sanitizedWebLinks,
-      browserEnabled: projectSettingsBrowserEnabled,
-      switchBehaviorOverride: projectSwitchBehaviorOverride || undefined,
-      subthreadPolicyOverride: projectSubthreadPolicyOverride || undefined
+      browserEnabled: draft.projectSettingsBrowserEnabled,
+      switchBehaviorOverride: draft.projectSwitchBehaviorOverride || undefined,
+      subthreadPolicyOverride: draft.projectSubthreadPolicyOverride || undefined
     });
 
     setProjectSettingsById((prev) => ({
@@ -2858,6 +3102,7 @@ export const App = () => {
       }));
     }
     setShowProjectSettings(false);
+    setProjectSettingsInitialDraft(null);
   };
 
   const removeActiveProject = async () => {
@@ -2879,6 +3124,7 @@ export const App = () => {
     try {
       await api.projects.delete({ id: projectIdToRemove });
       setShowProjectSettings(false);
+      setProjectSettingsInitialDraft(null);
       setProjectSettingsById((prev) => {
         const next = { ...prev };
         delete next[projectIdToRemove];
@@ -3191,7 +3437,7 @@ export const App = () => {
           <button id="terminal-stop" class="btn">Stop</button>
           <button id="terminal-copy" class="btn">Copy</button>
           <span id="terminal-status" class="status"></span>
-          ${isWindows
+          ${useWindowsStyleHeader
             ? `<button id="windowMinBtn" class="window-btn" title="Minimize">&#8722;</button>
           <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">&#9723;</button>
           <button id="windowCloseBtn" class="window-btn close" title="Close">&times;</button>`
@@ -3845,7 +4091,7 @@ export const App = () => {
   }, [runShortcutByKey]);
 
   useEffect(() => {
-    if (!isWindows) {
+    if (isMacOS) {
       return;
     }
     let cancelled = false;
@@ -3937,9 +4183,11 @@ export const App = () => {
   const openCreateWorkspaceModal = () => {
     setWorkspaceModalMode("create");
     setWorkspaceEditingId(null);
-    setWorkspaceDraftName("");
-    setWorkspaceDraftColor("#64748b");
-    setWorkspaceDraftMoveProjectIds([]);
+    setWorkspaceModalInitialDraft({
+      name: "",
+      color: "#64748b",
+      moveProjectIds: []
+    });
     setShowWorkspaceModal(true);
   };
 
@@ -3950,15 +4198,17 @@ export const App = () => {
     }
     setWorkspaceModalMode("edit");
     setWorkspaceEditingId(workspace.id);
-    setWorkspaceDraftName(workspace.name);
-    setWorkspaceDraftColor(workspace.color);
-    setWorkspaceDraftMoveProjectIds([]);
+    setWorkspaceModalInitialDraft({
+      name: workspace.name,
+      color: workspace.color,
+      moveProjectIds: []
+    });
     setShowWorkspaceModal(true);
   };
 
-  const saveWorkspaceFromModal = async () => {
-    const name = workspaceDraftName.trim();
-    const color = workspaceDraftColor.trim() || "#64748b";
+  const saveWorkspaceFromModal = async (draft: { name: string; color: string; moveProjectIds: string[] }) => {
+    const name = draft.name.trim();
+    const color = draft.color.trim() || "#64748b";
     if (!name) {
       setLogs((prev) => [...prev, "Workspace name is required."]);
       return;
@@ -3968,7 +4218,7 @@ export const App = () => {
         name,
         icon: "grid",
         color,
-        moveProjectIds: workspaceDraftMoveProjectIds
+        moveProjectIds: draft.moveProjectIds
       });
       await Promise.all([loadWorkspaces(), loadProjects(), loadThreads()]);
       setShowWorkspaceModal(false);
@@ -4411,6 +4661,7 @@ export const App = () => {
     if (!activeThreadId) {
       return;
     }
+    const threadId = activeThreadId;
     const trimmed = composerRef.current.trim();
     const mentionedFiles = composerMentionedFiles;
     if (!trimmed && composerAttachments.length === 0 && mentionedFiles.length === 0) {
@@ -4427,7 +4678,7 @@ export const App = () => {
     }));
 
     const result = await api.sessions.steer({
-      threadId: activeThreadId,
+      threadId,
       input: promptInput,
       attachments: sendAttachments,
       skills: slashSkills.skills
@@ -4436,6 +4687,7 @@ export const App = () => {
       setLogs((prev) => [...prev, "Steer failed."]);
       return;
     }
+    appendLocalUserMessage(threadId, promptInput, sendAttachments);
 
     applyComposerText("");
     scheduleComposerResize();
@@ -4445,7 +4697,7 @@ export const App = () => {
     setSkillMention(null);
     setComposerDraftByThreadId((prev) => ({
       ...prev,
-      [activeThreadId]: ""
+      [threadId]: ""
     }));
     setComposerAttachments((prev) => {
       prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
@@ -4512,7 +4764,7 @@ export const App = () => {
       return;
     }
     navigator.clipboard.writeText(plan.markdown).catch((error) => {
-      setLogs((prev) => [...prev, `Copy plan failed: ${String(error)}`]);
+      appendLog(`Copy plan failed: ${String(error)}`);
     });
   };
 
@@ -4534,7 +4786,7 @@ export const App = () => {
 
     const popout = window.open("", "codeapp-plan-viewer", "popup=yes,width=1080,height=820,resizable=yes,scrollbars=yes");
     if (!popout) {
-      setLogs((prev) => [...prev, "Plan pop-out blocked."]);
+      appendLog("Plan pop-out blocked.");
       return;
     }
 
@@ -4732,7 +4984,7 @@ export const App = () => {
     shell.className = "shell";
 
     const head = doc.createElement("div");
-    head.className = `head drag-region window-header ${isWindows ? "window-header-windows" : ""} ${isMacOS ? "window-header-macos" : ""}`;
+    head.className = `head drag-region window-header ${useWindowsStyleHeader ? "window-header-windows" : ""} ${isMacOS ? "window-header-macos" : ""}`;
 
     const brand = doc.createElement("div");
     brand.className = "brand";
@@ -4777,7 +5029,7 @@ export const App = () => {
     });
     actions.appendChild(copyBtn);
     actions.appendChild(buildBtn);
-    if (isWindows) {
+    if (useWindowsStyleHeader) {
       const desktopApi = (popout as Window & { desktopAPI?: typeof api }).desktopAPI;
       const windowControls = doc.createElement("div");
       windowControls.className = "window-controls";
@@ -4979,7 +5231,7 @@ export const App = () => {
           <button class="btn" data-action="start_all">Start All</button>
           <button class="btn" data-action="restart_all">Restart Running</button>
           <button class="btn" data-action="stop_all">Stop All</button>
-          ${isWindows
+          ${useWindowsStyleHeader
             ? `<button id="windowMinBtn" class="window-btn" title="Minimize">&#8722;</button>
           <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">&#9723;</button>
           <button id="windowCloseBtn" class="window-btn close" title="Close">&times;</button>`
@@ -5675,14 +5927,14 @@ const stopActiveRun = async () => {
     []
   );
 
-  const saveSettings = async () => {
+  const saveSettings = async (draft: { settings: AppSettings; composerOptions: CodexThreadOptions; settingsEnvText: string }) => {
     if (settingsSaving) {
       return;
     }
 
     let envVars: Record<string, string> = {};
     try {
-      envVars = parseEnvText(settingsEnvText);
+      envVars = parseEnvText(draft.settingsEnvText);
     } catch (error) {
       const message = `Settings save failed: ${String(error)}`;
       setLogs((prev) => [...prev, message]);
@@ -5693,26 +5945,32 @@ const stopActiveRun = async () => {
     setSettingsSaving(true);
     setSettingsSaveNotice("");
     try {
-      const mode = settings.permissionMode as PermissionMode;
+      const mode = draft.settings.permissionMode as PermissionMode;
 
       const saved = await api.settings.set({
         permissionMode: mode,
-        theme: settings.theme ?? "midnight",
+        theme: draft.settings.theme ?? "midnight",
         envVars,
-        defaultProjectDirectory: settings.defaultProjectDirectory?.trim() ?? "",
-        autoRenameThreadTitles: settings.autoRenameThreadTitles ?? true,
-        showThreadSummaries: settings.showThreadSummaries ?? true,
-        useTurtleSpinners: settings.useTurtleSpinners ?? false,
-        condenseActivityTimeline: settings.condenseActivityTimeline ?? true,
-        projectTerminalSwitchBehaviorDefault: settings.projectTerminalSwitchBehaviorDefault ?? "start_stop",
-        preferredSystemTerminalId: settings.preferredSystemTerminalId?.trim() ?? "",
-        codexDefaults: composerOptions
+        defaultProjectDirectory: draft.settings.defaultProjectDirectory?.trim() ?? "",
+        autoRenameThreadTitles: draft.settings.autoRenameThreadTitles ?? true,
+        showThreadSummaries: draft.settings.showThreadSummaries ?? true,
+        useTurtleSpinners: draft.settings.useTurtleSpinners ?? false,
+        condenseActivityTimeline: draft.settings.condenseActivityTimeline ?? true,
+        projectTerminalSwitchBehaviorDefault: draft.settings.projectTerminalSwitchBehaviorDefault ?? "start_stop",
+        preferredSystemTerminalId: draft.settings.preferredSystemTerminalId?.trim() ?? "",
+        codexDefaults: draft.composerOptions
       });
 
       await api.permissions.setMode({ mode });
 
       setSettings(saved);
       setComposerOptions(saved.codexDefaults);
+      setAppSettingsInitialDraft({
+        settings: saved,
+        composerOptions: saved.codexDefaults,
+        settingsEnvText: envVarsToText(saved.envVars),
+        settingsTab: "general"
+      });
       setSettingsSaveNotice("Settings saved.");
       if (!isSettingsWindow) {
         setShowSettings(false);
@@ -5772,6 +6030,11 @@ const stopActiveRun = async () => {
     installStatus &&
       (!installStatus.nodeOk || !installStatus.npmOk || !installStatus.gitOk || !installStatus.rgOk || !installStatus.codexOk)
   );
+  useEffect(() => {
+    if (!setupBlocked) {
+      setIsSetupCardDismissed(false);
+    }
+  }, [setupBlocked]);
   const planArtifacts = useMemo<PlanArtifact[]>(() => {
     const plans: PlanArtifact[] = [];
 
@@ -5822,6 +6085,36 @@ const stopActiveRun = async () => {
     [planArtifacts]
   );
   const todoPlans = useMemo(() => planArtifacts.filter((plan) => plan.source === "todo"), [planArtifacts]);
+  const getTodoPlanByActivityId = useCallback(
+    (activityId: string) => todoPlans.find((plan) => plan.activityId === activityId),
+    [todoPlans]
+  );
+  const handleBuildPlan = useCallback(
+    (planId: string) => {
+      buildNowFromPlan(planId).catch((error) => {
+        appendLog(`Build now failed: ${String(error)}`);
+      });
+    },
+    [appendLog, buildNowFromPlan]
+  );
+  const togglePreviewPanel = useCallback(() => {
+    setIsPreviewOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsGitPanelOpen(false);
+      }
+      return next;
+    });
+  }, []);
+  const toggleGitPanel = useCallback(() => {
+    setIsGitPanelOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsPreviewOpen(false);
+      }
+      return next;
+    });
+  }, []);
 
   const timelineItems = useMemo(() => {
     const messageItems: TimelineMessageItem[] = messages.map((message, idx) => {
@@ -6191,9 +6484,65 @@ const stopActiveRun = async () => {
     }
   };
 
+  const closeSettingsModal = useCallback(() => {
+    setShowSettings(false);
+    setAppSettingsInitialDraft({
+      settings,
+      composerOptions: settings.codexDefaults,
+      settingsEnvText: envVarsToText(settings.envVars),
+      settingsTab: "general"
+    });
+  }, [settings]);
+
+  const toggleAppSkillEnabled = useCallback(
+    async (path: string, enabled: boolean) => {
+      await api.skills.setEnabled({ path, enabled });
+      await loadAppSkills();
+    },
+    [loadAppSkills]
+  );
+
+  const pickDefaultProjectDirectory = useCallback(async () => api.projects.pickPath(), []);
+
+  const closeProjectSettingsModal = useCallback(() => {
+    setShowProjectSettings(false);
+    setProjectSettingsInitialDraft(null);
+  }, []);
+
+  const moveProjectWorkspace = useCallback(
+    async (workspaceId: string) => {
+      if (!activeProjectId || !workspaceId) {
+        return;
+      }
+      const updated = await api.projects.update({
+        id: activeProjectId,
+        workspaceId
+      });
+      setProjects((prev) => prev.map((project) => (project.id === updated.id ? updated : project)));
+      setActiveWorkspaceId(updated.workspaceId);
+      await loadThreads();
+    },
+    [activeProjectId, loadThreads]
+  );
+
+  const toggleProjectSkillEnabled = useCallback(
+    async (path: string, enabled: boolean) => {
+      if (!activeProjectId) {
+        return;
+      }
+      await api.skills.setEnabled({ projectId: activeProjectId, path, enabled });
+      await loadProjectSkills(activeProjectId);
+    },
+    [activeProjectId, loadProjectSkills]
+  );
+
   return (
     <div className="h-screen overflow-hidden bg-bg text-white theme-text">
-      <div className={isSettingsWindow ? "h-full w-full theme-app-shell" : `h-full w-full theme-app-shell ${isWindows ? "" : "pl-2"}`}>
+      <div
+        className={
+          isSettingsWindow ? "h-full w-full theme-app-shell" : `h-full w-full theme-app-shell ${isMacOS ? "pl-2" : ""}`
+        }
+      >
         <div className={isSettingsWindow ? "flex h-full flex-col overflow-hidden theme-settings-surface" : "flex h-full flex-col overflow-hidden rounded-2xl bg-black/40 shadow-neon backdrop-blur-xl"}>
           {!isSettingsWindow && (
             <MainHeader
@@ -6240,24 +6589,8 @@ const stopActiveRun = async () => {
               activeProjectBrowserEnabled={activeProjectBrowserEnabled}
               isPreviewOpen={isPreviewOpen}
               isGitPanelOpen={isGitPanelOpen}
-              onTogglePreviewPanel={() => {
-                setIsPreviewOpen((prev) => {
-                  const next = !prev;
-                  if (next) {
-                    setIsGitPanelOpen(false);
-                  }
-                  return next;
-                });
-              }}
-              onToggleGitPanel={() => {
-                setIsGitPanelOpen((prev) => {
-                  const next = !prev;
-                  if (next) {
-                    setIsPreviewOpen(false);
-                  }
-                  return next;
-                });
-              }}
+              onTogglePreviewPanel={togglePreviewPanel}
+              onToggleGitPanel={toggleGitPanel}
               showHeaderGitDiffStats={Boolean(showHeaderGitDiffStats)}
               activeGitAddedLines={activeGitAddedLines}
               activeGitRemovedLines={activeGitRemovedLines}
@@ -6265,7 +6598,7 @@ const stopActiveRun = async () => {
               onMinimizeWindow={minimizeWindow}
               onToggleMaximizeWindow={toggleMaximizeWindow}
               onCloseWindow={closeWindow}
-              appendLog={(line) => setLogs((prev) => [...prev, line])}
+              appendLog={appendLog}
             />
           )}
 
@@ -6312,7 +6645,7 @@ const stopActiveRun = async () => {
                 </div>
               )}
 
-              <div className="flex-1 min-h-0 space-y-3 overflow-y-auto pr-1 pb-3">
+              <div className="projects-scroll-area flex-1 min-h-0 space-y-3 overflow-y-auto pb-3">
                 {projectsInActiveWorkspace.length === 0 && <p className="px-2 text-sm text-muted">No projects in this workspace.</p>}
 
                 {projectsInActiveWorkspace.map((project) => {
@@ -6778,9 +7111,20 @@ const stopActiveRun = async () => {
             </aside>
 
             <main className="main-layout-content flex h-full min-h-0 min-w-0 flex-col">
-              {hasUserPromptInThread && installStatus && setupBlocked && (
+              {hasUserPromptInThread && installStatus && setupBlocked && !isSetupCardDismissed && (
                 <section className="mx-4 mt-3 rounded-xl border border-border bg-panel/70 p-3">
-                  <h3 className="mb-2 text-sm font-semibold tracking-wide text-slate-100">Setup Required</h3>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold tracking-wide text-slate-100">Setup Required</h3>
+                    <button
+                      type="button"
+                      className="btn-ghost h-7 px-2 py-0 text-xs"
+                      onClick={() => setIsSetupCardDismissed(true)}
+                      aria-label="Dismiss setup required notice"
+                      title="Dismiss"
+                    >
+                      <FaTimes className="text-[10px]" />
+                    </button>
+                  </div>
                   <div className="mb-3 grid grid-cols-2 gap-2 text-sm">
                     {installStatus.details
                       .filter((detail) => REQUIRED_SETUP_KEYS.has(detail.key))
@@ -6869,11 +7213,7 @@ const stopActiveRun = async () => {
                               content={item.message.content}
                               plansById={plansById}
                               onViewPlan={openPlanDrawerFor}
-                              onBuildPlan={(planId) => {
-                                buildNowFromPlan(planId).catch((error) => {
-                                  setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
-                                });
-                              }}
+                              onBuildPlan={handleBuildPlan}
                               onCopyPlan={copyPlanToClipboard}
                             />
                           </article>
@@ -6889,13 +7229,9 @@ const stopActiveRun = async () => {
                             key={row.id}
                             timelineItems={[row.item]}
                             plansById={plansById}
-                            getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                            getTodoPlanByActivityId={getTodoPlanByActivityId}
                             onViewPlan={openPlanDrawerFor}
-                            onBuildPlan={(planId) => {
-                              buildNowFromPlan(planId).catch((error) => {
-                                setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
-                              });
-                            }}
+                            onBuildPlan={handleBuildPlan}
                             onCopyPlan={copyPlanToClipboard}
                             expandedActivityGroups={expandedActivityGroups}
                             setExpandedActivityGroups={setExpandedActivityGroups}
@@ -6930,13 +7266,9 @@ const stopActiveRun = async () => {
                                 <MemoizedTimelineItemsList
                                   timelineItems={row.items}
                                   plansById={plansById}
-                                  getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                                  getTodoPlanByActivityId={getTodoPlanByActivityId}
                                   onViewPlan={openPlanDrawerFor}
-                                  onBuildPlan={(planId) => {
-                                    buildNowFromPlan(planId).catch((error) => {
-                                      setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
-                                    });
-                                  }}
+                                  onBuildPlan={handleBuildPlan}
                                   onCopyPlan={copyPlanToClipboard}
                                   expandedActivityGroups={expandedActivityGroups}
                                   setExpandedActivityGroups={setExpandedActivityGroups}
@@ -6952,13 +7284,9 @@ const stopActiveRun = async () => {
                     <MemoizedTimelineItemsList
                       timelineItems={timelineItems}
                       plansById={plansById}
-                      getTodoPlanByActivityId={(activityId) => todoPlans.find((plan) => plan.activityId === activityId)}
+                      getTodoPlanByActivityId={getTodoPlanByActivityId}
                       onViewPlan={openPlanDrawerFor}
-                      onBuildPlan={(planId) => {
-                        buildNowFromPlan(planId).catch((error) => {
-                          setLogs((prev) => [...prev, `Build now failed: ${String(error)}`]);
-                        });
-                      }}
+                      onBuildPlan={handleBuildPlan}
                       onCopyPlan={copyPlanToClipboard}
                       expandedActivityGroups={expandedActivityGroups}
                       setExpandedActivityGroups={setExpandedActivityGroups}
@@ -8055,7 +8383,7 @@ const stopActiveRun = async () => {
         gitBranchInput={gitBranchInput}
         gitBusyAction={gitBusyAction}
         onSwitchOrCreateBranch={switchOrCreateBranch}
-        appendLog={(line) => setLogs((prev) => [...prev, line])}
+        appendLog={appendLog}
       />
 
       <ComposerDropdownPortal
@@ -8065,6 +8393,8 @@ const stopActiveRun = async () => {
         setComposerOptions={setComposerOptions}
         setComposerDropdown={setComposerDropdown}
       />
+
+      <div ref={tooltipElementRef} className="app-global-tooltip" role="tooltip" aria-hidden="true" />
 
       {showSetupModal && installStatus && (
         <SetupModal
@@ -8080,24 +8410,17 @@ const stopActiveRun = async () => {
           }}
           onRefreshStatus={loadInstallerStatus}
           onRunAutomaticSetup={runAutomaticSetup}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
       {(showSettings || isSettingsWindow) && (
         <SettingsModal
+          initialDraft={appSettingsInitialDraft}
           isSettingsWindow={isSettingsWindow}
           isMacOS={isMacOS}
           isWindows={isWindows}
           appIconSrc={appIconSrc}
-          settingsTab={settingsTab}
-          setSettingsTab={setSettingsTab}
-          settings={settings}
-          setSettings={setSettings}
-          composerOptions={composerOptions}
-          setComposerOptions={setComposerOptions}
-          settingsEnvText={settingsEnvText}
-          setSettingsEnvText={setSettingsEnvText}
           appSkills={appSkills}
           systemTerminals={systemTerminals}
           skillEditorPath={skillEditorPath}
@@ -8106,49 +8429,22 @@ const stopActiveRun = async () => {
           skillEditorSaving={skillEditorSaving}
           settingsSaveNotice={settingsSaveNotice}
           settingsSaving={settingsSaving}
-          onClose={() => setShowSettings(false)}
+          onClose={closeSettingsModal}
           onCloseWindow={closeWindow}
           onSaveSettings={saveSettings}
           onSaveSkillEditor={saveSkillEditor}
-          onToggleAppSkillEnabled={async (path, enabled) => {
-            await api.skills.setEnabled({ path, enabled });
-            await loadAppSkills();
-          }}
+          onToggleAppSkillEnabled={toggleAppSkillEnabled}
           onOpenSkillEditor={openSkillEditor}
-          onPickDefaultProjectDirectory={async () => {
-            const picked = await api.projects.pickPath();
-            if (!picked) {
-              return;
-            }
-            setSettings((prev) => ({
-              ...prev,
-              defaultProjectDirectory: picked
-            }));
-          }}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          onPickDefaultProjectDirectory={pickDefaultProjectDirectory}
+          appendLog={appendLog}
         />
       )}
 
-      {showProjectSettings && activeProjectId && (
+      {showProjectSettings && activeProjectId && projectSettingsInitialDraft && (
         <ProjectSettingsModal
           activeProjectId={activeProjectId}
-          projectSettingsProjectName={projectSettingsProjectName}
-          setProjectSettingsProjectName={setProjectSettingsProjectName}
-          projectSwitchBehaviorOverride={projectSwitchBehaviorOverride}
-          setProjectSwitchBehaviorOverride={setProjectSwitchBehaviorOverride}
-          projectSubthreadPolicyOverride={projectSubthreadPolicyOverride}
-          setProjectSubthreadPolicyOverride={setProjectSubthreadPolicyOverride}
-          projectSettingsBrowserEnabled={projectSettingsBrowserEnabled}
-          setProjectSettingsBrowserEnabled={setProjectSettingsBrowserEnabled}
-          projectSettingsEnvText={projectSettingsEnvText}
-          setProjectSettingsEnvText={setProjectSettingsEnvText}
-          projectSettingsCommands={projectSettingsCommands}
-          setProjectSettingsCommands={setProjectSettingsCommands}
-          projectSettingsWebLinks={projectSettingsWebLinks}
-          setProjectSettingsWebLinks={setProjectSettingsWebLinks}
+          initialDraft={projectSettingsInitialDraft}
           workspaces={workspaces}
-          projectWorkspaceTargetId={projectWorkspaceTargetId}
-          setProjectWorkspaceTargetId={setProjectWorkspaceTargetId}
           skillsByProjectId={skillsByProjectId}
           skillEditorPath={skillEditorPath}
           skillEditorContent={skillEditorContent}
@@ -8156,29 +8452,13 @@ const stopActiveRun = async () => {
           skillEditorSaving={skillEditorSaving}
           saveSkillEditor={saveSkillEditor}
           removingProject={removingProject}
-          onClose={() => setShowProjectSettings(false)}
-          projectSettingsTab={projectSettingsTab}
-          setProjectSettingsTab={setProjectSettingsTab}
+          onClose={closeProjectSettingsModal}
           onRemoveProject={removeActiveProject}
           onSaveProjectSettings={saveProjectSettings}
-          onMoveProjectWorkspace={async () => {
-            if (!activeProjectId || !projectWorkspaceTargetId) {
-              return;
-            }
-            const updated = await api.projects.update({
-              id: activeProjectId,
-              workspaceId: projectWorkspaceTargetId
-            });
-            setProjects((prev) => prev.map((project) => (project.id === updated.id ? updated : project)));
-            setActiveWorkspaceId(updated.workspaceId);
-            await loadThreads();
-          }}
-          onToggleProjectSkillEnabled={async (path, enabled) => {
-            await api.skills.setEnabled({ projectId: activeProjectId, path, enabled });
-            await loadProjectSkills(activeProjectId);
-          }}
+          onMoveProjectWorkspace={moveProjectWorkspace}
+          onToggleProjectSkillEnabled={toggleProjectSkillEnabled}
           onOpenSkillEditor={openSkillEditor}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8191,7 +8471,7 @@ const stopActiveRun = async () => {
           isNameValid={Boolean(sanitizeProjectDirName(newProjectName))}
           onClose={() => setShowNewProjectModal(false)}
           onSubmit={submitNewProject}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8201,16 +8481,11 @@ const stopActiveRun = async () => {
           workspaces={workspaces}
           projects={projects}
           editingWorkspaceId={workspaceEditingId}
-          draftName={workspaceDraftName}
-          setDraftName={setWorkspaceDraftName}
-          draftColor={workspaceDraftColor}
-          setDraftColor={setWorkspaceDraftColor}
-          draftMoveProjectIds={workspaceDraftMoveProjectIds}
-          setDraftMoveProjectIds={setWorkspaceDraftMoveProjectIds}
+          initialDraft={workspaceModalInitialDraft}
           onClose={() => setShowWorkspaceModal(false)}
           onSave={saveWorkspaceFromModal}
           onDelete={deleteWorkspaceFromModal}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8229,7 +8504,7 @@ const stopActiveRun = async () => {
           onLoadImportCandidates={loadImportCandidates}
           onCloneProjectFromQuery={cloneProjectFromQuery}
           onImportProjectFromPath={importProjectFromPath}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8238,7 +8513,7 @@ const stopActiveRun = async () => {
           renameDialog={renameDialog}
           setRenameDialog={setRenameDialog}
           submitRenameDialog={submitRenameDialog}
-          appendLog={(line) => setLogs((prev) => [...prev, line])}
+          appendLog={appendLog}
         />
       )}
 
@@ -8246,6 +8521,7 @@ const stopActiveRun = async () => {
     </div>
   );
 };
+
 
 
 

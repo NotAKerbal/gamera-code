@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+- Improved settings organization
+- Theming
+- Workspaces
+- Performance increases
+- Linux fixes
+
 ## 0.2.4
 - Improved tooltips
 - Fixed requirement of restart to make settings apply

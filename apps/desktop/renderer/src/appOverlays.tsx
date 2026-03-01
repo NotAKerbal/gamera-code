@@ -1,3 +1,4 @@
+import { memo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { FaTimes, FaTrashAlt } from "react-icons/fa";
 import type {
@@ -13,6 +14,16 @@ import { PROJECT_SWITCH_BEHAVIOR_OPTIONS, SUBTHREAD_POLICY_OPTIONS, type RenameD
 
 type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean };
 type ProjectSettingsTab = "general" | "env" | "commands" | "links" | "skills";
+type ProjectSettingsDraft = {
+  projectName: string;
+  projectWorkspaceTargetId: string;
+  projectSettingsBrowserEnabled: boolean;
+  projectSettingsEnvText: string;
+  projectSettingsCommands: ProjectCommand[];
+  projectSettingsWebLinks: ProjectWebLink[];
+  projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
+  projectSubthreadPolicyOverride: SubthreadPolicy | "";
+};
 
 type ToggleButtonProps = {
   enabled: boolean;
@@ -35,25 +46,19 @@ const ToggleButton = ({ enabled, onToggle, className = "", onLabel = "On", offLa
   </button>
 );
 
+const WORKSPACE_COLOR_PRESETS = [
+  "#64748b",
+  "#2563eb",
+  "#059669",
+  "#d97706",
+  "#dc2626",
+  "#7c3aed"
+];
+
 type ProjectSettingsModalProps = {
   activeProjectId: string;
-  projectSettingsProjectName: string;
-  setProjectSettingsProjectName: Dispatch<SetStateAction<string>>;
-  projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
-  setProjectSwitchBehaviorOverride: Dispatch<SetStateAction<ProjectTerminalSwitchBehavior | "">>;
-  projectSubthreadPolicyOverride: SubthreadPolicy | "";
-  setProjectSubthreadPolicyOverride: Dispatch<SetStateAction<SubthreadPolicy | "">>;
-  projectSettingsBrowserEnabled: boolean;
-  setProjectSettingsBrowserEnabled: Dispatch<SetStateAction<boolean>>;
-  projectSettingsEnvText: string;
-  setProjectSettingsEnvText: Dispatch<SetStateAction<string>>;
-  projectSettingsCommands: ProjectCommand[];
-  setProjectSettingsCommands: Dispatch<SetStateAction<ProjectCommand[]>>;
-  projectSettingsWebLinks: ProjectWebLink[];
-  setProjectSettingsWebLinks: Dispatch<SetStateAction<ProjectWebLink[]>>;
+  initialDraft: ProjectSettingsDraft;
   workspaces: Workspace[];
-  projectWorkspaceTargetId: string;
-  setProjectWorkspaceTargetId: Dispatch<SetStateAction<string>>;
   skillsByProjectId: Record<string, SkillRecord[]>;
   skillEditorPath: string;
   skillEditorContent: string;
@@ -61,36 +66,19 @@ type ProjectSettingsModalProps = {
   skillEditorSaving: boolean;
   saveSkillEditor: () => Promise<void>;
   removingProject: boolean;
-  projectSettingsTab: ProjectSettingsTab;
-  setProjectSettingsTab: Dispatch<SetStateAction<ProjectSettingsTab>>;
   onClose: () => void;
   onRemoveProject: () => Promise<void>;
-  onSaveProjectSettings: () => Promise<void>;
-  onMoveProjectWorkspace: () => Promise<void>;
+  onSaveProjectSettings: (draft: ProjectSettingsDraft) => Promise<void>;
+  onMoveProjectWorkspace: (workspaceId: string) => Promise<void>;
   onToggleProjectSkillEnabled: (path: string, enabled: boolean) => Promise<void>;
   onOpenSkillEditor: (path: string) => Promise<void>;
   appendLog: (line: string) => void;
 };
 
-export const ProjectSettingsModal = ({
+export const ProjectSettingsModal = memo(({
   activeProjectId,
-  projectSettingsProjectName,
-  setProjectSettingsProjectName,
-  projectSwitchBehaviorOverride,
-  setProjectSwitchBehaviorOverride,
-  projectSubthreadPolicyOverride,
-  setProjectSubthreadPolicyOverride,
-  projectSettingsBrowserEnabled,
-  setProjectSettingsBrowserEnabled,
-  projectSettingsEnvText,
-  setProjectSettingsEnvText,
-  projectSettingsCommands,
-  setProjectSettingsCommands,
-  projectSettingsWebLinks,
-  setProjectSettingsWebLinks,
+  initialDraft,
   workspaces,
-  projectWorkspaceTargetId,
-  setProjectWorkspaceTargetId,
   skillsByProjectId,
   skillEditorPath,
   skillEditorContent,
@@ -98,8 +86,6 @@ export const ProjectSettingsModal = ({
   skillEditorSaving,
   saveSkillEditor,
   removingProject,
-  projectSettingsTab,
-  setProjectSettingsTab,
   onClose,
   onRemoveProject,
   onSaveProjectSettings,
@@ -107,53 +93,68 @@ export const ProjectSettingsModal = ({
   onToggleProjectSkillEnabled,
   onOpenSkillEditor,
   appendLog
-}: ProjectSettingsModalProps) => (
-  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-    <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon">
-      <div className="mb-4 flex shrink-0 items-center justify-between">
-        <h3 className="text-lg font-semibold">Project Settings</h3>
-        <button className="btn-secondary" onClick={onClose}>
-          <span className="inline-flex items-center gap-1"><FaTimes className="text-[11px]" />Close</span>
-        </button>
-      </div>
+}: ProjectSettingsModalProps) => {
+  const [projectSettingsTab, setProjectSettingsTab] = useState<ProjectSettingsTab>("general");
+  const [projectSettingsProjectName, setProjectSettingsProjectName] = useState(initialDraft.projectName);
+  const [projectWorkspaceTargetId, setProjectWorkspaceTargetId] = useState(initialDraft.projectWorkspaceTargetId);
+  const [projectSettingsBrowserEnabled, setProjectSettingsBrowserEnabled] = useState(initialDraft.projectSettingsBrowserEnabled);
+  const [projectSettingsEnvText, setProjectSettingsEnvText] = useState(initialDraft.projectSettingsEnvText);
+  const [projectSettingsCommands, setProjectSettingsCommands] = useState<ProjectCommand[]>(initialDraft.projectSettingsCommands);
+  const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>(initialDraft.projectSettingsWebLinks);
+  const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">(
+    initialDraft.projectSwitchBehaviorOverride
+  );
+  const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">(
+    initialDraft.projectSubthreadPolicyOverride
+  );
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
-        <aside className="shrink-0 md:w-52">
-          <div className="rounded-xl border border-border bg-black/20 p-2">
-            <button
-              className={projectSettingsTab === "general" ? "btn-secondary w-full justify-start text-left text-xs" : "btn-ghost w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("general")}
-            >
-              General
-            </button>
-            <button
-              className={projectSettingsTab === "env" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("env")}
-            >
-              Environment
-            </button>
-            <button
-              className={projectSettingsTab === "commands" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("commands")}
-            >
-              Dev Commands
-            </button>
-            <button
-              className={projectSettingsTab === "links" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("links")}
-            >
-              Web Links
-            </button>
-            <button
-              className={projectSettingsTab === "skills" ? "btn-secondary mt-1 w-full justify-start text-left text-xs" : "btn-ghost mt-1 w-full justify-start text-left text-xs"}
-              onClick={() => setProjectSettingsTab("skills")}
-            >
-              Skills
-            </button>
-          </div>
-        </aside>
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+      <div className="flex h-[42rem] max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon">
+        <div className="mb-4 flex shrink-0 items-center justify-between">
+          <h3 className="text-lg font-semibold">Project Settings</h3>
+          <button className="btn-secondary" onClick={onClose}>
+            <span className="inline-flex items-center gap-1"><FaTimes className="text-[11px]" />Close</span>
+          </button>
+        </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
+          <aside className="shrink-0 md:w-52">
+            <div className="rounded-xl border border-border bg-black/20 p-2">
+              <button
+                className={projectSettingsTab === "general" ? "settings-nav-btn is-active" : "settings-nav-btn"}
+                onClick={() => setProjectSettingsTab("general")}
+              >
+                <span className="settings-nav-label">General</span>
+              </button>
+              <button
+                className={projectSettingsTab === "env" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
+                onClick={() => setProjectSettingsTab("env")}
+              >
+                <span className="settings-nav-label">Environment</span>
+              </button>
+              <button
+                className={projectSettingsTab === "commands" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
+                onClick={() => setProjectSettingsTab("commands")}
+              >
+                <span className="settings-nav-label">Dev Commands</span>
+              </button>
+              <button
+                className={projectSettingsTab === "links" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
+                onClick={() => setProjectSettingsTab("links")}
+              >
+                <span className="settings-nav-label">Web Links</span>
+              </button>
+              <button
+                className={projectSettingsTab === "skills" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
+                onClick={() => setProjectSettingsTab("skills")}
+              >
+                <span className="settings-nav-label">Skills</span>
+              </button>
+            </div>
+          </aside>
+
+          <div key={`project-settings-tab-${projectSettingsTab}`} className="settings-tab-panel min-h-0 flex-1 overflow-y-auto pr-1">
           {projectSettingsTab === "general" && (
             <section className="rounded-xl border border-border/80 bg-black/20 py-2">
               <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Project</div>
@@ -216,7 +217,7 @@ export const ProjectSettingsModal = ({
                   <button
                     className="btn-secondary h-8 px-2 py-0 text-xs whitespace-nowrap"
                     onClick={() => {
-                      onMoveProjectWorkspace().catch((error) => {
+                      onMoveProjectWorkspace(projectWorkspaceTargetId).catch((error) => {
                         appendLog(`Move workspace failed: ${String(error)}`);
                       });
                     }}
@@ -492,7 +493,16 @@ export const ProjectSettingsModal = ({
           <button
             className="btn-primary"
             onClick={() => {
-              onSaveProjectSettings().catch((error) => {
+              onSaveProjectSettings({
+                projectName: projectSettingsProjectName,
+                projectWorkspaceTargetId,
+                projectSettingsBrowserEnabled,
+                projectSettingsEnvText,
+                projectSettingsCommands,
+                projectSettingsWebLinks,
+                projectSwitchBehaviorOverride,
+                projectSubthreadPolicyOverride
+              }).catch((error) => {
                 appendLog(`Project settings save failed: ${String(error)}`);
               });
             }}
@@ -504,7 +514,8 @@ export const ProjectSettingsModal = ({
       </div>
     </div>
   </div>
-);
+  );
+});
 
 type NewProjectModalProps = {
   defaultProjectDirectory?: string;
@@ -728,14 +739,13 @@ type WorkspaceModalProps = {
   workspaces: Workspace[];
   projects: Project[];
   editingWorkspaceId: string | null;
-  draftName: string;
-  setDraftName: Dispatch<SetStateAction<string>>;
-  draftColor: string;
-  setDraftColor: Dispatch<SetStateAction<string>>;
-  draftMoveProjectIds: string[];
-  setDraftMoveProjectIds: Dispatch<SetStateAction<string[]>>;
+  initialDraft: {
+    name: string;
+    color: string;
+    moveProjectIds: string[];
+  };
   onClose: () => void;
-  onSave: () => Promise<void>;
+  onSave: (draft: { name: string; color: string; moveProjectIds: string[] }) => Promise<void>;
   onDelete: () => Promise<void>;
   appendLog: (line: string) => void;
 };
@@ -745,90 +755,111 @@ export const WorkspaceModal = ({
   workspaces,
   projects,
   editingWorkspaceId,
-  draftName,
-  setDraftName,
-  draftColor,
-  setDraftColor,
-  draftMoveProjectIds,
-  setDraftMoveProjectIds,
+  initialDraft,
   onClose,
   onSave,
   onDelete,
   appendLog
-}: WorkspaceModalProps) => (
-  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-    <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
+}: WorkspaceModalProps) => {
+  const [draftName, setDraftName] = useState(initialDraft.name);
+  const [draftColor, setDraftColor] = useState(initialDraft.color);
+  const [draftMoveProjectIds, setDraftMoveProjectIds] = useState<string[]>(initialDraft.moveProjectIds);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-lg font-semibold">{mode === "create" ? "New Workspace" : "Workspace Settings"}</h3>
-        <button className="btn-secondary" onClick={onClose}>Close</button>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div>
-          <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Name</label>
-          <input className="input text-sm" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="Workspace name" />
-        </div>
-        <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Color</label>
-        <input className="input text-sm" value={draftColor} onChange={(event) => setDraftColor(event.target.value)} placeholder="#64748b" />
-      </div>
-
-      {mode === "create" && (
-        <div className="mt-4 rounded-xl border border-border/80 bg-black/20 p-3">
-          <div className="mb-2 text-xs uppercase tracking-wide text-muted">Move Projects Into This Workspace</div>
-          <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
-            {projects.length === 0 ? (
-              <p className="text-xs text-slate-400">No projects available.</p>
-            ) : (
-              projects.map((project) => (
-                <label key={project.id} className="project-settings-toggle">
-                  <input
-                    type="checkbox"
-                    checked={draftMoveProjectIds.includes(project.id)}
-                    onChange={(event) => {
-                      setDraftMoveProjectIds((prev) =>
-                        event.target.checked ? [...prev, project.id] : prev.filter((id) => id !== project.id)
-                      );
-                    }}
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Name</label>
+            <input className="input text-sm" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="Workspace name" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs uppercase tracking-wide text-muted">Color</label>
+            <div className="flex items-center gap-2">
+              {WORKSPACE_COLOR_PRESETS.map((color) => {
+                const selected = draftColor.toLowerCase() === color.toLowerCase();
+                return (
+                  <button
+                    key={color}
+                    type="button"
+                    className={`h-9 w-9 rounded-lg border ${selected ? "border-slate-100" : "border-border/80"}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setDraftColor(color)}
+                    aria-label={`Select workspace color ${color}`}
+                    title={color}
                   />
-                  <span>{project.name}</span>
-                </label>
-              ))
-            )}
+                );
+              })}
+            </div>
           </div>
         </div>
-      )}
 
-      <div className="mt-4 flex items-center justify-between">
-        {mode === "edit" ? (
-          <button
-            className="btn-danger"
-            onClick={() => {
-              if (workspaces.length <= 1) {
-                appendLog("Cannot delete the last workspace.");
-                return;
-              }
-              onDelete().catch((error) => appendLog(`Workspace delete failed: ${String(error)}`));
-            }}
-            disabled={!editingWorkspaceId || workspaces.length <= 1}
-          >
-            Delete Workspace
-          </button>
-        ) : <div />}
-        <div className="flex items-center gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button
-            className="btn-primary"
-            onClick={() => {
-              onSave().catch((error) => appendLog(`Workspace save failed: ${String(error)}`));
-            }}
-          >
-            {mode === "create" ? "Create Workspace" : "Save Workspace"}
-          </button>
+        {mode === "create" && (
+          <div className="mt-4 rounded-xl border border-border/80 bg-black/20 p-3">
+            <div className="mb-2 text-xs uppercase tracking-wide text-muted">Move Projects Into This Workspace</div>
+            <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+              {projects.length === 0 ? (
+                <p className="text-xs text-slate-400">No projects available.</p>
+              ) : (
+                projects.map((project) => (
+                  <label key={project.id} className="project-settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={draftMoveProjectIds.includes(project.id)}
+                      onChange={(event) => {
+                        setDraftMoveProjectIds((prev) =>
+                          event.target.checked ? [...prev, project.id] : prev.filter((id) => id !== project.id)
+                        );
+                      }}
+                    />
+                    <span>{project.name}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-between">
+          {mode === "edit" ? (
+            <button
+              className="btn-danger"
+              onClick={() => {
+                if (workspaces.length <= 1) {
+                  appendLog("Cannot delete the last workspace.");
+                  return;
+                }
+                onDelete().catch((error) => appendLog(`Workspace delete failed: ${String(error)}`));
+              }}
+              disabled={!editingWorkspaceId || workspaces.length <= 1}
+            >
+              Delete Workspace
+            </button>
+          ) : <div />}
+          <div className="flex items-center gap-2">
+            <button className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                onSave({
+                  name: draftName,
+                  color: draftColor,
+                  moveProjectIds: draftMoveProjectIds
+                }).catch((error) => appendLog(`Workspace save failed: ${String(error)}`));
+              }}
+            >
+              {mode === "create" ? "Create Workspace" : "Save Workspace"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const RenameThreadModal = ({
   renameDialog,

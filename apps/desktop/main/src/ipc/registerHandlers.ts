@@ -331,7 +331,7 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
         label: "Default Terminal",
         command: "x-terminal-emulator",
         available: commandExists("x-terminal-emulator"),
-        launch: async (cwd) => spawnDetached("x-terminal-emulator", ["--working-directory", cwd], cwd)
+        launch: async (cwd) => spawnDetached("x-terminal-emulator", [], cwd)
       },
       {
         id: "gnome-terminal",
@@ -339,6 +339,13 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
         command: "gnome-terminal",
         available: commandExists("gnome-terminal"),
         launch: async (cwd) => spawnDetached("gnome-terminal", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "gnome-console",
+        label: "GNOME Console",
+        command: "kgx",
+        available: commandExists("kgx"),
+        launch: async (cwd) => spawnDetached("kgx", ["--working-directory", cwd], cwd)
       },
       {
         id: "konsole",
@@ -355,6 +362,34 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
         launch: async (cwd) => spawnDetached("xfce4-terminal", ["--working-directory", cwd], cwd)
       },
       {
+        id: "tilix",
+        label: "Tilix",
+        command: "tilix",
+        available: commandExists("tilix"),
+        launch: async (cwd) => spawnDetached("tilix", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "mate-terminal",
+        label: "MATE Terminal",
+        command: "mate-terminal",
+        available: commandExists("mate-terminal"),
+        launch: async (cwd) => spawnDetached("mate-terminal", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "lxterminal",
+        label: "LXTerminal",
+        command: "lxterminal",
+        available: commandExists("lxterminal"),
+        launch: async (cwd) => spawnDetached("lxterminal", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "terminator",
+        label: "Terminator",
+        command: "terminator",
+        available: commandExists("terminator"),
+        launch: async (cwd) => spawnDetached("terminator", ["--working-directory", cwd], cwd)
+      },
+      {
         id: "kitty",
         label: "Kitty",
         command: "kitty",
@@ -367,6 +402,34 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
         command: "alacritty",
         available: commandExists("alacritty"),
         launch: async (cwd) => spawnDetached("alacritty", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "wezterm",
+        label: "WezTerm",
+        command: "wezterm",
+        available: commandExists("wezterm"),
+        launch: async (cwd) => spawnDetached("wezterm", ["start", "--cwd", cwd], cwd)
+      },
+      {
+        id: "ghostty",
+        label: "Ghostty",
+        command: "ghostty",
+        available: commandExists("ghostty"),
+        launch: async (cwd) => spawnDetached("ghostty", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "foot",
+        label: "Foot",
+        command: "foot",
+        available: commandExists("foot"),
+        launch: async (cwd) => spawnDetached("foot", ["--working-directory", cwd], cwd)
+      },
+      {
+        id: "xterm",
+        label: "XTerm",
+        command: "xterm",
+        available: commandExists("xterm"),
+        launch: async (cwd) => spawnDetached("xterm", [], cwd)
       }
     ];
   };
@@ -399,14 +462,17 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
       available[0];
 
     if (!selected) {
-      await shell.openPath(cwd);
-      return;
+      throw new Error("No system terminal detected. Install a terminal and try again.");
     }
 
-    const launched = await selected.launch(cwd);
-    if (!launched) {
-      await shell.openPath(cwd);
+    const fallbackCandidates = available.filter((candidate) => candidate.id !== selected.id);
+    for (const candidate of [selected, ...fallbackCandidates]) {
+      if (await candidate.launch(cwd)) {
+        return;
+      }
     }
+
+    throw new Error("Failed to launch a system terminal. Check your terminal settings and PATH.");
   };
 
   const pushSessionEvent = (event: SessionEvent) => {

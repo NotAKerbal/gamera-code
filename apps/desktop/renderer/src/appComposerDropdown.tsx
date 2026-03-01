@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import { memo, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CodexThreadOptions } from "@code-app/shared";
 import {
   APPROVAL_OPTIONS,
@@ -26,7 +26,7 @@ type ComposerDropdownPortalProps = {
   setComposerDropdown: Dispatch<SetStateAction<ComposerDropdownState | null>>;
 };
 
-export const ComposerDropdownPortal = ({
+const ComposerDropdownPortalComponent = ({
   composerDropdown,
   composerDropdownMenuRef,
   composerOptions,
@@ -186,3 +186,5 @@ export const ComposerDropdownPortal = ({
     document.body
   );
 };
+
+export const ComposerDropdownPortal = memo(ComposerDropdownPortalComponent);

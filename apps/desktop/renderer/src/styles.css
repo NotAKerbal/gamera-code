@@ -94,6 +94,29 @@
   --theme-tooltip-text: #1e293b;
 }
 
+[data-theme="orange-cat"] {
+  --theme-bg: 33 17 9;
+  --theme-surface: 64 33 14;
+  --theme-panel: 92 44 17;
+  --theme-border: 251 146 60;
+  --theme-muted: 253 186 116;
+  --theme-accent: 255 237 213;
+  --theme-text: 255 248 235;
+  --theme-shell-start: #4a2812;
+  --theme-shell-mid: #2d180b;
+  --theme-shell-end: #160c06;
+  --theme-settings-surface: #2a160a;
+  --theme-sidebar-start: #522b12;
+  --theme-sidebar-end: #2d170a;
+  --theme-content-start: rgba(58, 30, 12, 0.95);
+  --theme-content-end: rgba(24, 13, 7, 0.98);
+  --theme-scrollbar-thumb: #ea7e24;
+  --theme-scrollbar-track: #1f1209;
+  --theme-tooltip-bg: rgba(43, 22, 10, 0.98);
+  --theme-tooltip-border: rgba(251, 146, 60, 0.72);
+  --theme-tooltip-text: #ffedd5;
+}
+
 [data-theme="dawn"],
 [data-theme="linen"] {
   color-scheme: light;
@@ -378,6 +401,12 @@ webview {
   @apply text-xs font-semibold uppercase tracking-[0.16em] text-muted;
 }
 
+.projects-scroll-area {
+  margin-right: -0.75rem;
+  padding-right: 0.375rem;
+  scrollbar-gutter: stable;
+}
+
 .project-action-pop {
   @apply absolute right-0 top-8 z-20 flex min-w-36 flex-col gap-1 rounded-md border border-border bg-surface p-1 shadow-lg;
   animation: dropdown-fade 120ms ease-out;
@@ -401,10 +430,124 @@ webview {
   animation: dropdown-fade 120ms ease-out;
 }
 
+.settings-tab-panel {
+  animation: settings-tab-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.settings-nav-btn {
+  @apply flex w-full items-center justify-start rounded-lg border border-transparent bg-transparent px-3 py-2 text-left text-slate-300;
+  transition:
+    background-color 260ms ease,
+    border-color 260ms ease,
+    color 260ms ease;
+}
+
+.settings-nav-btn:hover {
+  @apply border-border/70 bg-panel/55 text-slate-100;
+}
+
+.settings-nav-label {
+  @apply text-xs font-medium;
+  transform-origin: left center;
+  transition: transform 260ms ease, letter-spacing 260ms ease;
+}
+
+.settings-nav-btn.is-active {
+  @apply border-border/90 bg-panel/80 text-white;
+}
+
+.settings-nav-btn.is-active .settings-nav-label {
+  transform: scale(1.08);
+  letter-spacing: 0.01em;
+}
+
+.settings-select {
+  position: relative;
+}
+
+.settings-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.settings-select-icon {
+  font-size: 10px;
+  color: rgb(var(--theme-muted));
+  transition: transform 180ms ease;
+}
+
+.settings-select-icon.is-open {
+  transform: rotate(180deg);
+}
+
+.settings-select-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.3rem);
+  z-index: 30;
+  border: 1px solid rgb(var(--theme-border) / 0.85);
+  border-radius: 0.7rem;
+  background: rgb(var(--theme-surface));
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
+  padding: 0.3rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settings-select-option {
+  @apply w-full rounded-md px-2 py-1.5 text-left text-xs text-muted transition;
+}
+
+.settings-select-option:hover {
+  @apply bg-panel text-accent;
+}
+
+.settings-select-option.is-active {
+  @apply bg-panel text-accent;
+}
+
+.settings-floating-actions {
+  position: absolute;
+  right: 1rem;
+  bottom: 0.5rem;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-floating-notice {
+  font-size: 11px;
+  max-width: 21rem;
+  padding: 0 0.4rem;
+}
+
+.settings-floating-notice.is-error {
+  color: rgb(252 165 165);
+}
+
+.settings-floating-notice.is-success {
+  color: rgb(110 231 183);
+}
+
 @keyframes dropdown-fade {
   from {
     opacity: 0;
     transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes settings-tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -618,6 +761,8 @@ webview {
 .workspace-segment {
   @apply relative inline-flex h-8 items-center gap-1 rounded-lg border border-transparent px-2 text-xs text-slate-300 transition;
   background: rgba(24, 24, 27, 0.55);
+  padding-right: 0.5rem;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease, padding-right 180ms ease;
 }
 
 .workspace-segment:hover {
@@ -625,8 +770,14 @@ webview {
   background: rgba(39, 39, 42, 0.7);
 }
 
+.workspace-segment:hover,
+.workspace-segment:focus-visible,
+.workspace-segment:focus-within {
+  padding-right: 2rem;
+}
+
 .workspace-segment.active {
-  @apply border-border/90 text-white;
+  @apply border-transparent text-white;
   background: rgba(63, 63, 70, 0.7);
 }
 
@@ -644,16 +795,6 @@ webview {
 
 .workspace-segment-meta {
   @apply inline-flex items-center gap-1 overflow-hidden;
-  max-width: 0;
-  opacity: 0;
-  transition: max-width 190ms ease, opacity 150ms ease;
-}
-
-.workspace-segment:hover .workspace-segment-meta,
-.workspace-segment:focus-visible .workspace-segment-meta,
-.workspace-segment:focus-within .workspace-segment-meta {
-  max-width: 10rem;
-  opacity: 1;
 }
 
 .workspace-segment-count {
@@ -676,9 +817,12 @@ webview {
 }
 
 .workspace-segment-settings {
-  @apply ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 transition;
+  @apply inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 transition;
+  position: absolute;
+  right: 5px;
+  top: 50%;
   opacity: 0;
-  transform: translateX(3px);
+  transform: translateY(-50%) translateX(3px);
   pointer-events: none;
 }
 
@@ -686,7 +830,7 @@ webview {
 .workspace-segment:focus-visible .workspace-segment-settings,
 .workspace-segment:focus-within .workspace-segment-settings {
   opacity: 1;
-  transform: translateX(0);
+  transform: translateY(-50%) translateX(0);
   pointer-events: auto;
 }
 
@@ -1021,8 +1165,14 @@ webview {
   .thinking-indicator-text,
   .thinking-indicator-ring,
   .turtle-spinner,
-  .git-header-diff-badge {
+  .git-header-diff-badge,
+  .settings-tab-panel,
+  .settings-nav-btn,
+  .settings-nav-label,
+  .settings-floating-actions,
+  .settings-select-icon {
     animation: none;
+    transition: none;
   }
 }
 
@@ -1341,44 +1491,18 @@ webview {
 .composer-tooltip-target::after,
 .app-tooltip-target::before,
 .app-tooltip-target::after {
-  opacity: 0;
+  content: none;
+}
+
+.app-global-tooltip {
+  position: fixed;
   pointer-events: none;
-  transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.composer-tooltip-target::before,
-.app-tooltip-target::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  z-index: 60;
-}
-
-.composer-tooltip-target::before {
-  bottom: calc(100% + 4px);
-  transform: translate(-50%, 4px);
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 5px solid var(--theme-tooltip-bg);
-}
-
-.app-tooltip-target::before {
-  top: calc(100% + 4px);
-  transform: translate(-50%, -4px);
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-bottom: 5px solid var(--theme-tooltip-bg);
-}
-
-.composer-tooltip-target::after,
-.app-tooltip-target::after {
-  position: absolute;
-  left: 50%;
+  z-index: 9999;
   max-width: min(24rem, 70vw);
   min-width: 13rem;
   padding: 0.45rem 0.55rem;
   border-radius: 0.45rem;
-  border: 1px solid var(--theme-tooltip-border);
+  border: 1px solid color-mix(in srgb, var(--theme-tooltip-border) 35%, transparent);
   background: var(--theme-tooltip-bg);
   color: var(--theme-tooltip-text);
   font-size: 11px;
@@ -1386,34 +1510,45 @@ webview {
   white-space: pre-line;
   text-align: left;
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.42);
-  z-index: 60;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 130ms ease, visibility 130ms step-end;
+  will-change: transform, opacity;
 }
 
-.composer-tooltip-target::after {
-  bottom: calc(100% + 9px);
-  transform: translate(-50%, 4px);
-}
-
-.composer-tooltip-target::after {
-  content: attr(data-composer-tooltip);
-}
-
-.app-tooltip-target::after {
-  content: attr(data-app-tooltip);
-  top: calc(100% + 9px);
-  transform: translate(-50%, -4px);
-}
-
-.composer-tooltip-target:hover::before,
-.composer-tooltip-target:hover::after,
-.composer-tooltip-target:focus-visible::before,
-.composer-tooltip-target:focus-visible::after,
-.app-tooltip-target:hover::before,
-.app-tooltip-target:hover::after,
-.app-tooltip-target:focus-visible::before,
-.app-tooltip-target:focus-visible::after {
+.app-global-tooltip.is-visible {
   opacity: 1;
+  visibility: visible;
+  transition: opacity 130ms ease;
+}
+
+.app-global-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+}
+
+.app-global-tooltip.is-above {
+  transform: translate(-50%, -100%);
+}
+
+.app-global-tooltip.is-above::after {
+  top: 100%;
+  border-top: 5px solid var(--theme-tooltip-bg);
+}
+
+.app-global-tooltip.is-below {
   transform: translate(-50%, 0);
+}
+
+.app-global-tooltip.is-below::after {
+  bottom: 100%;
+  border-bottom: 5px solid var(--theme-tooltip-bg);
 }
 
 .settings-toggle-btn {
