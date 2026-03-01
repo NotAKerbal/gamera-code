@@ -123,6 +123,17 @@ const THEME_PREVIEW_STYLES: Record<AppTheme, CSSProperties> = {
     ["--preview-thread-active" as string]: "rgba(203, 213, 225, 0.98)",
     ["--preview-text" as string]: "rgba(30, 41, 59, 0.95)",
     ["--preview-muted" as string]: "rgba(71, 85, 105, 0.7)"
+  },
+  "orange-cat": {
+    ["--preview-shell-start" as string]: "#41220f",
+    ["--preview-shell-end" as string]: "#1f1109",
+    ["--preview-sidebar-start" as string]: "#4b2811",
+    ["--preview-sidebar-end" as string]: "#311a0c",
+    ["--preview-border" as string]: "rgba(251, 146, 60, 0.55)",
+    ["--preview-thread" as string]: "rgba(120, 53, 15, 0.72)",
+    ["--preview-thread-active" as string]: "rgba(154, 52, 18, 0.92)",
+    ["--preview-text" as string]: "rgba(255, 237, 213, 0.98)",
+    ["--preview-muted" as string]: "rgba(254, 215, 170, 0.82)"
   }
 };
 
@@ -155,13 +166,19 @@ export const SettingsModal = ({
   onOpenSkillEditor,
   onPickDefaultProjectDirectory,
   appendLog
-}: SettingsModalProps) => (
-  <div className={isSettingsWindow ? "fixed inset-0 z-40 theme-settings-surface" : "fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"}>
+}: SettingsModalProps) => {
+  const useWindowsStyleHeader = isWindows || !isMacOS;
+  return (
+    <div
+      className={
+        isSettingsWindow ? "fixed inset-0 z-40 theme-settings-surface" : "fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
+      }
+    >
     <div className={isSettingsWindow ? "flex h-full w-full flex-col theme-settings-surface" : "flex w-full max-w-3xl flex-col rounded-2xl border border-border bg-surface p-4 shadow-neon"}>
       {isSettingsWindow ? (
         <header
           className={`drag-region window-header flex h-12 shrink-0 items-center justify-between border-b border-border/90 px-3 ${
-            isMacOS ? "window-header-macos" : isWindows ? "window-header-windows" : ""
+            isMacOS ? "window-header-macos" : useWindowsStyleHeader ? "window-header-windows" : ""
           }`}
         >
           <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-100">
@@ -169,7 +186,7 @@ export const SettingsModal = ({
             <span>GameraCode - Settings</span>
           </div>
           <div className="no-drag flex items-center gap-2">
-            {isWindows ? (
+            {useWindowsStyleHeader ? (
               <div className="window-controls ml-1">
                 <button className="window-control-btn window-control-close" onClick={() => void onCloseWindow()} title="Close">
                   <FaTimes className="window-control-icon" />
@@ -697,4 +714,5 @@ export const SettingsModal = ({
       </div>
     </div>
   </div>
-);
+  );
+};

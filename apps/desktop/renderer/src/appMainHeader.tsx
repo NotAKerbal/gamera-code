@@ -99,8 +99,17 @@ const TerminalGlyph = ({ terminalId }: { terminalId: string }) => {
   if (
     terminalId === "x-terminal-emulator" ||
     terminalId === "gnome-terminal" ||
+    terminalId === "gnome-console" ||
     terminalId === "konsole" ||
-    terminalId === "xfce4-terminal"
+    terminalId === "xfce4-terminal" ||
+    terminalId === "tilix" ||
+    terminalId === "mate-terminal" ||
+    terminalId === "lxterminal" ||
+    terminalId === "terminator" ||
+    terminalId === "wezterm" ||
+    terminalId === "ghostty" ||
+    terminalId === "foot" ||
+    terminalId === "xterm"
   ) {
     return <FaLinux className="text-[10px] text-slate-400" />;
   }
@@ -158,6 +167,7 @@ export const MainHeader = ({
   onCloseWindow,
   appendLog
 }: MainHeaderProps) => {
+  const useWindowsStyleHeader = isWindows || !isMacOS;
   const [showTerminalAlternatives, setShowTerminalAlternatives] = useState(false);
   const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
@@ -190,7 +200,7 @@ export const MainHeader = ({
   return (
     <header
     className={`drag-region window-header flex h-12 items-center justify-between border-b border-border/90 px-3 ${
-      isMacOS ? "window-header-macos" : isWindows ? "window-header-windows" : ""
+      isMacOS ? "window-header-macos" : useWindowsStyleHeader ? "window-header-windows" : ""
     }`}
   >
     <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-100">
@@ -520,7 +530,7 @@ export const MainHeader = ({
       >
         <span className="inline-flex items-center gap-1"><FaCog className="text-[11px]" />Settings</span>
       </button>
-      {isWindows ? (
+      {useWindowsStyleHeader ? (
         <div className="window-controls ml-1">
           <button
             className="window-control-btn app-tooltip-target"

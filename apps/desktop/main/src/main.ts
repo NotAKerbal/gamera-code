@@ -206,7 +206,6 @@ const ensureStartupSplashWindow = () => {
 
 const createWindow = () => {
   const isMac = process.platform === "darwin";
-  const isWindows = process.platform === "win32";
 
   ensureStartupSplashWindow();
 
@@ -216,7 +215,7 @@ const createWindow = () => {
     minWidth: 1100,
     minHeight: 700,
     show: false,
-    frame: !isWindows,
+    frame: !isMac,
     titleBarStyle: isMac ? "hiddenInset" : "default",
     titleBarOverlay: false,
     trafficLightPosition: isMac
@@ -266,7 +265,7 @@ const createWindow = () => {
       action: "allow",
       overrideBrowserWindowOptions: {
         autoHideMenuBar: true,
-        frame: process.platform !== "win32",
+        frame: process.platform === "darwin",
         titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
         titleBarOverlay: false,
         backgroundColor: "#0b0d10",
@@ -349,7 +348,6 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
   const safeUrl = escapeHtml(initialUrl);
   const safeIconSrc = escapeHtml(getAppIconFileUrl());
   const isMac = process.platform === "darwin";
-  const isWindows = process.platform === "win32";
   return `<!doctype html>
 <html>
   <head>
@@ -490,7 +488,7 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
         <img src="${safeIconSrc}" class="app-icon" alt="" />
         <div class="app-title">GameraCode - Browser</div>
       </div>
-      ${isWindows ? `<div class="window-controls">
+      ${!isMac ? `<div class="window-controls">
         <button id="windowMinBtn" class="window-btn" title="Minimize">-</button>
         <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">□</button>
         <button id="windowCloseBtn" class="window-btn close" title="Close">×</button>
@@ -626,7 +624,6 @@ const formatPreviewWindowTitle = (projectName?: string) => {
 
 const ensurePreviewPopout = async (url: string, projectName?: string) => {
   const isMac = process.platform === "darwin";
-  const isWindows = process.platform === "win32";
   if (!isAllowedPreviewUrl(url)) {
     throw new Error("Preview URL must target localhost or 127.0.0.1 over http/https.");
   }
@@ -637,7 +634,7 @@ const ensurePreviewPopout = async (url: string, projectName?: string) => {
       minWidth: 320,
       minHeight: 480,
       title: formatPreviewWindowTitle(projectName),
-      frame: !isWindows,
+      frame: !isMac,
       titleBarStyle: isMac ? "hiddenInset" : "default",
       titleBarOverlay: false,
       autoHideMenuBar: true,
@@ -688,7 +685,6 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
   const safeProjectName = escapeJsString(projectName?.trim() || "Project");
   const safeIconSrc = escapeHtml(getAppIconDataUrl(26));
   const isMac = process.platform === "darwin";
-  const isWindows = process.platform === "win32";
   return `<!doctype html>
 <html>
   <head>
@@ -986,7 +982,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         <div class="app-title">GameraCode - Git (${safeProjectName})</div>
       </div>
       ${
-        isWindows
+        !isMac
           ? `<div class="window-controls">
         <button id="windowMinBtn" class="window-btn" title="Minimize">
           <span class="window-btn-icon min"><svg viewBox="0 0 448 512" aria-hidden="true"><path d="M32 288c-17.7 0-32-14.3-32-32s14.3-32 32-32l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 288z"/></svg></span>
@@ -1361,7 +1357,6 @@ const formatWebLinkWindowTitle = (name?: string, projectName?: string) => {
 
 const ensureWebLinkWindow = async (url: string, name?: string, projectName?: string, focus = true) => {
   const isMac = process.platform === "darwin";
-  const isWindows = process.platform === "win32";
   if (!isAllowedWebLinkUrl(url)) {
     throw new Error("Website URL must use http/https.");
   }
@@ -1373,7 +1368,7 @@ const ensureWebLinkWindow = async (url: string, name?: string, projectName?: str
       minWidth: 720,
       minHeight: 520,
       title: formatWebLinkWindowTitle(name, projectName),
-      frame: !isWindows,
+      frame: !isMac,
       titleBarStyle: isMac ? "hiddenInset" : "default",
       titleBarOverlay: false,
       autoHideMenuBar: true,
@@ -1408,7 +1403,6 @@ const ensureWebLinkWindow = async (url: string, name?: string, projectName?: str
 
 const ensureGitPopout = async (projectId: string, projectName?: string) => {
   const isMac = process.platform === "darwin";
-  const isWindows = process.platform === "win32";
   if (!gitPopoutWindow || gitPopoutWindow.isDestroyed()) {
     gitPopoutWindow = new BrowserWindow({
       width: 1320,
@@ -1416,7 +1410,7 @@ const ensureGitPopout = async (projectId: string, projectName?: string) => {
       minWidth: 980,
       minHeight: 520,
       title: formatGitWindowTitle(projectName),
-      frame: !isWindows,
+      frame: !isMac,
       titleBarStyle: isMac ? "hiddenInset" : "default",
       titleBarOverlay: false,
       autoHideMenuBar: true,
@@ -1462,7 +1456,6 @@ const navigateGitPopout = async (projectId: string, projectName?: string) => {
 
 const ensureSettingsWindow = async () => {
   const isMac = process.platform === "darwin";
-  const isWindows = process.platform === "win32";
   if (!settingsWindow || settingsWindow.isDestroyed()) {
     settingsWindow = new BrowserWindow({
       width: 1040,
@@ -1470,7 +1463,7 @@ const ensureSettingsWindow = async () => {
       minWidth: 860,
       minHeight: 620,
       title: "GameraCode Settings",
-      frame: !isWindows,
+      frame: !isMac,
       titleBarStyle: isMac ? "hiddenInset" : "default",
       titleBarOverlay: false,
       backgroundColor: "#0b0d10",

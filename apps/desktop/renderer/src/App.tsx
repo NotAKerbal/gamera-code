@@ -199,6 +199,7 @@ const api = window.desktopAPI;
 const platformHints = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
 const isMacOS = platformHints.includes("mac");
 const isWindows = platformHints.includes("win");
+const useWindowsStyleHeader = !isMacOS;
 
 export const App = () => {
   const isSettingsWindow = isSettingsWindowContext();
@@ -224,6 +225,7 @@ export const App = () => {
   const [setupPermissionGranted, setSetupPermissionGranted] = useState(false);
   const [setupInstalling, setSetupInstalling] = useState(false);
   const [setupLiveLines, setSetupLiveLines] = useState<string[]>([]);
+  const [isSetupCardDismissed, setIsSetupCardDismissed] = useState(false);
   const setupLogEndRef = useRef<HTMLDivElement | null>(null);
   const setupLiveBufferRef = useRef<string[]>([]);
   const setupLiveFlushTimeoutRef = useRef<number | null>(null);
@@ -3191,7 +3193,7 @@ export const App = () => {
           <button id="terminal-stop" class="btn">Stop</button>
           <button id="terminal-copy" class="btn">Copy</button>
           <span id="terminal-status" class="status"></span>
-          ${isWindows
+          ${useWindowsStyleHeader
             ? `<button id="windowMinBtn" class="window-btn" title="Minimize">&#8722;</button>
           <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">&#9723;</button>
           <button id="windowCloseBtn" class="window-btn close" title="Close">&times;</button>`
@@ -3845,7 +3847,7 @@ export const App = () => {
   }, [runShortcutByKey]);
 
   useEffect(() => {
-    if (!isWindows) {
+    if (isMacOS) {
       return;
     }
     let cancelled = false;
@@ -4732,7 +4734,7 @@ export const App = () => {
     shell.className = "shell";
 
     const head = doc.createElement("div");
-    head.className = `head drag-region window-header ${isWindows ? "window-header-windows" : ""} ${isMacOS ? "window-header-macos" : ""}`;
+    head.className = `head drag-region window-header ${useWindowsStyleHeader ? "window-header-windows" : ""} ${isMacOS ? "window-header-macos" : ""}`;
 
     const brand = doc.createElement("div");
     brand.className = "brand";
@@ -4777,7 +4779,7 @@ export const App = () => {
     });
     actions.appendChild(copyBtn);
     actions.appendChild(buildBtn);
-    if (isWindows) {
+    if (useWindowsStyleHeader) {
       const desktopApi = (popout as Window & { desktopAPI?: typeof api }).desktopAPI;
       const windowControls = doc.createElement("div");
       windowControls.className = "window-controls";
@@ -4979,7 +4981,7 @@ export const App = () => {
           <button class="btn" data-action="start_all">Start All</button>
           <button class="btn" data-action="restart_all">Restart Running</button>
           <button class="btn" data-action="stop_all">Stop All</button>
-          ${isWindows
+          ${useWindowsStyleHeader
             ? `<button id="windowMinBtn" class="window-btn" title="Minimize">&#8722;</button>
           <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">&#9723;</button>
           <button id="windowCloseBtn" class="window-btn close" title="Close">&times;</button>`
@@ -5772,6 +5774,11 @@ const stopActiveRun = async () => {
     installStatus &&
       (!installStatus.nodeOk || !installStatus.npmOk || !installStatus.gitOk || !installStatus.rgOk || !installStatus.codexOk)
   );
+  useEffect(() => {
+    if (!setupBlocked) {
+      setIsSetupCardDismissed(false);
+    }
+  }, [setupBlocked]);
   const planArtifacts = useMemo<PlanArtifact[]>(() => {
     const plans: PlanArtifact[] = [];
 
@@ -6193,7 +6200,11 @@ const stopActiveRun = async () => {
 
   return (
     <div className="h-screen overflow-hidden bg-bg text-white theme-text">
-      <div className={isSettingsWindow ? "h-full w-full theme-app-shell" : `h-full w-full theme-app-shell ${isWindows ? "" : "pl-2"}`}>
+      <div
+        className={
+          isSettingsWindow ? "h-full w-full theme-app-shell" : `h-full w-full theme-app-shell ${isMacOS ? "pl-2" : ""}`
+        }
+      >
         <div className={isSettingsWindow ? "flex h-full flex-col overflow-hidden theme-settings-surface" : "flex h-full flex-col overflow-hidden rounded-2xl bg-black/40 shadow-neon backdrop-blur-xl"}>
           {!isSettingsWindow && (
             <MainHeader
@@ -6778,9 +6789,20 @@ const stopActiveRun = async () => {
             </aside>
 
             <main className="main-layout-content flex h-full min-h-0 min-w-0 flex-col">
-              {hasUserPromptInThread && installStatus && setupBlocked && (
+              {hasUserPromptInThread && installStatus && setupBlocked && !isSetupCardDismissed && (
                 <section className="mx-4 mt-3 rounded-xl border border-border bg-panel/70 p-3">
-                  <h3 className="mb-2 text-sm font-semibold tracking-wide text-slate-100">Setup Required</h3>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold tracking-wide text-slate-100">Setup Required</h3>
+                    <button
+                      type="button"
+                      className="btn-ghost h-7 px-2 py-0 text-xs"
+                      onClick={() => setIsSetupCardDismissed(true)}
+                      aria-label="Dismiss setup required notice"
+                      title="Dismiss"
+                    >
+                      <FaTimes className="text-[10px]" />
+                    </button>
+                  </div>
                   <div className="mb-3 grid grid-cols-2 gap-2 text-sm">
                     {installStatus.details
                       .filter((detail) => REQUIRED_SETUP_KEYS.has(detail.key))
