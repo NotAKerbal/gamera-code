@@ -335,6 +335,7 @@ export const App = () => {
   const [gitIncomingCommitsByProjectId, setGitIncomingCommitsByProjectId] = useState<Record<string, GitOutgoingCommit[]>>({});
   const [gitSelectedPathByProjectId, setGitSelectedPathByProjectId] = useState<Record<string, string | null>>({});
   const [gitBusyAction, setGitBusyAction] = useState<string | null>(null);
+  const [gitCommitIsGeneratingMessage, setGitCommitIsGeneratingMessage] = useState(false);
   const [gitBranchSearch, setGitBranchSearch] = useState("");
   const [branchListScrollTop, setBranchListScrollTop] = useState(0);
   const [branchListViewportHeight, setBranchListViewportHeight] = useState(208);
@@ -3276,11 +3277,13 @@ export const App = () => {
     if (!activeProjectId) {
       return;
     }
+    const trimmedMessage = gitCommitInputRef.current?.value.trim() ?? "";
+    setGitCommitIsGeneratingMessage(trimmedMessage.length === 0);
     setGitBusyAction("commit");
     try {
       const result = await api.git.commit({
         projectId: activeProjectId,
-        message: gitCommitInputRef.current?.value.trim() || undefined
+        message: trimmedMessage || undefined
       });
       const pushGitActivity = (message: string, tone: GitActivityEntry["tone"]) => {
         setGitActivityByProjectId((prev) => {
@@ -3330,6 +3333,7 @@ export const App = () => {
       selectGitPath(activeProjectId, selectedPath);
     } finally {
       setGitBusyAction(null);
+      setGitCommitIsGeneratingMessage(false);
     }
   };
 
@@ -8241,6 +8245,9 @@ const stopActiveRun = async () => {
                                 placeholder="Commit message"
                                 disabled={Boolean(gitBusyAction)}
                               />
+                              {gitBusyAction === "commit" && gitCommitIsGeneratingMessage && (
+                                <p className="mt-1 text-[11px] text-slate-400">Generating AI commit name...</p>
+                              )}
                             </div>
                             {activeStagedFiles.length === 0 ? (
                               <p className="mt-1 text-xs text-slate-500">No staged files.</p>
