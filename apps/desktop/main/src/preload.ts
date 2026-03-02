@@ -54,6 +54,10 @@ const workspacesListChannel = (IPC_CHANNELS as Record<string, string>).workspace
 const workspacesCreateChannel = (IPC_CHANNELS as Record<string, string>).workspacesCreate ?? "workspaces:create";
 const workspacesUpdateChannel = (IPC_CHANNELS as Record<string, string>).workspacesUpdate ?? "workspaces:update";
 const workspacesDeleteChannel = (IPC_CHANNELS as Record<string, string>).workspacesDelete ?? "workspaces:delete";
+const projectTerminalSendInputChannel =
+  (IPC_CHANNELS as Record<string, string>).projectTerminalSendInput ?? "projectTerminal:sendInput";
+const projectTerminalResizeChannel =
+  (IPC_CHANNELS as Record<string, string>).projectTerminalResize ?? "projectTerminal:resize";
 type DesktopApiWithGitExtras = DesktopApi & {
   projects: DesktopApi["projects"] & {
     listFiles: (input: { projectId: string; limit?: number }) => Promise<Array<{ path: string; updatedAtMs: number }>>;
@@ -112,6 +116,8 @@ const api: DesktopApiWithGitExtras = {
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalStart, input),
     stop: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalStop, input),
     getState: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalGetState, input),
+    sendInput: (input) => ipcRenderer.invoke(projectTerminalSendInputChannel, input),
+    resize: (input) => ipcRenderer.invoke(projectTerminalResizeChannel, input),
     onEvent: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: ProjectTerminalEvent) => listener(payload);
       ipcRenderer.on(IPC_CHANNELS.projectTerminalEvent, wrapped);
