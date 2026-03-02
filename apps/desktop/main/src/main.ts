@@ -1501,7 +1501,6 @@ const bootstrap = async () => {
   const repository = new Repository(db, paths);
   const permissionEngine = new PermissionEngine(repository, repository.getSettings().permissionMode);
   const installerManager = new InstallerManager(repository);
-  const gitService = new GitService();
 
   createWindow();
 
@@ -1516,6 +1515,10 @@ const bootstrap = async () => {
     repository,
     permissionEngine,
     emit: (event) => emitSessionEvent(event)
+  });
+  const gitService = new GitService({
+    suggestCommitMessage: async (input) =>
+      sessionManager.suggestCommitMessage(input.cwd, input.files, input.diff)
   });
   const projectTerminalManager = new ProjectTerminalManager({
     repository,

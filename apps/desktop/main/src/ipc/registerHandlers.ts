@@ -747,8 +747,8 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
   });
 
   const threadsForkChannel = (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
-  ipcMain.handle(threadsForkChannel, async (_event, input: { id: string }) => {
-    const forked = await deps.sessionManager.forkThread(input.id);
+  ipcMain.handle(threadsForkChannel, async (_event, input: { id: string; upToStreamSeq?: number }) => {
+    const forked = await deps.sessionManager.forkThread(input.id, input.upToStreamSeq);
     if (!forked) {
       throw new Error("Thread not found.");
     }

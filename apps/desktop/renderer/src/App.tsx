@@ -4521,8 +4521,8 @@ export const App = () => {
     });
   };
 
-  const forkThreadFromSidebar = async (thread: Thread) => {
-    const forked = await api.threads.fork({ id: thread.id });
+  const forkThreadFromPrompt = async (thread: Thread, upToStreamSeq: number) => {
+    const forked = await api.threads.fork({ id: thread.id, upToStreamSeq });
     setThreads((prev) => [forked, ...prev.filter((item) => item.id !== forked.id)]);
     setActiveProjectId(forked.projectId);
     setActiveThreadId(forked.id);
@@ -6816,29 +6816,6 @@ const stopActiveRun = async () => {
                                     </span>
                                     <span
                                       className="thread-row-action-btn"
-                                      title="Fork thread"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        forkThreadFromSidebar(thread).catch((error) => {
-                                          setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                                        });
-                                      }}
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Enter" || event.key === " ") {
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          forkThreadFromSidebar(thread).catch((error) => {
-                                            setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                                          });
-                                        }
-                                      }}
-                                      role="button"
-                                      tabIndex={0}
-                                    >
-                                      <FaCodeBranch className="text-[10px]" />
-                                    </span>
-                                    <span
-                                      className="thread-row-action-btn"
                                       title="Archive thread"
                                       onClick={(event) => {
                                         event.stopPropagation();
@@ -7039,29 +7016,6 @@ const stopActiveRun = async () => {
                                   </span>
                                   <span
                                     className="thread-row-action-btn"
-                                    title="Fork thread"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      forkThreadFromSidebar(thread).catch((error) => {
-                                        setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                                      });
-                                    }}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Enter" || event.key === " ") {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        forkThreadFromSidebar(thread).catch((error) => {
-                                          setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                                        });
-                                      }
-                                    }}
-                                    role="button"
-                                    tabIndex={0}
-                                  >
-                                    <FaCodeBranch className="text-[10px]" />
-                                  </span>
-                                  <span
-                                    className="thread-row-action-btn"
                                     title="Restore thread"
                                     onClick={(event) => {
                                       event.stopPropagation();
@@ -7221,7 +7175,22 @@ const stopActiveRun = async () => {
                             />
                           </article>
                         ) : (
-                          <article key={item.id} className="timeline-item min-w-0 overflow-hidden rounded-lg bg-zinc-900/80 p-3">
+                          <article key={item.id} className="timeline-item group relative min-w-0 overflow-hidden rounded-lg bg-zinc-900/80 p-3">
+                            {activeThread && (
+                              <button
+                                type="button"
+                                className="btn-ghost absolute right-2 top-2 h-7 w-7 p-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                                onClick={() => {
+                                  forkThreadFromPrompt(activeThread, item.message.streamSeq).catch((error) => {
+                                    setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
+                                  });
+                                }}
+                                title="Fork from this prompt"
+                                aria-label="Fork from this prompt"
+                              >
+                                <FaCodeBranch className="text-[10px]" />
+                              </button>
+                            )}
                             <MemoizedUserMessageContent content={item.message.content} attachments={item.message.attachments} />
                           </article>
                         );
@@ -7236,6 +7205,14 @@ const stopActiveRun = async () => {
                             onViewPlan={openPlanDrawerFor}
                             onBuildPlan={handleBuildPlan}
                             onCopyPlan={copyPlanToClipboard}
+                            onForkFromUserMessage={(message) => {
+                              if (!activeThread) {
+                                return;
+                              }
+                              forkThreadFromPrompt(activeThread, message.streamSeq).catch((error) => {
+                                setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
+                              });
+                            }}
                             expandedActivityGroups={expandedActivityGroups}
                             setExpandedActivityGroups={setExpandedActivityGroups}
                             setExpandedActivityChildren={setExpandedActivityChildren}
@@ -7273,6 +7250,14 @@ const stopActiveRun = async () => {
                                   onViewPlan={openPlanDrawerFor}
                                   onBuildPlan={handleBuildPlan}
                                   onCopyPlan={copyPlanToClipboard}
+                                  onForkFromUserMessage={(message) => {
+                                    if (!activeThread) {
+                                      return;
+                                    }
+                                    forkThreadFromPrompt(activeThread, message.streamSeq).catch((error) => {
+                                      setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
+                                    });
+                                  }}
                                   expandedActivityGroups={expandedActivityGroups}
                                   setExpandedActivityGroups={setExpandedActivityGroups}
                                   setExpandedActivityChildren={setExpandedActivityChildren}
@@ -7291,6 +7276,14 @@ const stopActiveRun = async () => {
                       onViewPlan={openPlanDrawerFor}
                       onBuildPlan={handleBuildPlan}
                       onCopyPlan={copyPlanToClipboard}
+                      onForkFromUserMessage={(message) => {
+                        if (!activeThread) {
+                          return;
+                        }
+                        forkThreadFromPrompt(activeThread, message.streamSeq).catch((error) => {
+                          setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
+                        });
+                      }}
                       expandedActivityGroups={expandedActivityGroups}
                       setExpandedActivityGroups={setExpandedActivityGroups}
                       setExpandedActivityChildren={setExpandedActivityChildren}

@@ -488,6 +488,14 @@ export class CodexAppServerClient {
     });
   }
 
+  async rollbackThread(providerThreadId: string, numTurns: number): Promise<void> {
+    const safeNumTurns = Math.max(1, Math.floor(numTurns));
+    await this.request("thread/rollback", {
+      threadId: providerThreadId,
+      numTurns: safeNumTurns
+    });
+  }
+
   async startReview(
     providerThreadId: string,
     target: Record<string, unknown>,

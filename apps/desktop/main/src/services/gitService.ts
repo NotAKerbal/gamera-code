@@ -15,6 +15,7 @@ import type {
 import { withRuntimePath } from "../utils/runtimeEnv";
 
 const DIFF_MAX_CHARS = 120000;
+const AI_COMMIT_DIFF_MAX_CHARS = 40000;
 const ORIGIN_PREFIX = "origin/";
 
 const parseAheadBehind = (value: string | undefined): { ahead: number; behind: number } => {
@@ -115,6 +116,24 @@ const parseOnelineCommits = (value: string): GitOutgoingCommitItem[] => {
 };
 
 export class GitService {
+  constructor(
+    private readonly deps: {
+      suggestCommitMessage?: (input: { cwd: string; files: string[]; diff: string }) => Promise<string | null>;
+    } = {}
+  ) {}
+
+  private normalizeCommitMessage(value: string | null): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const firstLine = value.split(/\r?\n/u)[0]?.trim() ?? "";
+    if (!firstLine) {
+      return null;
+    }
+    return firstLine.slice(0, 120);
+  }
+
   private toProjectDirName(value: string): string {
     return value
       .trim()
@@ -487,6 +506,22 @@ export class GitService {
     if (files.length === 0) {
       return "Update project files";
     }
+
+    const stagedDiffResult = await this.runGit(cwd, ["diff", "--cached"]);
+    if (stagedDiffResult.ok && this.deps.suggestCommitMessage) {
+      const diff = stagedDiffResult.stdout.slice(0, AI_COMMIT_DIFF_MAX_CHARS);
+      const suggested = this.normalizeCommitMessage(
+        await this.deps.suggestCommitMessage({
+          cwd,
+          files,
+          diff
+        })
+      );
+      if (suggested) {
+        return suggested;
+      }
+    }
+
     if (files.length === 1) {
       return `Update ${files[0]}`;
     }

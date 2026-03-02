@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import ReactMarkdown from "react-markdown";
-import { FaChevronDown, FaGlobeAmericas } from "react-icons/fa";
-import type { PromptAttachment } from "@code-app/shared";
+import { FaChevronDown, FaCodeBranch, FaGlobeAmericas } from "react-icons/fa";
+import type { MessageEvent, PromptAttachment } from "@code-app/shared";
 import {
   splitAssistantContentSegments,
   MARKDOWN_REMARK_PLUGINS,
@@ -176,6 +176,7 @@ interface TimelineItemsListProps {
   onViewPlan: (planId: string) => void;
   onBuildPlan: (planId: string) => void;
   onCopyPlan: (planId: string) => void;
+  onForkFromUserMessage?: (message: MessageEvent) => void;
   expandedActivityGroups: Record<string, boolean>;
   setExpandedActivityGroups: Dispatch<SetStateAction<Record<string, boolean>>>;
   setExpandedActivityChildren: Dispatch<SetStateAction<Record<string, boolean>>>;
@@ -188,6 +189,7 @@ const TimelineItemsList = ({
   onViewPlan,
   onBuildPlan,
   onCopyPlan,
+  onForkFromUserMessage,
   expandedActivityGroups,
   setExpandedActivityGroups,
   setExpandedActivityChildren
@@ -208,7 +210,18 @@ const TimelineItemsList = ({
               />
             </article>
           ) : (
-            <article key={item.id} className="timeline-item min-w-0 overflow-hidden rounded-lg bg-zinc-900/80 p-3">
+            <article key={item.id} className="timeline-item group relative min-w-0 overflow-hidden rounded-lg bg-zinc-900/80 p-3">
+              {onForkFromUserMessage && (
+                <button
+                  type="button"
+                  className="btn-ghost absolute right-2 top-2 h-7 w-7 p-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                  onClick={() => onForkFromUserMessage(item.message)}
+                  title="Fork from this prompt"
+                  aria-label="Fork from this prompt"
+                >
+                  <FaCodeBranch className="text-[10px]" />
+                </button>
+              )}
               <MemoizedUserMessageContent content={item.message.content} attachments={item.message.attachments} />
             </article>
           );

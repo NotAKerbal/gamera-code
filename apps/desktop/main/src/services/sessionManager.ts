@@ -862,17 +862,38 @@ export class SessionManager {
     return true;
   }
 
-  async forkThread(threadId: string): Promise<Thread | null> {
+  async forkThread(threadId: string, upToStreamSeq?: number): Promise<Thread | null> {
     const sourceThread = this.deps.repository.getThread(threadId);
     if (!sourceThread) {
       return null;
     }
+
+    const forkSourceMessages = this.deps.repository.listMessagesForFork({
+      threadId: sourceThread.id,
+      upToStreamSeq
+    });
+    const userTurnsAfterCutoff =
+      typeof upToStreamSeq === "number" && Number.isFinite(upToStreamSeq)
+        ? this.deps.repository
+            .listMessagesForFork({ threadId: sourceThread.id })
+            .filter((event) => event.role === "user" && event.streamSeq > upToStreamSeq).length
+        : 0;
 
     const forked = this.deps.repository.createThread({
       projectId: sourceThread.projectId,
       title: `${sourceThread.title} (fork)`,
       provider: sourceThread.provider,
       parentThreadId: sourceThread.id
+    });
+
+    forkSourceMessages.forEach((event) => {
+      this.deps.repository.appendMessage({
+        threadId: forked.id,
+        role: event.role,
+        content: event.content,
+        attachments: event.attachments,
+        ts: event.ts
+      });
     });
 
     if (sourceThread.provider !== "codex") {
@@ -899,6 +920,9 @@ export class SessionManager {
     await appServer.connect();
     try {
       const forkedProviderThreadId = await appServer.forkThread(sourceProviderThreadId, options);
+      if (userTurnsAfterCutoff > 0) {
+        await appServer.rollbackThread(forkedProviderThreadId, userTurnsAfterCutoff);
+      }
       this.deps.repository.setProviderThreadId(forked.id, "codex", forkedProviderThreadId);
     } finally {
       await appServer.close();
@@ -1217,6 +1241,104 @@ export class SessionManager {
       } catch {
         return null;
       }
+    }
+  }
+
+  async suggestCommitMessage(cwd: string, files: string[], diff: string): Promise<string | null> {
+    const cleanFiles = files.map((file) => file.trim()).filter(Boolean);
+    if (cleanFiles.length === 0) {
+      return null;
+    }
+
+    const settings = this.deps.repository.getSettings();
+    const env = Object.fromEntries(
+      Object.entries(
+        withRuntimePath({
+          ...process.env,
+          ...settings.envVars,
+          FORCE_COLOR: "0",
+          NO_COLOR: "1",
+          CLICOLOR: "0",
+          TERM: "dumb",
+          CODE_APP_PROVIDER: "codex"
+        })
+      ).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+
+    const threadOptions = normalizeCodexThreadOptions(cwd, {
+      ...settings.codexDefaults,
+      collaborationMode: "coding"
+    });
+    const prompt = [
+      "Write a single git commit subject line for the staged changes.",
+      "Rules:",
+      "- Return exactly one line.",
+      "- Use imperative mood.",
+      "- Keep it under 72 characters if possible.",
+      "- No trailing period, no quotes, no markdown.",
+      "",
+      "Staged files:",
+      ...cleanFiles.map((file) => `- ${file}`),
+      "",
+      "Staged diff (may be truncated):",
+      diff.trim() || "(no diff text available)"
+    ].join("\n");
+
+    const appServer = new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: `commit-message-${Date.now()}`
+    });
+    await appServer.connect();
+
+    try {
+      const providerThreadId = await appServer.startOrResumeThread(null, threadOptions);
+      let latestDraft = "";
+      let finalText = "";
+      await appServer.runTurn(
+        providerThreadId,
+        [{ type: "text", text: prompt }],
+        threadOptions,
+        (event) => {
+          const eventType = asString((event as UnknownRecord).type) ?? "";
+          if (eventType !== "item.updated" && eventType !== "item.completed") {
+            return;
+          }
+          const item = asRecord((event as UnknownRecord).item);
+          if (!item || asString(item.type) !== "agent_message") {
+            return;
+          }
+          const text = sanitizePtyOutput(asString(item.text) ?? "");
+          if (!text) {
+            return;
+          }
+          if (eventType === "item.completed") {
+            finalText = text;
+          } else {
+            latestDraft = text;
+          }
+        }
+      );
+
+      const text = sanitizePtyOutput((finalText || latestDraft).trim());
+      if (!text) {
+        return null;
+      }
+
+      const firstLine = text
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .find(Boolean);
+      if (!firstLine) {
+        return null;
+      }
+
+      const normalized = firstLine.replace(/^["'`]+|["'`]+$/g, "").trim();
+      return normalized ? normalized.slice(0, 120) : null;
+    } catch {
+      return null;
+    } finally {
+      await appServer.close().catch(() => undefined);
     }
   }
 

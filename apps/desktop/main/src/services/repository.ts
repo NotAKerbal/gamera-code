@@ -1018,6 +1018,38 @@ export class Repository {
     };
   }
 
+  listMessagesForFork(input: { threadId: string; upToStreamSeq?: number }): MessageEvent[] {
+    const threadId = input.threadId.trim();
+    if (!threadId) {
+      return [];
+    }
+
+    const rows =
+      typeof input.upToStreamSeq === "number" && Number.isFinite(input.upToStreamSeq)
+        ? (this.db
+            .prepare(
+              `SELECT *
+               FROM message_events
+               WHERE thread_id = @threadId
+                 AND stream_seq <= @upToStreamSeq
+               ORDER BY stream_seq ASC`
+            )
+            .all({
+              threadId,
+              upToStreamSeq: Math.max(0, Math.floor(input.upToStreamSeq))
+            }) as MessageRow[])
+        : (this.db
+            .prepare(
+              `SELECT *
+               FROM message_events
+               WHERE thread_id = ?
+               ORDER BY stream_seq ASC`
+            )
+            .all(threadId) as MessageRow[]);
+
+    return rows.map(mapMessage);
+  }
+
   appendPtyLog(threadId: string, text: string): void {
     const filePath = getThreadDataPath(this.paths.threadsDir, threadId).ptyLogPath;
     this.enqueueFileAppend(filePath, text);
