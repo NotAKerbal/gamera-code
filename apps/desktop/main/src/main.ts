@@ -898,6 +898,14 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         min-height: 16px;
         white-space: pre-wrap;
       }
+      .commit-inline-status {
+        margin-left: 8px;
+        font-size: 11px;
+        color: #94a3b8;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
       .diff-wrap {
         min-height: 0;
         display: flex;
@@ -1025,6 +1033,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
           <textarea id="commitInput" class="commit-input" placeholder="Commit message (optional: auto-generate if empty)"></textarea>
           <div class="row" style="margin-top: 8px;">
             <button id="commitBtn" class="btn">Commit</button>
+            <span id="commitInlineStatus" class="commit-inline-status"></span>
           </div>
           <div id="actionStatus" class="action-status"></div>
         </div>
@@ -1052,6 +1061,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       const stageBtn = document.getElementById("stageBtn");
       const commitBtn = document.getElementById("commitBtn");
       const commitInput = document.getElementById("commitInput");
+      const commitInlineStatus = document.getElementById("commitInlineStatus");
       const actionStatus = document.getElementById("actionStatus");
       const windowMinBtn = document.getElementById("windowMinBtn");
       const windowMaxBtn = document.getElementById("windowMaxBtn");
@@ -1105,10 +1115,14 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       const setActionStatus = (message) => {
         actionStatus.textContent = message || "";
       };
+      const setCommitInlineStatus = (html) => {
+        if (!commitInlineStatus) return;
+        commitInlineStatus.innerHTML = html || "";
+      };
       const setActionStatusGenerating = () => {
-        actionStatus.innerHTML = useTurtleSpinner
+        setCommitInlineStatus(useTurtleSpinner
           ? '<span class="spinner turtle"></span> Generating AI commit name...'
-          : '<span class="spinner"></span> Generating AI commit name...';
+          : '<span class="spinner"></span> Generating AI commit name...');
       };
 
       const setSyncBusy = (busy) => {
@@ -1273,10 +1287,9 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         setBusy(true);
         const commitMessage = commitInput.value.trim();
         const isAutoGenerate = commitMessage.length === 0;
+        setActionStatus("");
         if (isAutoGenerate) {
           setActionStatusGenerating();
-        } else {
-          setActionStatus("");
         }
         try {
           const result = await api.git.commit({
@@ -1295,6 +1308,7 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
           }
           await loadState();
         } finally {
+          setCommitInlineStatus("");
           setBusy(false);
         }
       };
