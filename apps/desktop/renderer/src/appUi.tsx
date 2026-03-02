@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { FaChevronDown, FaCodeBranch, FaGlobeAmericas } from "react-icons/fa";
 import type { MessageEvent, PromptAttachment } from "@code-app/shared";
@@ -177,9 +177,6 @@ interface TimelineItemsListProps {
   onBuildPlan: (planId: string) => void;
   onCopyPlan: (planId: string) => void;
   onForkFromUserMessage?: (message: MessageEvent) => void;
-  expandedActivityGroups: Record<string, boolean>;
-  setExpandedActivityGroups: Dispatch<SetStateAction<Record<string, boolean>>>;
-  setExpandedActivityChildren: Dispatch<SetStateAction<Record<string, boolean>>>;
 }
 
 const TimelineItemsList = ({
@@ -189,11 +186,10 @@ const TimelineItemsList = ({
   onViewPlan,
   onBuildPlan,
   onCopyPlan,
-  onForkFromUserMessage,
-  expandedActivityGroups,
-  setExpandedActivityGroups,
-  setExpandedActivityChildren
+  onForkFromUserMessage
 }: TimelineItemsListProps) => {
+  const [expandedActivityGroups, setExpandedActivityGroups] = useState<Record<string, boolean>>({});
+
   return (
     <>
       {timelineItems.map((item) => {
@@ -229,7 +225,6 @@ const TimelineItemsList = ({
 
         if (item.kind === "command-group" || item.kind === "read-group") {
           const groupOpen = expandedActivityGroups[item.id] ?? false;
-          const childIds = item.childIds;
           const isCommandGroup = item.kind === "command-group";
           return (
             <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
@@ -245,15 +240,6 @@ const TimelineItemsList = ({
                   onClick={() => {
                     const nextOpen = !groupOpen;
                     setExpandedActivityGroups((prev) => ({ ...prev, [item.id]: nextOpen }));
-                    if (nextOpen) {
-                      setExpandedActivityChildren((prev) => {
-                        const next = { ...prev };
-                        childIds.forEach((id) => {
-                          next[id] = true;
-                        });
-                        return next;
-                      });
-                    }
                   }}
                 >
                   <span>{item.label}</span>
@@ -315,7 +301,6 @@ const TimelineItemsList = ({
 
         if (item.kind === "file-group") {
           const groupOpen = expandedActivityGroups[item.id] ?? false;
-          const childIds = item.childIds;
           return (
             <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
               <section className={`activity-group activity-group-edits ${groupOpen ? "is-open" : ""}`}>
@@ -326,15 +311,6 @@ const TimelineItemsList = ({
                   onClick={() => {
                     const nextOpen = !groupOpen;
                     setExpandedActivityGroups((prev) => ({ ...prev, [item.id]: nextOpen }));
-                    if (nextOpen) {
-                      setExpandedActivityChildren((prev) => {
-                        const next = { ...prev };
-                        childIds.forEach((id) => {
-                          next[id] = true;
-                        });
-                        return next;
-                      });
-                    }
                   }}
                 >
                   {buildFileGroupLabel(item.files)}

@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -206,6 +207,110 @@ const useWindowsStyleHeader = !isMacOS;
 type TooltipPlacement = "above" | "below";
 const TOOLTIP_HOVER_DELAY_MS = 500;
 
+type ActivityBundleRowProps = {
+  rowId: string;
+  chips: string[];
+  items: TimelineItem[];
+  defaultOpen: boolean;
+  plansById: Record<string, PlanArtifact>;
+  getTodoPlanByActivityId: (activityId: string) => PlanArtifact | undefined;
+  onViewPlan: (planId: string) => void;
+  onBuildPlan: (planId: string) => void;
+  onCopyPlan: (planId: string) => void;
+  onForkFromUserMessage: (message: MessageEvent) => void;
+};
+type TimelinePlanRowProps = {
+  item: TimelineEventItem;
+  plansById: Record<string, PlanArtifact>;
+  getTodoPlanByActivityId: (activityId: string) => PlanArtifact | undefined;
+  onViewPlan: (planId: string) => void;
+  onBuildPlan: (planId: string) => void;
+  onCopyPlan: (planId: string) => void;
+  onForkFromUserMessage: (message: MessageEvent) => void;
+};
+
+const ActivityBundleRow = ({
+  rowId,
+  chips,
+  items,
+  defaultOpen,
+  plansById,
+  getTodoPlanByActivityId,
+  onViewPlan,
+  onBuildPlan,
+  onCopyPlan,
+  onForkFromUserMessage
+}: ActivityBundleRowProps) => {
+  const [groupOpen, setGroupOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    if (defaultOpen) {
+      setGroupOpen(true);
+    }
+  }, [defaultOpen]);
+
+  return (
+    <article className="timeline-item min-w-0 overflow-hidden">
+      <section className={`activity-group activity-group-commands ${groupOpen ? "is-open" : ""}`}>
+        <button
+          type="button"
+          className="activity-summary"
+          aria-expanded={groupOpen}
+          onClick={() => {
+            setGroupOpen((prev) => !prev);
+          }}
+        >
+          <span>Activity</span>
+          {chips.map((chip, index) => (
+            <span key={`${rowId}-chip-${index}`} className="summary-chip">
+              {chip}
+            </span>
+          ))}
+          <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
+        </button>
+        <div className={`activity-bundle-collapse ${groupOpen ? "open" : ""}`} aria-hidden={!groupOpen}>
+          <div className="activity-body">
+            <MemoizedTimelineItemsList
+              timelineItems={items}
+              plansById={plansById}
+              getTodoPlanByActivityId={getTodoPlanByActivityId}
+              onViewPlan={onViewPlan}
+              onBuildPlan={onBuildPlan}
+              onCopyPlan={onCopyPlan}
+              onForkFromUserMessage={onForkFromUserMessage}
+            />
+          </div>
+        </div>
+      </section>
+    </article>
+  );
+};
+const MemoizedActivityBundleRow = memo(ActivityBundleRow);
+const TimelinePlanRow = ({
+  item,
+  plansById,
+  getTodoPlanByActivityId,
+  onViewPlan,
+  onBuildPlan,
+  onCopyPlan,
+  onForkFromUserMessage
+}: TimelinePlanRowProps) => {
+  const singleItem = useMemo(() => [item], [item]);
+
+  return (
+    <MemoizedTimelineItemsList
+      timelineItems={singleItem}
+      plansById={plansById}
+      getTodoPlanByActivityId={getTodoPlanByActivityId}
+      onViewPlan={onViewPlan}
+      onBuildPlan={onBuildPlan}
+      onCopyPlan={onCopyPlan}
+      onForkFromUserMessage={onForkFromUserMessage}
+    />
+  );
+};
+const MemoizedTimelinePlanRow = memo(TimelinePlanRow);
+
 export const App = () => {
   const isSettingsWindow = isSettingsWindowContext();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -293,8 +398,6 @@ export const App = () => {
   const tooltipHoverTimeoutRef = useRef<number | null>(null);
   const tooltipTextRef = useRef("");
   const tooltipPlacementRef = useRef<TooltipPlacement>("below");
-  const [expandedActivityGroups, setExpandedActivityGroups] = useState<Record<string, boolean>>({});
-  const [, setExpandedActivityChildren] = useState<Record<string, boolean>>({});
   const [threadHistoryCursorById, setThreadHistoryCursorById] = useState<Record<string, number | undefined>>({});
   const [threadHistoryHasMoreById, setThreadHistoryHasMoreById] = useState<Record<string, boolean>>({});
   const [threadHistoryLoadingById, setThreadHistoryLoadingById] = useState<Record<string, boolean>>({});
@@ -5086,7 +5189,7 @@ export const App = () => {
     });
   };
 
-  const buildPlanImplementationPrompt = (plan: PlanArtifact) => {
+  const buildPlanImplementationPrompt = useCallback((plan: PlanArtifact) => {
     return [
       "Implement this plan now in coding mode.",
       "Execute end-to-end, run relevant validation/tests, and summarize exactly what changed.",
@@ -5096,7 +5199,7 @@ export const App = () => {
       plan.markdown || plan.summary,
       "```"
     ].join("\n");
-  };
+  }, []);
 
   const buildNowFromPlan = async (planId: string) => {
     if (!activeThreadId) {
@@ -6910,6 +7013,25 @@ const stopActiveRun = async () => {
     },
     [activeProjectId, loadProjectSkills]
   );
+  const handleSelectWorkspace = useCallback(
+    (workspaceId: string) => {
+      focusWorkspace(workspaceId).catch((error) => {
+        setLogs((prev) => [...prev, `Workspace switch failed: ${String(error)}`]);
+      });
+    },
+    [focusWorkspace]
+  );
+  const handleForkFromUserMessage = useCallback(
+    (message: MessageEvent) => {
+      if (!activeThread) {
+        return;
+      }
+      forkThreadFromPrompt(activeThread, message.streamSeq).catch((error) => {
+        setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
+      });
+    },
+    [activeThread, forkThreadFromPrompt]
+  );
 
   return (
     <div className="h-screen overflow-hidden bg-bg text-white theme-text">
@@ -6928,11 +7050,7 @@ const stopActiveRun = async () => {
               appVersionLabel={APP_VERSION_LABEL}
               workspaces={workspaceHeaderItems}
               activeWorkspaceId={activeWorkspaceId}
-              onSelectWorkspace={(workspaceId) => {
-                focusWorkspace(workspaceId).catch((error) => {
-                  setLogs((prev) => [...prev, `Workspace switch failed: ${String(error)}`]);
-                });
-              }}
+              onSelectWorkspace={handleSelectWorkspace}
               onOpenWorkspaceSettings={openWorkspaceSettingsModal}
               onOpenNewWorkspaceModal={openCreateWorkspaceModal}
               changelogItems={CHANGELOG_ITEMS}
@@ -7618,75 +7736,34 @@ const stopActiveRun = async () => {
                       }
                       if (row.kind === "plan") {
                         return (
-                          <MemoizedTimelineItemsList
+                          <MemoizedTimelinePlanRow
                             key={row.id}
-                            timelineItems={[row.item]}
+                            item={row.item}
                             plansById={plansById}
                             getTodoPlanByActivityId={getTodoPlanByActivityId}
                             onViewPlan={openPlanDrawerFor}
                             onBuildPlan={handleBuildPlan}
                             onCopyPlan={copyPlanToClipboard}
-                            onForkFromUserMessage={(message) => {
-                              if (!activeThread) {
-                                return;
-                              }
-                              forkThreadFromPrompt(activeThread, message.streamSeq).catch((error) => {
-                                setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                              });
-                            }}
-                            expandedActivityGroups={expandedActivityGroups}
-                            setExpandedActivityGroups={setExpandedActivityGroups}
-                            setExpandedActivityChildren={setExpandedActivityChildren}
+                            onForkFromUserMessage={handleForkFromUserMessage}
                           />
                         );
                       }
 
                       const isLastRow = rowIndex === timelineRows.length - 1;
-                      const groupOpen = expandedActivityGroups[row.id] ?? isLastRow;
                       return (
-                        <article key={row.id} className="timeline-item min-w-0 overflow-hidden">
-                          <section className={`activity-group activity-group-commands ${groupOpen ? "is-open" : ""}`}>
-                            <button
-                              type="button"
-                              className="activity-summary"
-                              aria-expanded={groupOpen}
-                              onClick={() => {
-                                setExpandedActivityGroups((prev) => ({ ...prev, [row.id]: !groupOpen }));
-                              }}
-                            >
-                              <span>Activity</span>
-                              {row.chips.map((chip, index) => (
-                                <span key={`${row.id}-chip-${index}`} className="summary-chip">
-                                  {chip}
-                                </span>
-                              ))}
-                              <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
-                            </button>
-                            <div className={`activity-bundle-collapse ${groupOpen ? "open" : ""}`} aria-hidden={!groupOpen}>
-                              <div className="activity-body">
-                                <MemoizedTimelineItemsList
-                                  timelineItems={row.items}
-                                  plansById={plansById}
-                                  getTodoPlanByActivityId={getTodoPlanByActivityId}
-                                  onViewPlan={openPlanDrawerFor}
-                                  onBuildPlan={handleBuildPlan}
-                                  onCopyPlan={copyPlanToClipboard}
-                                  onForkFromUserMessage={(message) => {
-                                    if (!activeThread) {
-                                      return;
-                                    }
-                                    forkThreadFromPrompt(activeThread, message.streamSeq).catch((error) => {
-                                      setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                                    });
-                                  }}
-                                  expandedActivityGroups={expandedActivityGroups}
-                                  setExpandedActivityGroups={setExpandedActivityGroups}
-                                  setExpandedActivityChildren={setExpandedActivityChildren}
-                                />
-                              </div>
-                            </div>
-                          </section>
-                        </article>
+                        <MemoizedActivityBundleRow
+                          key={row.id}
+                          rowId={row.id}
+                          chips={row.chips}
+                          items={row.items}
+                          defaultOpen={isLastRow}
+                          plansById={plansById}
+                          getTodoPlanByActivityId={getTodoPlanByActivityId}
+                          onViewPlan={openPlanDrawerFor}
+                          onBuildPlan={handleBuildPlan}
+                          onCopyPlan={copyPlanToClipboard}
+                          onForkFromUserMessage={handleForkFromUserMessage}
+                        />
                       );
                     })
                   ) : (
@@ -7697,17 +7774,7 @@ const stopActiveRun = async () => {
                       onViewPlan={openPlanDrawerFor}
                       onBuildPlan={handleBuildPlan}
                       onCopyPlan={copyPlanToClipboard}
-                      onForkFromUserMessage={(message) => {
-                        if (!activeThread) {
-                          return;
-                        }
-                        forkThreadFromPrompt(activeThread, message.streamSeq).catch((error) => {
-                          setLogs((prev) => [...prev, `Fork thread failed: ${String(error)}`]);
-                        });
-                      }}
-                      expandedActivityGroups={expandedActivityGroups}
-                      setExpandedActivityGroups={setExpandedActivityGroups}
-                      setExpandedActivityChildren={setExpandedActivityChildren}
+                      onForkFromUserMessage={handleForkFromUserMessage}
                     />
                   )}
 
