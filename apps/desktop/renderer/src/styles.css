@@ -684,6 +684,34 @@ webview {
   @apply text-[11px] uppercase tracking-[0.12em] text-muted;
 }
 
+.git-flow-arrow {
+  @apply relative flex h-4 items-center justify-center text-[12px] text-slate-400/70;
+}
+
+.git-flow-arrow::before {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: 50%;
+  border-top: 1px dashed rgba(148, 163, 184, 0.24);
+  transform: translateY(-50%);
+}
+
+.git-flow-arrow span {
+  position: relative;
+  z-index: 1;
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 9999px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
 .git-branch-chip {
   @apply inline-flex items-center rounded-md border border-cyan-500/40 bg-cyan-900/20 px-2 py-0.5 text-[11px] font-medium text-cyan-100;
 }

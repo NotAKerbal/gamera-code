@@ -8222,6 +8222,10 @@ const stopActiveRun = async () => {
                             )}
                           </div>
 
+                          <div className="git-flow-arrow" aria-hidden="true">
+                            <span>{"\u2193"}</span>
+                          </div>
+
                           <div className="git-panel-card">
                             <button
                               className="btn-ghost w-full justify-center"
@@ -8258,6 +8262,10 @@ const stopActiveRun = async () => {
                                 )}
                               </div>
                             )}
+                          </div>
+
+                          <div className="git-flow-arrow" aria-hidden="true">
+                            <span>{"\u2191"}</span>
                           </div>
 
                           <div className="git-panel-card">
@@ -8322,6 +8330,10 @@ const stopActiveRun = async () => {
                                 </div>
                               ))
                             )}
+                          </div>
+
+                          <div className="git-flow-arrow" aria-hidden="true">
+                            <span>{"\u2191"}</span>
                           </div>
 
                           <div className="git-panel-card">
@@ -8393,6 +8405,11 @@ const stopActiveRun = async () => {
                               </button>
                             )}
                           </div>
+
+                          <div className="git-flow-arrow" aria-hidden="true">
+                            <span>{"\u2191"}</span>
+                          </div>
+
                           <div className="git-panel-card">
                             <div className="git-panel-card-title">
                               Unstaged / Untracked ({activeUnstagedFiles.length})
