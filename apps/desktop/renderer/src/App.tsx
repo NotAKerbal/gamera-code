@@ -529,6 +529,10 @@ export const App = () => {
   }, []);
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
+  const activeComposerDraft = useMemo(
+    () => (activeThreadId ? composerDraftByThreadId[activeThreadId] ?? "" : ""),
+    [activeThreadId, composerDraftByThreadId]
+  );
   const selectedProject = useMemo(
     () => (activeProjectId ? projects.find((project) => project.id === activeProjectId) || null : null),
     [projects, activeProjectId]
@@ -1286,7 +1290,11 @@ export const App = () => {
     );
 
     if (activeThreadId && !codexThreads.some((thread) => thread.id === activeThreadId)) {
-      setActiveThreadId(sortedThreads[0]?.id ?? null);
+      const fallbackThread = sortedThreads[0] ?? null;
+      setActiveThreadId(fallbackThread?.id ?? null);
+      if (fallbackThread) {
+        setActiveProjectId((prev) => (prev === fallbackThread.projectId ? prev : fallbackThread.projectId));
+      }
       return;
     }
 
@@ -1297,11 +1305,14 @@ export const App = () => {
         );
         const workspaceThread = sortedThreads.find((thread) => workspaceProjectIds.has(thread.projectId));
         if (workspaceThread) {
+          setActiveProjectId((prev) => (prev === workspaceThread.projectId ? prev : workspaceThread.projectId));
           setActiveThreadId(workspaceThread.id);
           return;
         }
       }
-      setActiveThreadId(sortedThreads[0]!.id);
+      const fallbackThread = sortedThreads[0]!;
+      setActiveProjectId((prev) => (prev === fallbackThread.projectId ? prev : fallbackThread.projectId));
+      setActiveThreadId(fallbackThread.id);
     }
   };
 
@@ -1596,13 +1607,6 @@ export const App = () => {
   }, [activeThreadId, activeThread?.provider]);
 
   useEffect(() => {
-    if (!activeThread || activeProjectId === activeThread.projectId) {
-      return;
-    }
-    setActiveProjectId(activeThread.projectId);
-  }, [activeThread, activeProjectId]);
-
-  useEffect(() => {
     runStateByThreadIdRef.current = runStateByThreadId;
   }, [runStateByThreadId]);
 
@@ -1651,12 +1655,11 @@ export const App = () => {
       setSkillMention(null);
       return;
     }
-    const draft = composerDraftByThreadId[activeThreadId] ?? "";
-    applyComposerText(draft);
-    const nextSkills = extractSkillsFromInput(draft, activeSkills).skills;
+    applyComposerText(activeComposerDraft);
+    const nextSkills = extractSkillsFromInput(activeComposerDraft, activeSkills).skills;
     setComposerMentionedSkills((prev) => (areSkillReferencesEqual(prev, nextSkills) ? prev : nextSkills));
     scheduleComposerResize();
-  }, [activeThreadId, activeSkills, composerDraftByThreadId]);
+  }, [activeThreadId, activeComposerDraft, activeSkills]);
 
   useEffect(() => {
     const nextSkills = extractSkillsFromInput(composerRef.current, activeSkills).skills;
@@ -3095,7 +3098,7 @@ export const App = () => {
         prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
         return [];
       });
-      setIsDraggingFiles(false);
+      setIsDraggingFiles((prev) => (prev ? false : prev));
       setFileMention(null);
       setSkillMention(null);
       const historyPage = await api.threads.events({
