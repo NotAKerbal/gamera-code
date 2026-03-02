@@ -18,6 +18,8 @@ const gitGetOutgoingCommitsChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
 const gitGetIncomingCommitsChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetIncomingCommits ?? "git:getIncomingCommits";
+const gitGetSharedHistoryChannel =
+  (IPC_CHANNELS as Record<string, string>).gitGetSharedHistory ?? "git:getSharedHistory";
 const gitGetSnapshotChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetSnapshot ?? "git:getSnapshot";
 const threadsForkChannel =
@@ -61,6 +63,9 @@ type DesktopApiWithGitExtras = DesktopApi & {
     discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
     getIncomingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
+    getSharedHistory: (
+      input: { projectId: string; limit?: number }
+    ) => Promise<Array<{ hash: string; summary: string; date: string; refs?: string }>>;
   };
   workspaces: {
     list: () => Promise<Array<{ id: string; name: string; icon: string; color: string; createdAt: string; updatedAt: string }>>;
@@ -198,6 +203,7 @@ const api: DesktopApiWithGitExtras = {
     getDiff: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitGetDiff, input),
     getOutgoingCommits: (input: { projectId: string }) => ipcRenderer.invoke(gitGetOutgoingCommitsChannel, input),
     getIncomingCommits: (input: { projectId: string }) => ipcRenderer.invoke(gitGetIncomingCommitsChannel, input),
+    getSharedHistory: (input: { projectId: string; limit?: number }) => ipcRenderer.invoke(gitGetSharedHistoryChannel, input),
     fetch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitFetch, input),
     pull: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitPull, input),
     push: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitPush, input),

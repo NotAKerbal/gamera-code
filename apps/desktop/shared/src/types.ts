@@ -355,6 +355,13 @@ export interface GitOutgoingCommit {
   summary: string;
 }
 
+export interface GitHistoryCommit {
+  hash: string;
+  summary: string;
+  date: string;
+  refs?: string;
+}
+
 export interface GitSnapshot {
   state: GitState;
   outgoingCommits: GitOutgoingCommit[];

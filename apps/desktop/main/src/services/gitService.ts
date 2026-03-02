@@ -100,6 +100,13 @@ type GitOutgoingCommitItem = {
   summary: string;
 };
 
+type GitHistoryCommitItem = {
+  hash: string;
+  summary: string;
+  date: string;
+  refs?: string;
+};
+
 const parseOnelineCommits = (value: string): GitOutgoingCommitItem[] => {
   return value
     .split("\n")
@@ -110,6 +117,24 @@ const parseOnelineCommits = (value: string): GitOutgoingCommitItem[] => {
       return {
         hash: hash ?? "",
         summary: summaryParts.join(" ").trim()
+      };
+    })
+    .filter((commit) => Boolean(commit.hash) && Boolean(commit.summary));
+};
+
+const parseHistoryCommits = (value: string): GitHistoryCommitItem[] => {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [hashRaw, dateRaw, refsRaw, ...summaryParts] = line.split("\t");
+      const refs = refsRaw?.trim().replace(/^\((.*)\)$/u, "$1");
+      return {
+        hash: hashRaw?.trim() ?? "",
+        date: dateRaw?.trim() ?? "",
+        refs: refs ? refs : undefined,
+        summary: summaryParts.join("\t").trim()
       };
     })
     .filter((commit) => Boolean(commit.hash) && Boolean(commit.summary));
@@ -403,6 +428,36 @@ export class GitService {
       return [];
     }
     return parseOnelineCommits(result.stdout);
+  }
+
+  async getSharedHistory(cwd: string, limit = 120): Promise<GitHistoryCommitItem[]> {
+    const insideRepo = await this.isInsideRepo(cwd);
+    if (!insideRepo) {
+      return [];
+    }
+
+    const upstream = await this.runGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+    if (!upstream.ok) {
+      return [];
+    }
+
+    const mergeBase = await this.runGit(cwd, ["merge-base", "HEAD", "@{u}"]);
+    if (!mergeBase.ok || !mergeBase.stdout) {
+      return [];
+    }
+
+    const result = await this.runGit(cwd, [
+      "log",
+      "--date=short",
+      "--pretty=format:%h%x09%ad%x09%d%x09%s",
+      mergeBase.stdout.trim(),
+      "-n",
+      String(limit)
+    ]);
+    if (!result.ok || !result.stdout) {
+      return [];
+    }
+    return parseHistoryCommits(result.stdout);
   }
 
   async getSnapshot(cwd: string, limit = 30): Promise<GitSnapshot> {

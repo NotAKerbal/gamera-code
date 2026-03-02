@@ -4,6 +4,7 @@ import type {
   GitCommitResult,
   GitCommandResult,
   GitDiffResult,
+  GitHistoryCommit,
   GitOutgoingCommit,
   GitSnapshot,
   GitRepositoryCandidate,
@@ -174,6 +175,7 @@ export interface DesktopApi {
     getDiff: (input: { projectId: string; path?: string }) => Promise<GitDiffResult>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<GitOutgoingCommit[]>;
     getIncomingCommits: (input: { projectId: string }) => Promise<GitOutgoingCommit[]>;
+    getSharedHistory: (input: { projectId: string; limit?: number }) => Promise<GitHistoryCommit[]>;
     fetch: (input: { projectId: string }) => Promise<GitCommandResult>;
     pull: (input: { projectId: string }) => Promise<GitCommandResult>;
     push: (input: { projectId: string }) => Promise<GitCommandResult>;

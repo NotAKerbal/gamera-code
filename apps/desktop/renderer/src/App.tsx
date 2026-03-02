@@ -51,6 +51,7 @@ import type {
   CodexSandboxMode,
   CodexThreadOptions,
   CodexWebSearchMode,
+  GitHistoryCommit,
   GitRepositoryCandidate,
   GitOutgoingCommit,
   GitState,
@@ -333,6 +334,9 @@ export const App = () => {
   const [gitStateByProjectId, setGitStateByProjectId] = useState<Record<string, GitState>>({});
   const [gitOutgoingCommitsByProjectId, setGitOutgoingCommitsByProjectId] = useState<Record<string, GitOutgoingCommit[]>>({});
   const [gitIncomingCommitsByProjectId, setGitIncomingCommitsByProjectId] = useState<Record<string, GitOutgoingCommit[]>>({});
+  const [gitSharedHistoryByProjectId, setGitSharedHistoryByProjectId] = useState<Record<string, GitHistoryCommit[]>>({});
+  const [gitSharedHistoryExpandedByProjectId, setGitSharedHistoryExpandedByProjectId] = useState<Record<string, boolean>>({});
+  const [gitSharedHistoryLoadingByProjectId, setGitSharedHistoryLoadingByProjectId] = useState<Record<string, boolean>>({});
   const [gitSelectedPathByProjectId, setGitSelectedPathByProjectId] = useState<Record<string, string | null>>({});
   const [gitBusyAction, setGitBusyAction] = useState<string | null>(null);
   const [gitCommitIsGeneratingMessage, setGitCommitIsGeneratingMessage] = useState(false);
@@ -561,6 +565,12 @@ export const App = () => {
     () => (activeProjectId ? gitIncomingCommitsByProjectId[activeProjectId] ?? [] : []),
     [activeProjectId, gitIncomingCommitsByProjectId]
   );
+  const activeSharedHistory = useMemo(
+    () => (activeProjectId ? gitSharedHistoryByProjectId[activeProjectId] ?? [] : []),
+    [activeProjectId, gitSharedHistoryByProjectId]
+  );
+  const activeGitSharedHistoryExpanded = activeProjectId ? Boolean(gitSharedHistoryExpandedByProjectId[activeProjectId]) : false;
+  const activeGitSharedHistoryLoading = activeProjectId ? Boolean(gitSharedHistoryLoadingByProjectId[activeProjectId]) : false;
   const activeStagedFiles = useMemo(
     () => (activeGitState?.files ?? []).filter((file) => file.staged),
     [activeGitState?.files]
@@ -1252,6 +1262,25 @@ export const App = () => {
     return snapshot.incomingCommits;
   };
 
+  const loadGitSharedHistory = async (projectId: string, limit = 120) => {
+    setGitSharedHistoryLoadingByProjectId((prev) => ({
+      ...prev,
+      [projectId]: true
+    }));
+    try {
+      const commits = await api.git.getSharedHistory({ projectId, limit });
+      setGitSharedHistoryByProjectId((prev) => ({
+        ...prev,
+        [projectId]: commits
+      }));
+      return commits;
+    } finally {
+      setGitSharedHistoryLoadingByProjectId((prev) => ({
+        ...prev,
+        [projectId]: false
+      }));
+    }
+  };
   const addImageFiles = async (files: File[]) => {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
     if (imageFiles.length === 0) {
@@ -3154,6 +3183,26 @@ export const App = () => {
         delete next[projectIdToRemove];
         return next;
       });
+      setGitIncomingCommitsByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectIdToRemove];
+        return next;
+      });
+      setGitSharedHistoryByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectIdToRemove];
+        return next;
+      });
+      setGitSharedHistoryExpandedByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectIdToRemove];
+        return next;
+      });
+      setGitSharedHistoryLoadingByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectIdToRemove];
+        return next;
+      });
       setGitSelectedPathByProjectId((prev) => {
         const next = { ...prev };
         delete next[projectIdToRemove];
@@ -3377,6 +3426,24 @@ export const App = () => {
     setGitBranchSearch("");
   };
 
+  const toggleSharedGitHistory = async () => {
+    if (!activeProjectId) {
+      return;
+    }
+    const nextExpanded = !activeGitSharedHistoryExpanded;
+    setGitSharedHistoryExpandedByProjectId((prev) => ({
+      ...prev,
+      [activeProjectId]: nextExpanded
+    }));
+    if (!nextExpanded) {
+      return;
+    }
+    try {
+      await loadGitSharedHistory(activeProjectId);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Git shared history failed: ${String(error)}`]);
+    }
+  };
   const parseTerminalPopoutKey = (key: string): { projectId: string; commandId: string } | null => {
     const splitIndex = key.indexOf(":");
     if (splitIndex < 1 || splitIndex >= key.length - 1) {
@@ -8058,10 +8125,22 @@ const stopActiveRun = async () => {
                 {isGitPanelOpen && (
                   <>
                     <div className="flex items-center justify-between border-b border-border/80 px-3 py-2">
-                      <div className="text-xs uppercase tracking-[0.16em] text-muted">Git</div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        className="btn-ghost"
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs uppercase tracking-[0.16em] text-muted">Git</div>
+                        {activeProjectId && activeGitState?.insideRepo && (
+                          <span className="git-branch-chip">{activeGitState.branch ?? "(detached)"}</span>
+                        )}
+                        {activeProjectId &&
+                          activeGitState?.insideRepo &&
+                          (activeGitState.ahead > 0 || activeGitState.behind > 0) && (
+                            <span className="git-branch-status-chip">
+                              {`Ahead ${activeGitState.ahead} / Behind ${activeGitState.behind}`}
+                            </span>
+                          )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          className="btn-ghost"
                           onClick={() => {
                             if (!activeProjectId) {
                               return;
@@ -8101,28 +8180,12 @@ const stopActiveRun = async () => {
                       </div>
                     </div>
 
-                    <section className="space-y-2 border-b border-border/80 px-3 py-2 max-h-[52vh] overflow-y-auto">
-                      {!activeProjectId ? (
-                        <p className="text-xs text-slate-400">Select a project to view git state.</p>
-                      ) : !activeGitState?.insideRepo ? (
-                        <p className="text-xs text-slate-400">This project is not a git repository.</p>
-                      ) : (
-                        <>
-                          <div className="text-xs text-slate-300">
-                            Branch: <span className="text-slate-100">{activeGitState.branch ?? "(detached)"}</span>
-                            {activeGitState.upstream ? ` -> ${activeGitState.upstream}` : ""}
-                          </div>
-                          {(activeGitState.ahead > 0 || activeGitState.behind > 0) && (
-                            <div className="text-[11px] text-slate-400">
-                              Ahead {activeGitState.ahead} / Behind {activeGitState.behind}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </section>
-
                     <section className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-                      {activeGitState?.insideRepo ? (
+                      {!activeProjectId ? (
+                        <p className="text-xs text-slate-500">Select a project to view git state.</p>
+                      ) : !activeGitState?.insideRepo ? (
+                        <p className="text-xs text-slate-500">This project is not a git repository.</p>
+                      ) : (
                         <div className="space-y-3">
                           <div className="git-panel-card">
                             <div className="git-panel-card-title mb-2">
@@ -8156,6 +8219,44 @@ const stopActiveRun = async () => {
                                   <div className="truncate">{commit.summary}</div>
                                 </div>
                               ))
+                            )}
+                          </div>
+
+                          <div className="git-panel-card">
+                            <button
+                              className="btn-ghost w-full justify-center"
+                              onClick={() => toggleSharedGitHistory().catch((error) => setLogs((prev) => [...prev, `Git shared history toggle failed: ${String(error)}`]))}
+                              disabled={activeGitSharedHistoryLoading}
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                {activeGitSharedHistoryLoading && (
+                                  <span className={settings.useTurtleSpinners ? "loading-ring turtle-spinner" : "loading-ring"} />
+                                )}
+                                {activeGitSharedHistoryExpanded ? "Hide Synced History" : "View Synced History"}
+                              </span>
+                            </button>
+
+                            {activeGitSharedHistoryExpanded && (
+                              <div className="git-history-expand mt-2 space-y-2">
+                                {activeGitSharedHistoryLoading ? (
+                                  <p className="text-xs text-slate-500">Loading synced commits...</p>
+                                ) : activeSharedHistory.length === 0 ? (
+                                  <p className="text-xs text-slate-500">No shared commit history found for this branch/upstream pair.</p>
+                                ) : (
+                                  <div className="git-history-scroll space-y-2">
+                                    {activeSharedHistory.map((commit) => (
+                                      <div key={`shared-${commit.hash}`} className="git-history-commit">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="git-commit-pill-hash truncate text-[10px]">{commit.hash}</div>
+                                          <div className="truncate text-[10px] text-muted">{commit.date}</div>
+                                        </div>
+                                        <div className="truncate text-xs text-slate-100">{commit.summary}</div>
+                                        {commit.refs && <div className="truncate text-[10px] text-muted">{commit.refs}</div>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </div>
 
@@ -8358,8 +8459,6 @@ const stopActiveRun = async () => {
                             <p className="text-xs text-slate-500">Working tree clean.</p>
                           )}
                         </div>
-                      ) : (
-                        <p className="text-xs text-slate-500">No git data.</p>
                       )}
                     </section>
                   </>
@@ -8527,10 +8626,4 @@ const stopActiveRun = async () => {
     </div>
   );
 };
-
-
-
-
-
-
 

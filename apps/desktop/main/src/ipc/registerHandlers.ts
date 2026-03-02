@@ -72,6 +72,8 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     (IPC_CHANNELS as Record<string, string>).gitGetOutgoingCommits ?? "git:getOutgoingCommits";
   const gitGetIncomingCommitsChannel =
     (IPC_CHANNELS as Record<string, string>).gitGetIncomingCommits ?? "git:getIncomingCommits";
+  const gitGetSharedHistoryChannel =
+    (IPC_CHANNELS as Record<string, string>).gitGetSharedHistory ?? "git:getSharedHistory";
   const gitGetSnapshotChannel =
     (IPC_CHANNELS as Record<string, string>).gitGetSnapshot ?? "git:getSnapshot";
   const orchestrationListRunsChannel =
@@ -996,6 +998,10 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
 
   ipcMain.handle(gitGetIncomingCommitsChannel, async (_event, input: { projectId: string }) => {
     return deps.gitService.getIncomingCommits(getProjectPath(input.projectId));
+  });
+
+  ipcMain.handle(gitGetSharedHistoryChannel, async (_event, input: { projectId: string; limit?: number }) => {
+    return deps.gitService.getSharedHistory(getProjectPath(input.projectId), input.limit);
   });
 
   ipcMain.handle(IPC_CHANNELS.gitFetch, async (_event, input: { projectId: string }) => {
