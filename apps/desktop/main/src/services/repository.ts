@@ -81,6 +81,7 @@ interface WorkspaceModel {
 }
 
 type ProjectModel = Project & { workspaceId: string };
+type ThreadWithMetadata = Thread & { color?: string; pinnedAt?: string };
 
 const asProjectModel = (project: Project): ProjectModel => project as ProjectModel;
 
@@ -186,19 +187,26 @@ const mapWorkspace = (row: WorkspaceRow): WorkspaceModel => ({
   updatedAt: row.updated_at
 });
 
-const mapThread = (row: ThreadRow): Thread => ({
-  id: row.id,
-  projectId: row.project_id,
-  parentThreadId: row.parent_thread_id ?? undefined,
-  title: row.title,
-  color: row.color ?? undefined,
-  provider: row.provider,
-  status: row.status,
-  createdAt: row.created_at,
-  updatedAt: row.last_message_ts ?? row.updated_at,
-  archivedAt: row.archived_at ?? undefined,
-  pinnedAt: row.pinned_at ?? undefined
-});
+const mapThread = (row: ThreadRow): Thread => {
+  const mapped: ThreadWithMetadata = {
+    id: row.id,
+    projectId: row.project_id,
+    parentThreadId: row.parent_thread_id ?? undefined,
+    title: row.title,
+    provider: row.provider,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.last_message_ts ?? row.updated_at,
+    archivedAt: row.archived_at ?? undefined
+  };
+  if (row.color) {
+    mapped.color = row.color;
+  }
+  if (row.pinned_at) {
+    mapped.pinnedAt = row.pinned_at;
+  }
+  return mapped as Thread;
+};
 
 const mapSession = (row: SessionRow): Session => ({
   threadId: row.thread_id,
@@ -824,13 +832,18 @@ export class Repository {
     if (!existing) {
       throw new Error("Thread not found");
     }
+    const existingWithMetadata = existing as ThreadWithMetadata;
 
     const normalizedColor =
-      typeof input.color === "string" ? (input.color.trim() ? input.color.trim() : undefined) : existing.color;
+      typeof input.color === "string" ? (input.color.trim() ? input.color.trim() : undefined) : existingWithMetadata.color;
     const now = new Date().toISOString();
     const pinnedAt =
-      typeof input.pinned === "boolean" ? (input.pinned ? existing.pinnedAt ?? now : undefined) : existing.pinnedAt;
-    const updated: Thread = {
+      typeof input.pinned === "boolean"
+        ? input.pinned
+          ? existingWithMetadata.pinnedAt ?? now
+          : undefined
+        : existingWithMetadata.pinnedAt;
+    const updated: ThreadWithMetadata = {
       ...existing,
       title: input.title ?? existing.title,
       color: normalizedColor,
@@ -850,7 +863,7 @@ export class Repository {
         pinnedAt: updated.pinnedAt ?? null
       });
 
-    return updated;
+    return updated as Thread;
   }
 
   archiveThread(id: string, archived: boolean): Thread {
@@ -858,7 +871,7 @@ export class Repository {
     if (!existing) {
       throw new Error("Thread not found");
     }
-    if (archived && existing.pinnedAt) {
+    if (archived && (existing as ThreadWithMetadata).pinnedAt) {
       throw new Error("Pinned threads must be unpinned before archiving");
     }
 
