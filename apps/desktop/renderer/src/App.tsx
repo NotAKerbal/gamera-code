@@ -8246,7 +8246,10 @@ const stopActiveRun = async () => {
                                 disabled={Boolean(gitBusyAction)}
                               />
                               {gitBusyAction === "commit" && gitCommitIsGeneratingMessage && (
-                                <p className="mt-1 text-[11px] text-slate-400">Generating AI commit name...</p>
+                                <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-400">
+                                  <span className={settings.useTurtleSpinners ? "loading-ring turtle-spinner" : "loading-ring"} />
+                                  Generating AI commit name...
+                                </p>
                               )}
                             </div>
                             {activeStagedFiles.length === 0 ? (

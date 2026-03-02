@@ -1105,6 +1105,11 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
       const setActionStatus = (message) => {
         actionStatus.textContent = message || "";
       };
+      const setActionStatusGenerating = () => {
+        actionStatus.innerHTML = useTurtleSpinner
+          ? '<span class="spinner turtle"></span> Generating AI commit name...'
+          : '<span class="spinner"></span> Generating AI commit name...';
+      };
 
       const setSyncBusy = (busy) => {
         if (busy) {
@@ -1268,7 +1273,11 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
         setBusy(true);
         const commitMessage = commitInput.value.trim();
         const isAutoGenerate = commitMessage.length === 0;
-        setActionStatus(isAutoGenerate ? "Generating AI commit name..." : "");
+        if (isAutoGenerate) {
+          setActionStatusGenerating();
+        } else {
+          setActionStatus("");
+        }
         try {
           const result = await api.git.commit({
             projectId: activeProjectId,
