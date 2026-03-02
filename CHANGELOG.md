@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+- Improved git panel
+- Better rendering for workspaces at the top
+- Improved buttons in the compsoer
+
 ## 0.3.0
 - Improved settings organization
 - Theming
