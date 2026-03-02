@@ -933,6 +933,14 @@ webview {
   @apply min-w-0 flex-1 text-left;
 }
 
+.thread-row-title-line {
+  @apply flex min-w-0 items-center gap-1.5;
+}
+
+.thread-pin-indicator {
+  @apply shrink-0 text-[10px] text-accent/90;
+}
+
 .thread-row-subtitle {
   @apply text-[11px] text-muted;
   display: -webkit-box;
@@ -1013,6 +1021,51 @@ webview {
 
 .thread-archived-toggle {
   @apply mt-1 w-full rounded-md bg-panel/35 px-2 py-1 text-left text-[11px] text-muted transition hover:bg-panel/75 hover:text-accent;
+}
+
+.thread-context-menu {
+  @apply fixed z-50 min-w-[190px] rounded-md border border-border bg-panel/95 p-1 shadow-xl backdrop-blur;
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.thread-context-menu.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.thread-context-menu.is-closing {
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+}
+
+.thread-context-menu-item {
+  @apply block w-full rounded-md px-2 py-1.5 text-left text-xs text-slate-100 transition hover:bg-white/10;
+}
+
+.thread-context-menu-divider {
+  @apply my-1 h-px bg-border/80;
+}
+
+.thread-context-menu-colors {
+  @apply grid grid-cols-6 gap-1 p-1;
+}
+
+.thread-context-color-btn {
+  @apply h-5 w-5 rounded-sm border border-border/80 transition;
+}
+
+.thread-context-color-btn.is-clear {
+  background-color: #64748b;
+}
+
+.thread-context-color-btn:hover {
+  @apply border-slate-100;
+}
+
+.thread-context-color-btn.is-selected {
+  @apply border-slate-100 ring-1 ring-slate-100/70;
 }
 
 .theme-preview-option {

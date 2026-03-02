@@ -147,11 +147,13 @@ export interface Thread {
   projectId: string;
   parentThreadId?: string;
   title: string;
+  color?: string;
   provider: Provider;
   status: ThreadStatus;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string;
+  pinnedAt?: string;
 }
 
 export interface Session {

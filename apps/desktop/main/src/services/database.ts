@@ -30,11 +30,13 @@ export const initializeDatabase = (dbPath: string) => {
       project_id TEXT NOT NULL,
       parent_thread_id TEXT,
       title TEXT NOT NULL,
+      color TEXT,
       provider TEXT NOT NULL,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       archived_at TEXT,
+      pinned_at TEXT,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
@@ -191,6 +193,14 @@ export const initializeDatabase = (dbPath: string) => {
   const hasParentThreadIdColumn = threadColumns.some((column) => column.name === "parent_thread_id");
   if (!hasParentThreadIdColumn) {
     db.exec("ALTER TABLE threads ADD COLUMN parent_thread_id TEXT;");
+  }
+  const hasColorColumn = threadColumns.some((column) => column.name === "color");
+  if (!hasColorColumn) {
+    db.exec("ALTER TABLE threads ADD COLUMN color TEXT;");
+  }
+  const hasPinnedAtColumn = threadColumns.some((column) => column.name === "pinned_at");
+  if (!hasPinnedAtColumn) {
+    db.exec("ALTER TABLE threads ADD COLUMN pinned_at TEXT;");
   }
 
   const projectColumns = db

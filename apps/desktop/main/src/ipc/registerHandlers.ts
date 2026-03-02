@@ -738,7 +738,14 @@ export const registerIpcHandlers = (deps: HandlerDeps) => {
     IPC_CHANNELS.threadsUpdate,
     async (
       _event,
-      input: { id: string; title?: string; provider?: "codex" | "gemini"; status?: ThreadStatus }
+      input: {
+        id: string;
+        title?: string;
+        color?: string;
+        provider?: "codex" | "gemini";
+        status?: ThreadStatus;
+        pinned?: boolean;
+      }
     ) => {
       return deps.repository.updateThread(input);
     }

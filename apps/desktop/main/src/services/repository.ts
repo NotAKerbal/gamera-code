@@ -89,11 +89,13 @@ interface ThreadRow {
   project_id: string;
   parent_thread_id: string | null;
   title: string;
+  color: string | null;
   provider: Provider;
   status: ThreadStatus;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  pinned_at: string | null;
   last_message_ts?: string | null;
 }
 
@@ -189,11 +191,13 @@ const mapThread = (row: ThreadRow): Thread => ({
   projectId: row.project_id,
   parentThreadId: row.parent_thread_id ?? undefined,
   title: row.title,
+  color: row.color ?? undefined,
   provider: row.provider,
   status: row.status,
   createdAt: row.created_at,
   updatedAt: row.last_message_ts ?? row.updated_at,
-  archivedAt: row.archived_at ?? undefined
+  archivedAt: row.archived_at ?? undefined,
+  pinnedAt: row.pinned_at ?? undefined
 });
 
 const mapSession = (row: SessionRow): Session => ({
@@ -808,25 +812,43 @@ export class Repository {
     return thread;
   }
 
-  updateThread(input: { id: string; title?: string; provider?: Provider; status?: ThreadStatus }): Thread {
+  updateThread(input: {
+    id: string;
+    title?: string;
+    color?: string;
+    provider?: Provider;
+    status?: ThreadStatus;
+    pinned?: boolean;
+  }): Thread {
     const existing = this.getThread(input.id);
     if (!existing) {
       throw new Error("Thread not found");
     }
 
+    const normalizedColor =
+      typeof input.color === "string" ? (input.color.trim() ? input.color.trim() : undefined) : existing.color;
+    const now = new Date().toISOString();
+    const pinnedAt =
+      typeof input.pinned === "boolean" ? (input.pinned ? existing.pinnedAt ?? now : undefined) : existing.pinnedAt;
     const updated: Thread = {
       ...existing,
       title: input.title ?? existing.title,
+      color: normalizedColor,
       provider: input.provider ?? existing.provider,
       status: input.status ?? existing.status,
-      updatedAt: new Date().toISOString()
+      pinnedAt,
+      updatedAt: now
     };
 
     this.db
       .prepare(
-        "UPDATE threads SET title = @title, provider = @provider, status = @status, updated_at = @updatedAt WHERE id = @id"
+        "UPDATE threads SET title = @title, color = @color, provider = @provider, status = @status, pinned_at = @pinnedAt, updated_at = @updatedAt WHERE id = @id"
       )
-      .run(updated);
+      .run({
+        ...updated,
+        color: updated.color ?? null,
+        pinnedAt: updated.pinnedAt ?? null
+      });
 
     return updated;
   }
@@ -835,6 +857,9 @@ export class Repository {
     const existing = this.getThread(id);
     if (!existing) {
       throw new Error("Thread not found");
+    }
+    if (archived && existing.pinnedAt) {
+      throw new Error("Pinned threads must be unpinned before archiving");
     }
 
     const archivedAt = archived ? new Date().toISOString() : null;

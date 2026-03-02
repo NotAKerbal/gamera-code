@@ -246,4 +246,47 @@ describeRepository("Repository", () => {
     expect(repo.getThread(child.id)?.archivedAt).toBeUndefined();
     expect(repo.getThread(grandchild.id)?.archivedAt).toBeUndefined();
   });
+
+  it("stores pinned state on threads", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-thread-pin-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-pin" });
+    const thread = repo.createThread({ projectId: project.id, title: "pin me", provider: "codex" });
+
+    const pinned = repo.updateThread({ id: thread.id, pinned: true });
+    expect(pinned.pinnedAt).toBeTruthy();
+
+    const unpinned = repo.updateThread({ id: thread.id, pinned: false });
+    expect(unpinned.pinnedAt).toBeUndefined();
+  });
+
+  it("stores thread color", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-thread-color-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-color" });
+    const thread = repo.createThread({ projectId: project.id, title: "color me", provider: "codex" });
+    const updated = repo.updateThread({ id: thread.id, color: "#2563eb" });
+
+    expect(updated.color).toBe("#2563eb");
+    expect(repo.getThread(thread.id)?.color).toBe("#2563eb");
+  });
+
+  it("blocks archiving pinned threads", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-thread-pin-archive-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-pin-archive" });
+    const thread = repo.createThread({ projectId: project.id, title: "pinned", provider: "codex" });
+    repo.updateThread({ id: thread.id, pinned: true });
+
+    expect(() => repo.archiveThread(thread.id, true)).toThrow(/Pinned threads must be unpinned before archiving/);
+  });
 });

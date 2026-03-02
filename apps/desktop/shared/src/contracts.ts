@@ -94,7 +94,14 @@ export interface DesktopApi {
   threads: {
     list: (input?: { projectId?: string; includeArchived?: boolean }) => Promise<Thread[]>;
     create: (input: { projectId: string; title: string; provider: Provider }) => Promise<Thread>;
-    update: (input: { id: string; title?: string; provider?: Provider; status?: Thread["status"] }) => Promise<Thread>;
+    update: (input: {
+      id: string;
+      title?: string;
+      color?: string;
+      provider?: Provider;
+      status?: Thread["status"];
+      pinned?: boolean;
+    }) => Promise<Thread>;
     archive: (input: { id: string; archived: boolean }) => Promise<Thread>;
     fork: (input: { id: string; upToStreamSeq?: number }) => Promise<Thread>;
     events: (input: {

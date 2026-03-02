@@ -8,6 +8,7 @@ import {
   type ClipboardEventHandler,
   type DragEventHandler,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type KeyboardEventHandler
 } from "react";
 import { FitAddon } from "@xterm/addon-fit";
@@ -34,6 +35,7 @@ import {
   FaSyncAlt,
   FaTerminal,
   FaTimes,
+  FaThumbtack,
   FaTrashAlt,
   FaBoxOpen,
   FaUserShield,
@@ -102,6 +104,7 @@ import {
   SANDBOX_OPTIONS,
   SHOW_TERMINAL,
   SKILL_MENTION_MATCH_LIMIT,
+  THREAD_COLOR_PRESETS,
   THREAD_SUMMARY_STORAGE_KEY,
   WEB_SEARCH_OPTIONS,
   areSkillReferencesEqual,
@@ -392,6 +395,14 @@ export const App = () => {
   const terminalMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const threadCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const threadCreateInputRef = useRef<HTMLInputElement | null>(null);
+  const threadContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const threadContextMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const threadContextMenuRenameRef = useRef<HTMLButtonElement | null>(null);
+  const threadContextMenuArchiveRef = useRef<HTMLButtonElement | null>(null);
+  const threadContextMenuUnarchiveRef = useRef<HTMLButtonElement | null>(null);
+  const threadContextMenuThreadIdRef = useRef<string | null>(null);
+  const threadContextMenuCloseTimerRef = useRef<number | null>(null);
+  const threadsRef = useRef<Thread[]>([]);
   const timelineViewportRef = useRef<HTMLElement | null>(null);
   const pendingHistoryScrollRestoreRef = useRef<{
     threadId: string;
@@ -780,9 +791,60 @@ export const App = () => {
       );
     });
   }, [importCandidates, importQuery]);
+  const sortThreadsForSidebar = useCallback(
+    (items: Thread[]) =>
+      [...items].sort((a, b) => {
+        const aPinned = Boolean(a.pinnedAt);
+        const bPinned = Boolean(b.pinnedAt);
+        if (aPinned !== bPinned) {
+          return aPinned ? -1 : 1;
+        }
+        const aTs = Date.parse(a.updatedAt);
+        const bTs = Date.parse(b.updatedAt);
+        const aTime = Number.isFinite(aTs) ? aTs : 0;
+        const bTime = Number.isFinite(bTs) ? bTs : 0;
+        if (aTime !== bTime) {
+          return bTime - aTime;
+        }
+        return a.title.localeCompare(b.title);
+      }),
+    []
+  );
+  const toRgba = useCallback((hexColor: string, alpha: number) => {
+    const value = hexColor.trim().replace(/^#/, "");
+    const normalized =
+      value.length === 3
+        ? value
+            .split("")
+            .map((part) => `${part}${part}`)
+            .join("")
+        : value;
+    if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+      return "";
+    }
+    const r = Number.parseInt(normalized.slice(0, 2), 16);
+    const g = Number.parseInt(normalized.slice(2, 4), 16);
+    const b = Number.parseInt(normalized.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }, []);
+  const getThreadRowStyle = useCallback(
+    (thread: Thread, depth: number, active: boolean) => {
+      const style: Record<string, string> = {};
+      if (depth > 0) {
+        style.marginLeft = `${depth * 14}px`;
+      }
+      if (!thread.color) {
+        return Object.keys(style).length > 0 ? style : undefined;
+      }
+      style.backgroundColor = toRgba(thread.color, active ? 0.2 : 0.1);
+      style.borderColor = toRgba(thread.color, active ? 0.35 : 0.22);
+      return style;
+    },
+    [toRgba]
+  );
 
   const threadBucketsByProjectId = useMemo(() => {
-    return threads.reduce<Record<string, { active: Thread[]; archived: Thread[] }>>((acc, thread) => {
+    const buckets = threads.reduce<Record<string, { active: Thread[]; archived: Thread[] }>>((acc, thread) => {
       const bucket = acc[thread.projectId] ?? (acc[thread.projectId] = { active: [], archived: [] });
       if (thread.archivedAt) {
         bucket.archived.push(thread);
@@ -791,7 +853,22 @@ export const App = () => {
       }
       return acc;
     }, {});
-  }, [threads]);
+    Object.values(buckets).forEach((bucket) => {
+      bucket.active = sortThreadsForSidebar(bucket.active);
+      bucket.archived = sortThreadsForSidebar(bucket.archived);
+    });
+    return buckets;
+  }, [threads, sortThreadsForSidebar]);
+  const threadRowsByProjectId = useMemo(() => {
+    const rows: Record<string, { active: Array<{ thread: Thread; depth: number }>; archived: Array<{ thread: Thread; depth: number }> }> = {};
+    Object.entries(threadBucketsByProjectId).forEach(([projectId, bucket]) => {
+      rows[projectId] = {
+        active: flattenThreadRows(bucket.active),
+        archived: flattenThreadRows(bucket.archived)
+      };
+    });
+    return rows;
+  }, [threadBucketsByProjectId]);
   const workspaceById = useMemo(
     () => Object.fromEntries(workspaces.map((workspace) => [workspace.id, workspace])) as Record<string, Workspace>,
     [workspaces]
@@ -1090,6 +1167,7 @@ export const App = () => {
   const loadThreads = async () => {
     const data = await api.threads.list({ includeArchived: true });
     const codexThreads = data.filter((thread) => thread.provider === "codex");
+    const sortedThreads = sortThreadsForSidebar(codexThreads);
     const threadIds = codexThreads.map((thread) => thread.id);
     setThreads(codexThreads);
     await Promise.all(
@@ -1105,7 +1183,7 @@ export const App = () => {
     );
 
     if (activeThreadId && !codexThreads.some((thread) => thread.id === activeThreadId)) {
-      setActiveThreadId(codexThreads[0]?.id ?? null);
+      setActiveThreadId(sortedThreads[0]?.id ?? null);
       return;
     }
 
@@ -1114,13 +1192,13 @@ export const App = () => {
         const workspaceProjectIds = new Set(
           projects.filter((project) => project.workspaceId === activeWorkspaceId).map((project) => project.id)
         );
-        const workspaceThread = codexThreads.find((thread) => workspaceProjectIds.has(thread.projectId));
+        const workspaceThread = sortedThreads.find((thread) => workspaceProjectIds.has(thread.projectId));
         if (workspaceThread) {
           setActiveThreadId(workspaceThread.id);
           return;
         }
       }
-      setActiveThreadId(codexThreads[0]!.id);
+      setActiveThreadId(sortedThreads[0]!.id);
     }
   };
 
@@ -1379,6 +1457,24 @@ export const App = () => {
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
   }, [activeThreadId]);
+
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
+
+  useEffect(() => {
+    const openThreadId = threadContextMenuThreadIdRef.current;
+    if (!openThreadId) {
+      return;
+    }
+    if (threads.some((thread) => thread.id === openThreadId)) {
+      return;
+    }
+    if (threadContextMenuRef.current) {
+      threadContextMenuRef.current.style.display = "none";
+    }
+    threadContextMenuThreadIdRef.current = null;
+  }, [threads]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", settings.theme ?? "midnight");
@@ -2567,6 +2663,63 @@ export const App = () => {
       window.removeEventListener("keydown", onEscape);
     };
   }, [threadMenuProjectId]);
+
+  useEffect(() => {
+    const closeThreadContextMenu = () => {
+      const menu = threadContextMenuRef.current;
+      if (!menu) {
+        return;
+      }
+      if (threadContextMenuCloseTimerRef.current !== null) {
+        window.clearTimeout(threadContextMenuCloseTimerRef.current);
+        threadContextMenuCloseTimerRef.current = null;
+      }
+      menu.classList.remove("is-open");
+      menu.classList.add("is-closing");
+      threadContextMenuCloseTimerRef.current = window.setTimeout(() => {
+        menu.classList.remove("is-closing");
+        menu.style.display = "none";
+        threadContextMenuCloseTimerRef.current = null;
+      }, 130);
+      threadContextMenuThreadIdRef.current = null;
+    };
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+      if (threadContextMenuRef.current?.contains(target)) {
+        return;
+      }
+      closeThreadContextMenu();
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeThreadContextMenu();
+      }
+    };
+    const onWindowBlur = () => {
+      closeThreadContextMenu();
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onEscape);
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onEscape);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (threadContextMenuCloseTimerRef.current !== null) {
+        window.clearTimeout(threadContextMenuCloseTimerRef.current);
+        threadContextMenuCloseTimerRef.current = null;
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!isTerminalMenuOpen) {
@@ -4213,9 +4366,9 @@ export const App = () => {
       setActiveWorkspaceId(project.workspaceId);
     }
     setActiveProjectId(projectId);
-    const mostRecentActiveThread = threads
-      .filter((thread) => thread.projectId === projectId && !thread.archivedAt)
-      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+    const mostRecentActiveThread = sortThreadsForSidebar(
+      threads.filter((thread) => thread.projectId === projectId && !thread.archivedAt)
+    )[0];
 
     if (mostRecentActiveThread) {
       setActiveThreadId(mostRecentActiveThread.id);
@@ -4229,9 +4382,9 @@ export const App = () => {
     setActiveWorkspaceId(workspaceId);
     const workspaceProjects = projects.filter((project) => project.workspaceId === workspaceId);
     const workspaceProjectIds = new Set(workspaceProjects.map((project) => project.id));
-    const mostRecentThread = threads
-      .filter((thread) => !thread.archivedAt && workspaceProjectIds.has(thread.projectId))
-      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+    const mostRecentThread = sortThreadsForSidebar(
+      threads.filter((thread) => !thread.archivedAt && workspaceProjectIds.has(thread.projectId))
+    )[0];
 
     if (mostRecentThread) {
       setActiveProjectId(mostRecentThread.projectId);
@@ -4326,12 +4479,168 @@ export const App = () => {
   };
 
   const setThreadArchived = async (thread: Thread, archived: boolean) => {
+    if (archived && thread.pinnedAt) {
+      setLogs((prev) => [...prev, "Unpin the thread before archiving it."]);
+      return;
+    }
     await api.threads.archive({ id: thread.id, archived });
     if (archived && activeThreadId === thread.id) {
       const fallback = threads.find((item) => item.projectId === thread.projectId && !item.archivedAt && item.id !== thread.id);
       setActiveThreadId(fallback?.id ?? null);
     }
     await loadThreads();
+  };
+
+  const setThreadPinned = async (thread: Thread, pinned: boolean) => {
+    const updated = await api.threads.update({ id: thread.id, pinned });
+    setThreads((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+  };
+
+  const setThreadColor = async (thread: Thread, color: string) => {
+    const updated = await api.threads.update({ id: thread.id, color });
+    setThreads((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+  };
+
+  const getThreadFromContextMenu = () => {
+    const threadId = threadContextMenuThreadIdRef.current;
+    if (!threadId) {
+      return null;
+    }
+    return threadsRef.current.find((item) => item.id === threadId) ?? null;
+  };
+
+  const syncThreadContextMenuVisuals = (thread: Thread) => {
+    const pinButton = threadContextMenuButtonRef.current;
+    const archiveButton = threadContextMenuArchiveRef.current;
+    const unarchiveButton = threadContextMenuUnarchiveRef.current;
+    if (pinButton) {
+      pinButton.textContent = thread.pinnedAt ? "Unpin thread" : "Pin thread";
+    }
+    if (archiveButton && unarchiveButton) {
+      if (thread.archivedAt) {
+        archiveButton.style.display = "none";
+        unarchiveButton.style.display = "block";
+      } else {
+        archiveButton.style.display = "block";
+        unarchiveButton.style.display = "none";
+      }
+    }
+    const menu = threadContextMenuRef.current;
+    if (!menu) {
+      return;
+    }
+    const swatches = menu.querySelectorAll<HTMLButtonElement>("[data-thread-color]");
+    swatches.forEach((swatch) => {
+      const swatchColor = (swatch.dataset.threadColor ?? "").toLowerCase();
+      const threadColor = (thread.color ?? "").toLowerCase();
+      const selected = swatchColor ? threadColor === swatchColor : !threadColor;
+      swatch.classList.toggle("is-selected", selected);
+      swatch.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+  };
+
+  const closeThreadContextMenu = (animated = true) => {
+    const menu = threadContextMenuRef.current;
+    if (!menu) {
+      return;
+    }
+    if (threadContextMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(threadContextMenuCloseTimerRef.current);
+      threadContextMenuCloseTimerRef.current = null;
+    }
+    if (!animated) {
+      menu.classList.remove("is-open", "is-closing");
+      menu.style.display = "none";
+      threadContextMenuThreadIdRef.current = null;
+      return;
+    }
+    menu.classList.remove("is-open");
+    menu.classList.add("is-closing");
+    threadContextMenuCloseTimerRef.current = window.setTimeout(() => {
+      menu.classList.remove("is-closing");
+      menu.style.display = "none";
+      threadContextMenuCloseTimerRef.current = null;
+    }, 130);
+    threadContextMenuThreadIdRef.current = null;
+  };
+
+  const openThreadContextMenu = (event: ReactMouseEvent, _projectId: string, threadId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const menu = threadContextMenuRef.current;
+    if (!menu) {
+      return;
+    }
+    const thread = threadsRef.current.find((item) => item.id === threadId);
+    if (!thread) {
+      return;
+    }
+    threadContextMenuThreadIdRef.current = threadId;
+    syncThreadContextMenuVisuals(thread);
+    if (threadContextMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(threadContextMenuCloseTimerRef.current);
+      threadContextMenuCloseTimerRef.current = null;
+    }
+    menu.classList.remove("is-closing");
+    const menuWidth = 190;
+    const menuHeight = 210;
+    const x = Math.min(event.clientX, Math.max(8, window.innerWidth - menuWidth - 8));
+    const y = Math.min(event.clientY, Math.max(8, window.innerHeight - menuHeight - 8));
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.display = "block";
+    menu.classList.remove("is-open");
+    window.requestAnimationFrame(() => {
+      menu.classList.add("is-open");
+    });
+  };
+
+  const handleThreadContextMenuPin = () => {
+    const thread = getThreadFromContextMenu();
+    if (!thread) {
+      closeThreadContextMenu();
+      return;
+    }
+    closeThreadContextMenu();
+    setThreadPinned(thread, !thread.pinnedAt).catch((error) => {
+      setLogs((prev) => [...prev, `Pin thread failed: ${String(error)}`]);
+    });
+  };
+
+  const handleThreadContextMenuRename = () => {
+    const thread = getThreadFromContextMenu();
+    if (!thread) {
+      closeThreadContextMenu();
+      return;
+    }
+    closeThreadContextMenu();
+    renameThread(thread).catch((error) => {
+      setLogs((prev) => [...prev, `Thread rename failed: ${String(error)}`]);
+    });
+  };
+
+  const handleThreadContextMenuArchive = (archived: boolean) => {
+    const thread = getThreadFromContextMenu();
+    if (!thread) {
+      closeThreadContextMenu();
+      return;
+    }
+    closeThreadContextMenu();
+    setThreadArchived(thread, archived).catch((error) => {
+      setLogs((prev) => [...prev, `${archived ? "Archive" : "Restore"} thread failed: ${String(error)}`]);
+    });
+  };
+
+  const handleThreadContextMenuColor = (color: string) => {
+    const thread = getThreadFromContextMenu();
+    if (!thread) {
+      closeThreadContextMenu();
+      return;
+    }
+    syncThreadContextMenuVisuals({ ...thread, color });
+    setThreadColor(thread, color).catch((error) => {
+      setLogs((prev) => [...prev, `Set thread color failed: ${String(error)}`]);
+    });
   };
 
   const beginProjectInlineRename = (project: Project) => {
@@ -6716,10 +7025,9 @@ const stopActiveRun = async () => {
 
                 {projectsInActiveWorkspace.map((project) => {
                   const threadBuckets = threadBucketsByProjectId[project.id];
-                  const archivedThreads = threadBuckets?.archived ?? [];
-                  const visibleThreads = threadBuckets?.active ?? [];
-                  const visibleRows = flattenThreadRows(visibleThreads);
-                  const archivedRows = flattenThreadRows(archivedThreads);
+                  const threadRows = threadRowsByProjectId[project.id];
+                  const visibleRows = threadRows?.active ?? [];
+                  const archivedRows = threadRows?.archived ?? [];
                   const showArchived = Boolean(showArchivedByProjectId[project.id]);
                   const active = activeProjectId === project.id;
                   const menuOpen = threadMenuProjectId === project.id;
@@ -6844,14 +7152,18 @@ const stopActiveRun = async () => {
                                 className={`${activeThreadId === thread.id ? "thread-row active" : "thread-row"} ${
                                   threadCompletionFlashById[thread.id] ? "thread-row-complete-flash" : ""
                                 } ${threadAwaitingInputById[thread.id] ? "thread-row-awaiting-input" : ""}`}
-                                style={depth > 0 ? { marginLeft: `${depth * 14}px` } : undefined}
+                                style={getThreadRowStyle(thread, depth, activeThreadId === thread.id)}
                                 onClick={() => {
                                   activateThreadFromSidebar(project.id, thread.id);
                                 }}
+                                onContextMenu={(event) => openThreadContextMenu(event, project.id, thread.id)}
                               >
                                 <div className="thread-row-main">
                                   <div className="thread-row-title-block">
-                                    <div className="truncate text-left text-sm">{thread.title}</div>
+                                    <div className="thread-row-title-line">
+                                      {thread.pinnedAt && <FaThumbtack className="thread-pin-indicator" aria-label="Pinned thread" />}
+                                      <div className="truncate text-left text-sm">{thread.title}</div>
+                                    </div>
                                   </div>
                                   <div className="thread-row-actions">
                                     <span
@@ -6879,7 +7191,7 @@ const stopActiveRun = async () => {
                                     </span>
                                     <span
                                       className="thread-row-action-btn"
-                                      title="Archive thread"
+                                      title={thread.pinnedAt ? "Unpin thread before archiving" : "Archive thread"}
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         setThreadArchived(thread, true).catch((error) => {
@@ -7044,14 +7356,18 @@ const stopActiveRun = async () => {
                               className={`${activeThreadId === thread.id ? "thread-row active archived" : "thread-row archived"} ${
                                 threadCompletionFlashById[thread.id] ? "thread-row-complete-flash" : ""
                               } ${threadAwaitingInputById[thread.id] ? "thread-row-awaiting-input" : ""}`}
-                              style={depth > 0 ? { marginLeft: `${depth * 14}px` } : undefined}
+                              style={getThreadRowStyle(thread, depth, activeThreadId === thread.id)}
                               onClick={() => {
                                 activateThreadFromSidebar(project.id, thread.id);
                               }}
+                              onContextMenu={(event) => openThreadContextMenu(event, project.id, thread.id)}
                             >
                               <div className="thread-row-main">
                                 <div className="thread-row-title-block">
-                                  <div className="truncate text-left text-sm">{thread.title}</div>
+                                  <div className="thread-row-title-line">
+                                    {thread.pinnedAt && <FaThumbtack className="thread-pin-indicator" aria-label="Pinned thread" />}
+                                    <div className="truncate text-left text-sm">{thread.title}</div>
+                                  </div>
                                 </div>
                                 <div className="thread-row-actions">
                                   <span
@@ -7127,6 +7443,48 @@ const stopActiveRun = async () => {
                     </section>
                   );
                 })}
+              </div>
+              <div ref={threadContextMenuRef} className="thread-context-menu" style={{ display: "none" }}>
+                <button ref={threadContextMenuRenameRef} className="thread-context-menu-item" onClick={handleThreadContextMenuRename}>
+                  Rename thread
+                </button>
+                <button ref={threadContextMenuArchiveRef} className="thread-context-menu-item" onClick={() => handleThreadContextMenuArchive(true)}>
+                  Archive thread
+                </button>
+                <button
+                  ref={threadContextMenuUnarchiveRef}
+                  className="thread-context-menu-item"
+                  style={{ display: "none" }}
+                  onClick={() => handleThreadContextMenuArchive(false)}
+                >
+                  Unarchive thread
+                </button>
+                <button ref={threadContextMenuButtonRef} className="thread-context-menu-item" onClick={handleThreadContextMenuPin}>
+                  Pin thread
+                </button>
+                <div className="thread-context-menu-divider" />
+                <div className="thread-context-menu-colors" role="group" aria-label="Thread color">
+                  <button
+                    type="button"
+                    data-thread-color=""
+                    className="thread-context-color-btn is-clear"
+                    onClick={() => handleThreadContextMenuColor("")}
+                    aria-label="Use default thread color"
+                    title="Default color"
+                  />
+                  {THREAD_COLOR_PRESETS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      data-thread-color={color}
+                      className="thread-context-color-btn"
+                      style={{ backgroundColor: color }}
+                      onClick={() => handleThreadContextMenuColor(color)}
+                      aria-label={`Set thread color ${color}`}
+                      title={color}
+                    />
+                  ))}
+                </div>
               </div>
             </aside>
 
@@ -7654,6 +8012,84 @@ const stopActiveRun = async () => {
                     </div>
                   ) : (
                     <>
+                      {activeQueuedPromptCount > 0 && (
+                        <div className="mb-2 space-y-2">
+                          <div className="text-[11px] text-slate-400">Queued prompts: {activeQueuedPromptCount}</div>
+                          <div className="space-y-1.5">
+                            {activeQueuedPrompts.map((prompt, index) => {
+                              const preview = prompt.input.replace(/\s+/g, " ").trim() || "(attachments only)";
+                              return (
+                                <div
+                                  key={prompt.id}
+                                  className="rounded-md border border-border/70 bg-black/20 px-2 py-1.5 text-xs text-slate-200"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="text-[10px] uppercase tracking-wide text-slate-400">
+                                        #{index + 1}
+                                        {prompt.attachments.length > 0 ? ` | ${prompt.attachments.length} image(s)` : ""}
+                                        {prompt.skills.length > 0 ? ` | ${prompt.skills.length} skill(s)` : ""}
+                                      </div>
+                                      <div className="truncate text-slate-200">{preview}</div>
+                                    </div>
+                                    <div className="inline-flex items-center gap-1">
+                                      <button
+                                        className="btn-secondary composer-tooltip-target px-2 py-1 text-[11px]"
+                                        data-composer-tooltip={
+                                          activeRunState === "running"
+                                            ? composerTooltipText(
+                                                "Steer Queued Prompt",
+                                                "Inject this queued prompt into the active run."
+                                              )
+                                            : composerTooltipText(
+                                                "Steer Queued Prompt",
+                                                "Start a run first, then steer this queued prompt."
+                                              )
+                                        }
+                                        aria-label="Steer queued prompt"
+                                        onClick={() => {
+                                          if (!activeThreadId) {
+                                            return;
+                                          }
+                                          steerQueuedPrompt(activeThreadId, prompt).catch((error) => {
+                                            setLogs((prev) => [...prev, `Queued steer failed: ${String(error)}`]);
+                                          });
+                                        }}
+                                        disabled={!activeThreadId || activeRunState !== "running"}
+                                      >
+                                        <span className="inline-flex items-center gap-1">
+                                          <FaPaperPlane className="text-[10px]" />
+                                          Steer now
+                                        </span>
+                                      </button>
+                                      <button
+                                        className="btn-danger composer-tooltip-target px-2 py-1 text-[11px]"
+                                        data-composer-tooltip={composerTooltipText(
+                                          "Cancel Queued Prompt",
+                                          "Remove this prompt from the queue."
+                                        )}
+                                        aria-label="Cancel queued prompt"
+                                        onClick={() => {
+                                          if (!activeThreadId) {
+                                            return;
+                                          }
+                                          cancelQueuedPrompt(activeThreadId, prompt.id);
+                                        }}
+                                        disabled={!activeThreadId}
+                                      >
+                                        <span className="inline-flex items-center gap-1">
+                                          <FaTimes className="text-[10px]" />
+                                          Cancel
+                                        </span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                       <textarea
                         ref={composerTextareaRef}
                         className="min-h-[56px] w-full resize-none bg-transparent font-sans text-sm leading-relaxed outline-none"
@@ -7867,75 +8303,6 @@ const stopActiveRun = async () => {
                 </div>
                 {!showQuestionComposer && (
                   <>
-                    {activeQueuedPromptCount > 0 && (
-                      <div className="mt-2 space-y-2">
-                        <div className="text-[11px] text-slate-400">Queued prompts: {activeQueuedPromptCount}</div>
-                        <div className="space-y-1.5">
-                          {activeQueuedPrompts.map((prompt, index) => {
-                            const preview = prompt.input.replace(/\s+/g, " ").trim() || "(attachments only)";
-                            return (
-                              <div
-                                key={prompt.id}
-                                className="rounded-md border border-border/70 bg-black/20 px-2 py-1.5 text-xs text-slate-200"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <div className="text-[10px] uppercase tracking-wide text-slate-400">
-                                      #{index + 1}
-                                      {prompt.attachments.length > 0 ? ` | ${prompt.attachments.length} image(s)` : ""}
-                                      {prompt.skills.length > 0 ? ` | ${prompt.skills.length} skill(s)` : ""}
-                                    </div>
-                                    <div className="truncate text-slate-200">{preview}</div>
-                                  </div>
-                                  <div className="inline-flex items-center gap-1">
-                                    <button
-                                      className="btn-secondary composer-tooltip-target px-2 py-1 text-[11px]"
-                                      data-composer-tooltip={
-                                        activeRunState === "running"
-                                          ? composerTooltipText("Steer Queued Prompt", "Inject this queued prompt into the active run.")
-                                          : composerTooltipText("Steer Queued Prompt", "Start a run first, then steer this queued prompt.")
-                                      }
-                                      aria-label="Steer queued prompt"
-                                      onClick={() => {
-                                        if (!activeThreadId) {
-                                          return;
-                                        }
-                                        steerQueuedPrompt(activeThreadId, prompt).catch((error) => {
-                                          setLogs((prev) => [...prev, `Queued steer failed: ${String(error)}`]);
-                                        });
-                                      }}
-                                      disabled={!activeThreadId || activeRunState !== "running"}
-                                    >
-                                      <span className="inline-flex items-center gap-1">
-                                        <FaPaperPlane className="text-[10px]" />
-                                        Steer now
-                                      </span>
-                                    </button>
-                                    <button
-                                      className="btn-danger composer-tooltip-target px-2 py-1 text-[11px]"
-                                      data-composer-tooltip={composerTooltipText("Cancel Queued Prompt", "Remove this prompt from the queue.")}
-                                      aria-label="Cancel queued prompt"
-                                      onClick={() => {
-                                        if (!activeThreadId) {
-                                          return;
-                                        }
-                                        cancelQueuedPrompt(activeThreadId, prompt.id);
-                                      }}
-                                      disabled={!activeThreadId}
-                                    >
-                                      <span className="inline-flex items-center gap-1">
-                                        <FaTimes className="text-[10px]" />
-                                        Cancel
-                                      </span>
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
                     <div className="mt-2 composer-toolbar-row">
                       <div className="composer-toolbar">
                         <span className="composer-option">
