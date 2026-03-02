@@ -245,7 +245,6 @@ export const App = () => {
     settingsTab: "general"
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [settingsSaveNotice, setSettingsSaveNotice] = useState("");
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [projectSettingsInitialDraft, setProjectSettingsInitialDraft] = useState<{
     projectName: string;
@@ -1134,7 +1133,6 @@ export const App = () => {
       settingsEnvText: envVarsToText(current.envVars),
       settingsTab: "general"
     });
-    setSettingsSaveNotice("");
     await loadAppSkills();
   };
 
@@ -6012,12 +6010,10 @@ const stopActiveRun = async () => {
     } catch (error) {
       const message = `Settings save failed: ${String(error)}`;
       setLogs((prev) => [...prev, message]);
-      setSettingsSaveNotice(message);
       return;
     }
 
     setSettingsSaving(true);
-    setSettingsSaveNotice("");
     try {
       const mode = draft.settings.permissionMode as PermissionMode;
 
@@ -6045,7 +6041,6 @@ const stopActiveRun = async () => {
         settingsEnvText: envVarsToText(saved.envVars),
         settingsTab: "general"
       });
-      setSettingsSaveNotice("Settings saved.");
       if (!isSettingsWindow) {
         setShowSettings(false);
       }
@@ -6054,7 +6049,6 @@ const stopActiveRun = async () => {
     } catch (error) {
       const message = `Settings save failed: ${String(error)}`;
       setLogs((prev) => [...prev, message]);
-      setSettingsSaveNotice(message);
     } finally {
       setSettingsSaving(false);
     }
@@ -6086,7 +6080,6 @@ const stopActiveRun = async () => {
         path: skillEditorPath,
         content: skillEditorContent
       });
-      setSettingsSaveNotice("Skill saved.");
       if (activeProjectId) {
         await loadProjectSkills(activeProjectId);
       }
@@ -6094,7 +6087,6 @@ const stopActiveRun = async () => {
     } catch (error) {
       const message = `Skill save failed: ${String(error)}`;
       setLogs((prev) => [...prev, message]);
-      setSettingsSaveNotice(message);
     } finally {
       setSkillEditorSaving(false);
     }
@@ -8549,7 +8541,6 @@ const stopActiveRun = async () => {
           skillEditorContent={skillEditorContent}
           setSkillEditorContent={setSkillEditorContent}
           skillEditorSaving={skillEditorSaving}
-          settingsSaveNotice={settingsSaveNotice}
           settingsSaving={settingsSaving}
           onClose={closeSettingsModal}
           onCloseWindow={closeWindow}

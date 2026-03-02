@@ -46,7 +46,6 @@ type SettingsModalProps = {
   skillEditorContent: string;
   setSkillEditorContent: Dispatch<SetStateAction<string>>;
   skillEditorSaving: boolean;
-  settingsSaveNotice: string;
   settingsSaving: boolean;
   onClose: () => void;
   onCloseWindow: () => void | Promise<void>;
@@ -214,7 +213,6 @@ export const SettingsModal = memo(({
   skillEditorContent,
   setSkillEditorContent,
   skillEditorSaving,
-  settingsSaveNotice,
   settingsSaving,
   onClose,
   onCloseWindow,
@@ -746,15 +744,6 @@ export const SettingsModal = memo(({
       </datalist>
 
       <div className="settings-floating-actions">
-        {settingsSaveNotice ? (
-          <div
-            className={`settings-floating-notice ${
-              settingsSaveNotice.startsWith("Settings save failed:") ? "is-error" : "is-success"
-            }`}
-          >
-            {settingsSaveNotice}
-          </div>
-        ) : null}
         <button
           className="btn-secondary"
           onClick={() => {
@@ -770,7 +759,7 @@ export const SettingsModal = memo(({
         <button
           className="btn-primary"
           onClick={() => onSaveSettings({ settings, composerOptions, settingsEnvText })}
-          disabled={settingsSaving}
+          aria-busy={settingsSaving}
         >
           {settingsSaving ? "Saving..." : "Save"}
         </button>
