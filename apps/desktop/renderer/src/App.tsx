@@ -1587,14 +1587,13 @@ export const App = () => {
     if (!activeThreadId) {
       return;
     }
-    const target = threads.find((thread) => thread.id === activeThreadId);
-    if (!target || target.provider !== "codex") {
+    if (activeThread?.provider !== "codex") {
       return;
     }
     loadOrchestrationRuns(activeThreadId).catch((error) => {
       setLogs((prev) => [...prev, `Load orchestration failed: ${String(error)}`]);
     });
-  }, [activeThreadId, threads]);
+  }, [activeThreadId, activeThread?.provider]);
 
   useEffect(() => {
     if (!activeThread || activeProjectId === activeThread.projectId) {
@@ -1646,15 +1645,16 @@ export const App = () => {
 
     if (!activeThreadId) {
       applyComposerText("");
-      setComposerMentionedFiles([]);
-      setComposerMentionedSkills([]);
+      setComposerMentionedFiles((prev) => (prev.length === 0 ? prev : []));
+      setComposerMentionedSkills((prev) => (prev.length === 0 ? prev : []));
       setFileMention(null);
       setSkillMention(null);
       return;
     }
     const draft = composerDraftByThreadId[activeThreadId] ?? "";
     applyComposerText(draft);
-    setComposerMentionedSkills(extractSkillsFromInput(draft, activeSkills).skills);
+    const nextSkills = extractSkillsFromInput(draft, activeSkills).skills;
+    setComposerMentionedSkills((prev) => (areSkillReferencesEqual(prev, nextSkills) ? prev : nextSkills));
     scheduleComposerResize();
   }, [activeThreadId, activeSkills, composerDraftByThreadId]);
 
@@ -3064,16 +3064,19 @@ export const App = () => {
 
   useEffect(() => {
     if (!activeThreadId) {
-      setMessages([]);
-      setTerminalLines([]);
-      setActivity([]);
-      setComposerMentionedFiles([]);
-      setComposerMentionedSkills([]);
+      setMessages((prev) => (prev.length === 0 ? prev : []));
+      setTerminalLines((prev) => (prev.length === 0 ? prev : []));
+      setActivity((prev) => (prev.length === 0 ? prev : []));
+      setComposerMentionedFiles((prev) => (prev.length === 0 ? prev : []));
+      setComposerMentionedSkills((prev) => (prev.length === 0 ? prev : []));
       setFileMention(null);
       setSkillMention(null);
       pendingHistoryScrollRestoreRef.current = null;
       lastStartedOptionsKeyRef.current = "";
       setComposerAttachments((prev) => {
+        if (prev.length === 0) {
+          return prev;
+        }
         prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
         return [];
       });
@@ -3083,9 +3086,12 @@ export const App = () => {
     clearFinishedUnreadThread(activeThreadId);
 
     const bootThread = async () => {
-      setComposerMentionedFiles([]);
-      setComposerMentionedSkills([]);
+      setComposerMentionedFiles((prev) => (prev.length === 0 ? prev : []));
+      setComposerMentionedSkills((prev) => (prev.length === 0 ? prev : []));
       setComposerAttachments((prev) => {
+        if (prev.length === 0) {
+          return prev;
+        }
         prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
         return [];
       });
@@ -3097,7 +3103,7 @@ export const App = () => {
         userPromptCount: HISTORY_USER_PROMPT_WINDOW
       });
       applyThreadHistoryPage(activeThreadId, historyPage, "replace");
-      setTerminalLines([]);
+      setTerminalLines((prev) => (prev.length === 0 ? prev : []));
       await api.sessions.start({ threadId: activeThreadId, options: composerOptions });
       lastStartedOptionsKeyRef.current = codexOptionsKey(composerOptions);
       scrollTimelineToBottom();
