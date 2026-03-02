@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+- Improved UI performance
+- Add more thread controls
+
 ## 0.3.1
 - Improved git panel
 - Better rendering for workspaces at the top
