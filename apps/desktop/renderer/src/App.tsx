@@ -67,6 +67,7 @@ import type {
   PromptAttachment,
   Project,
   ProjectFileEntry,
+  ProjectSetupEvent,
   ProjectSettings,
   ProjectTerminalSwitchBehavior,
   ProjectWebLink,
@@ -229,6 +230,30 @@ type TimelinePlanRowProps = {
   onForkFromUserMessage: (message: MessageEvent) => void;
 };
 
+type ProjectTemplateId = "nextjs" | "electron";
+
+type NewProjectTemplateOption = {
+  id: ProjectTemplateId;
+  label: string;
+  description: string;
+  language: "TypeScript" | "JavaScript";
+};
+
+const NEW_PROJECT_TEMPLATE_OPTIONS: NewProjectTemplateOption[] = [
+  {
+    id: "nextjs",
+    label: "Next.js",
+    description: "App Router, TypeScript, and ESLint defaults.",
+    language: "TypeScript"
+  },
+  {
+    id: "electron",
+    label: "Electron",
+    description: "Electron + Vite + TypeScript starter.",
+    language: "TypeScript"
+  }
+];
+
 const ActivityBundleRow = ({
   rowId,
   chips,
@@ -381,13 +406,14 @@ export const App = () => {
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState("");
-  const [newProjectName, setNewProjectName] = useState("");
   const [importProjectQuery, setImportProjectQuery] = useState("");
   const [importCandidates, setImportCandidates] = useState<GitRepositoryCandidate[]>([]);
   const [importLoading, setImportLoading] = useState(false);
   const [importBusyPath, setImportBusyPath] = useState<string | null>(null);
   const [cloneBusy, setCloneBusy] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
+  const [projectSetupById, setProjectSetupById] = useState<Record<string, ProjectSetupEvent>>({});
+  const projectSetupClearTimeoutByIdRef = useRef<Record<string, number>>({});
   const [logs, setLogs] = useState<string[]>([]);
   const [updateMessage, setUpdateMessage] = useState<string>("");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -444,6 +470,7 @@ export const App = () => {
   const [gitSharedHistoryLoadingByProjectId, setGitSharedHistoryLoadingByProjectId] = useState<Record<string, boolean>>({});
   const [gitSelectedPathByProjectId, setGitSelectedPathByProjectId] = useState<Record<string, string | null>>({});
   const [gitBusyAction, setGitBusyAction] = useState<string | null>(null);
+  const [gitInitRevealByProjectId, setGitInitRevealByProjectId] = useState<Record<string, boolean>>({});
   const [gitCommitIsGeneratingMessage, setGitCommitIsGeneratingMessage] = useState(false);
   const [gitBranchSearch, setGitBranchSearch] = useState("");
   const [branchListScrollTop, setBranchListScrollTop] = useState(0);
@@ -688,6 +715,11 @@ export const App = () => {
   );
   const activeGitSharedHistoryExpanded = activeProjectId ? Boolean(gitSharedHistoryExpandedByProjectId[activeProjectId]) : false;
   const activeGitSharedHistoryLoading = activeProjectId ? Boolean(gitSharedHistoryLoadingByProjectId[activeProjectId]) : false;
+  const activeGitInitReveal = activeProjectId ? Boolean(gitInitRevealByProjectId[activeProjectId]) : false;
+  const showGitInitLoader = gitBusyAction === "init";
+  const showGitInitAction = Boolean(
+    activeProjectId && activeGitState && !activeGitState.insideRepo && !showGitInitLoader
+  );
   const activeStagedFiles = useMemo(
     () => (activeGitState?.files ?? []).filter((file) => file.staged),
     [activeGitState?.files]
@@ -1953,6 +1985,44 @@ export const App = () => {
 
     return () => {
       unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = api.projects.onSetupEvent((event) => {
+      setProjectSetupById((prev) => ({
+        ...prev,
+        [event.projectId]: event
+      }));
+
+      if (event.status === "completed") {
+        const existingTimeout = projectSetupClearTimeoutByIdRef.current[event.projectId];
+        if (existingTimeout) {
+          window.clearTimeout(existingTimeout);
+        }
+        projectSetupClearTimeoutByIdRef.current[event.projectId] = window.setTimeout(() => {
+          setProjectSetupById((prev) => {
+            const current = prev[event.projectId];
+            if (!current || current.status !== "completed") {
+              return prev;
+            }
+            const next = { ...prev };
+            delete next[event.projectId];
+            return next;
+          });
+          delete projectSetupClearTimeoutByIdRef.current[event.projectId];
+        }, 900);
+      }
+
+      if (event.status === "failed") {
+        setLogs((prev) => [...prev, `Project setup failed (${event.projectId}): ${event.message}`]);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      Object.values(projectSetupClearTimeoutByIdRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
+      projectSetupClearTimeoutByIdRef.current = {};
     };
   }, []);
 
@@ -3230,11 +3300,14 @@ export const App = () => {
       return;
     }
 
-    setNewProjectName("");
     setShowNewProjectModal(true);
   };
 
-  const submitNewProject = async () => {
+  const submitNewProject = async (input: {
+    name: string;
+    monorepo: boolean;
+    templateIds: ProjectTemplateId[];
+  }) => {
     const parentDir = settings.defaultProjectDirectory?.trim() ?? "";
     if (!parentDir) {
       setLogs((prev) => [...prev, "Set a default project directory in Settings first."]);
@@ -3245,19 +3318,39 @@ export const App = () => {
       return;
     }
 
-    const projectName = sanitizeProjectDirName(newProjectName);
+    const projectName = sanitizeProjectDirName(input.name);
     if (!projectName) {
       setLogs((prev) => [...prev, "Project name is required and cannot contain path separators."]);
+      return;
+    }
+    if (!input.monorepo && input.templateIds.length > 1) {
+      setLogs((prev) => [...prev, "Select only one template when Monorepo is off."]);
       return;
     }
 
     setCreatingProject(true);
     try {
-      const project = await assignProjectToActiveWorkspace(await api.projects.createInDirectory({ name: projectName, parentDir }));
+      const project = await assignProjectToActiveWorkspace(
+        await api.projects.createInDirectory({
+          name: projectName,
+          parentDir,
+          monorepo: input.monorepo,
+          templateIds: input.templateIds
+        })
+      );
+      setProjectSetupById((prev) => ({
+        ...prev,
+        [project.id]: {
+          projectId: project.id,
+          phase: "creating_folder",
+          status: "running",
+          message: "Creating folder...",
+          ts: new Date().toISOString()
+        }
+      }));
       await loadProjects();
       setActiveProjectId(project.id);
       setShowNewProjectModal(false);
-      setNewProjectName("");
     } catch (error) {
       setLogs((prev) => [...prev, `Create project failed: ${String(error)}`]);
     } finally {
@@ -3555,6 +3648,7 @@ export const App = () => {
           ? activeSelectedGitPath
           : nextState.files[0]?.path;
       selectGitPath(activeProjectId, selectedPath);
+      return result;
     } finally {
       setGitBusyAction(null);
     }
@@ -3583,6 +3677,32 @@ export const App = () => {
       return;
     }
     await runGitAction("discard-unstaged", (projectId) => api.git.discard({ projectId }));
+  };
+
+  const initializeGitRepository = async () => {
+    if (!activeProjectId || !activeGitState || activeGitState.insideRepo || gitBusyAction) {
+      return;
+    }
+    const projectId = activeProjectId;
+    setIsBranchDropdownOpen(false);
+    const result = await runGitAction("init", (id) => api.git.init({ projectId: id }));
+    if (!result?.ok) {
+      return;
+    }
+    setGitInitRevealByProjectId((prev) => ({
+      ...prev,
+      [projectId]: true
+    }));
+    window.setTimeout(() => {
+      setGitInitRevealByProjectId((prev) => {
+        if (!prev[projectId]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+    }, 520);
   };
 
   const commitGitChanges = async () => {
@@ -7123,7 +7243,11 @@ const stopActiveRun = async () => {
 	                    onClick={() => setIsProjectMenuOpen((prev) => !prev)}
 	                    aria-label="Add project"
 	                  >
-	                    <FaPlus className="mx-auto text-[12px]" />
+	                    <FaPlus
+	                      className={`mx-auto text-[12px] transition-transform duration-200 ${
+	                        isProjectMenuOpen ? "rotate-45" : "rotate-0"
+	                      }`}
+	                    />
 	                  </button>
 	                  {isProjectMenuOpen && (
 	                    <div className="project-action-pop">
@@ -7158,6 +7282,8 @@ const stopActiveRun = async () => {
                   const showArchived = Boolean(showArchivedByProjectId[project.id]);
                   const active = activeProjectId === project.id;
                   const menuOpen = threadMenuProjectId === project.id;
+                  const setupState = projectSetupById[project.id];
+                  const setupRunning = setupState?.status === "running";
 
                   return (
                     <section key={project.id} className={active ? "project-section active" : "project-section"}>
@@ -7199,11 +7325,30 @@ const stopActiveRun = async () => {
                             onDoubleClick={() => beginProjectInlineRename(project)}
                             title="Double-click to rename project"
                           >
-                            <span className="truncate">{project.name}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate">{project.name}</span>
+                              {setupState && (
+                                <span
+                                  className={`mt-0.5 block truncate text-[10px] leading-4 ${
+                                    setupState.status === "failed" ? "text-red-300" : "text-slate-400"
+                                  }`}
+                                >
+                                  {setupState.message}
+                                </span>
+                              )}
+                            </span>
+                            {setupState?.status === "running" && (
+                              <FaSyncAlt className="ml-2 shrink-0 animate-spin text-[10px] text-slate-400" />
+                            )}
+                            {setupState?.status === "failed" && (
+                              <span className="ml-2 shrink-0 text-xs text-red-300">!</span>
+                            )}
                           </button>
                         )}
                         <button
-                          className="project-action-btn"
+                          className={`project-action-btn transition-all duration-300 ${
+                            setupRunning ? "pointer-events-none opacity-0 translate-y-0.5" : "opacity-100 translate-y-0"
+                          }`}
                           onClick={() => {
                             setActiveProjectId(project.id);
                             openActiveProjectSettings(project.id).catch((error) => {
@@ -7215,7 +7360,9 @@ const stopActiveRun = async () => {
                           <FaCog className="text-[12px]" />
                         </button>
                         <button
-                          className="project-action-btn app-tooltip-target"
+                          className={`project-action-btn app-tooltip-target transition-all duration-300 ${
+                            setupRunning ? "pointer-events-none opacity-0 translate-y-0.5" : "opacity-100 translate-y-0"
+                          }`}
                           data-thread-menu-trigger={project.id}
                           data-app-tooltip={composerTooltipText(
                             "New Thread",
@@ -7224,11 +7371,21 @@ const stopActiveRun = async () => {
                           )}
                           onClick={() => {
                             setActiveProjectId(project.id);
-                            setThreadMenuProjectId((prev) => (prev === project.id ? null : project.id));
+                            setThreadMenuProjectId((prev) => {
+                              const next = prev === project.id ? null : project.id;
+                              if (next === null) {
+                                setThreadDraftTitle("New thread");
+                              }
+                              return next;
+                            });
                           }}
                           aria-label="New thread"
                         >
-                          <FaPlus className="text-[12px]" />
+                          <FaPlus
+                            className={`text-[12px] transition-transform duration-200 ${
+                              menuOpen ? "rotate-45" : "rotate-0"
+                            }`}
+                          />
                         </button>
                       </div>
 
@@ -7263,7 +7420,15 @@ const stopActiveRun = async () => {
                       )}
 
                       <div className="thread-list">
-                        {visibleRows.length === 0 && <div className="thread-empty">No active threads</div>}
+                        {visibleRows.length === 0 && (
+                          <div
+                            className={`thread-empty transition-all duration-300 ${
+                              setupRunning ? "pointer-events-none opacity-0 -translate-y-1" : "opacity-100 translate-y-0"
+                            }`}
+                          >
+                            No active threads
+                          </div>
+                        )}
                         {visibleRows.map(({ thread, depth }) => {
                           const threadRuns = orchestrationRunsByParentId[thread.id] ?? [];
                           const runningChildren = threadRuns.flatMap((run) =>
@@ -8459,26 +8624,80 @@ const stopActiveRun = async () => {
                           <FaSyncAlt className="composer-option-icon" />
                           Summarize
                         </button>
+                        <button
+                          className="composer-toggle-btn composer-tooltip-target"
+                          data-composer-tooltip={composerTooltipText("Review Thread", "Run a review on the current chat thread.")}
+                          aria-label="Review current thread"
+                          onClick={() => {
+                            if (!activeThreadId) {
+                              setLogs((prev) => [...prev, "Open or select a thread before starting review."]);
+                              return;
+                            }
+                            api.sessions
+                              .reviewThread({ threadId: activeThreadId })
+                              .then((result) => {
+                                if (!result.ok) {
+                                  setLogs((prev) => [...prev, "Thread review failed to start."]);
+                                }
+                              })
+                              .catch((error) => {
+                                setLogs((prev) => [...prev, `Thread review failed: ${String(error)}`]);
+                              });
+                          }}
+                          disabled={!activeThreadId || activeRunState === "running"}
+                          title={activeThreadId ? "Review current thread in the active chat" : "Select a thread to review"}
+                        >
+                          <FaPen className="composer-option-icon" />
+                          Review
+                        </button>
                         <div className="branch-inline" ref={branchTriggerRef}>
-                          <button
-                            className="branch-trigger composer-tooltip-target"
-                            data-composer-tooltip={composerTooltipText("Switch Branch", "Open the git branch picker for this project.")}
-                            aria-label="Switch git branch"
-                            onClick={() => {
-                              if (!activeProjectId || !activeGitState?.insideRepo || gitBusyAction) {
-                                return;
-                              }
-                              setIsBranchDropdownOpen((prev) => !prev);
-                              setGitBranchSearch("");
-                            }}
-                            disabled={!activeProjectId || !activeGitState?.insideRepo || Boolean(gitBusyAction)}
-                          >
-                            <span className="inline-flex items-center gap-1 truncate">
-                              <FaCodeBranch className="shrink-0 text-[10px] text-slate-500" />
-                              branch: {activeGitState?.branch ?? "(detached)"}
-                            </span>
-                            <FaChevronDown className="text-[10px] text-slate-500" />
-                          </button>
+                          {showGitInitLoader ? (
+                            <div className="branch-init-loader" role="status" aria-live="polite" aria-label="Initializing git repository">
+                              <span className="branch-init-loader-orbit" aria-hidden="true">
+                                <span />
+                                <span />
+                                <span />
+                              </span>
+                              <span className="branch-init-loader-label">Initializing git...</span>
+                            </div>
+                          ) : showGitInitAction ? (
+                            <button
+                              className="branch-trigger branch-trigger-init composer-tooltip-target"
+                              data-composer-tooltip={composerTooltipText("Initialize Git", "Create a git repository in this project.")}
+                              aria-label="Initialize git repository"
+                              onClick={() => {
+                                initializeGitRepository().catch((error) => {
+                                  setLogs((prev) => [...prev, `Git init failed: ${String(error)}`]);
+                                });
+                              }}
+                              disabled={Boolean(gitBusyAction)}
+                            >
+                              <span className="inline-flex items-center gap-1 truncate">
+                                <FaCodeBranch className="shrink-0 text-[10px] text-cyan-300/90" />
+                                Initialize git
+                              </span>
+                            </button>
+                          ) : (
+                            <button
+                              className={`branch-trigger composer-tooltip-target ${activeGitInitReveal ? "branch-trigger-reveal" : ""}`}
+                              data-composer-tooltip={composerTooltipText("Switch Branch", "Open the git branch picker for this project.")}
+                              aria-label="Switch git branch"
+                              onClick={() => {
+                                if (!activeProjectId || !activeGitState?.insideRepo || gitBusyAction) {
+                                  return;
+                                }
+                                setIsBranchDropdownOpen((prev) => !prev);
+                                setGitBranchSearch("");
+                              }}
+                              disabled={!activeProjectId || !activeGitState?.insideRepo || Boolean(gitBusyAction)}
+                            >
+                              <span className="inline-flex items-center gap-1 truncate">
+                                <FaCodeBranch className="shrink-0 text-[10px] text-slate-500" />
+                                branch: {activeGitState?.branch ?? "(detached)"}
+                              </span>
+                              <FaChevronDown className="text-[10px] text-slate-500" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -8732,36 +8951,7 @@ const stopActiveRun = async () => {
                                   className="git-commit-pill git-commit-pill-outgoing mt-1 px-2 py-1 text-xs"
                                 >
                                   <div className="git-commit-pill-hash truncate text-[10px]">{commit.hash}</div>
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="truncate">{commit.summary}</div>
-                                    <button
-                                      className="btn-ghost h-6 px-2 py-0 text-[10px]"
-                                      onClick={() => {
-                                        if (!activeThreadId) {
-                                          setLogs((prev) => [...prev, "Open or select a thread before starting review."]);
-                                          return;
-                                        }
-                                        api.sessions
-                                          .reviewCommit({
-                                            threadId: activeThreadId,
-                                            sha: commit.hash,
-                                            title: commit.summary
-                                          })
-                                          .then((result) => {
-                                            if (!result.ok) {
-                                              setLogs((prev) => [...prev, "Commit review failed to start."]);
-                                            }
-                                          })
-                                          .catch((error) => {
-                                            setLogs((prev) => [...prev, `Commit review failed: ${String(error)}`]);
-                                          });
-                                      }}
-                                      disabled={!activeThreadId || activeRunState === "running"}
-                                      title={activeThreadId ? "Review this commit in the active thread" : "Select a thread to review"}
-                                    >
-                                      Review
-                                    </button>
-                                  </div>
+                                  <div className="truncate">{commit.summary}</div>
                                 </div>
                               ))
                             )}
@@ -9021,10 +9211,8 @@ const stopActiveRun = async () => {
       {showNewProjectModal && (
         <NewProjectModal
           defaultProjectDirectory={settings.defaultProjectDirectory}
-          newProjectName={newProjectName}
-          setNewProjectName={setNewProjectName}
+          templateOptions={NEW_PROJECT_TEMPLATE_OPTIONS}
           creatingProject={creatingProject}
-          isNameValid={Boolean(sanitizeProjectDirName(newProjectName))}
           onClose={() => setShowNewProjectModal(false)}
           onSubmit={submitNewProject}
           appendLog={appendLog}

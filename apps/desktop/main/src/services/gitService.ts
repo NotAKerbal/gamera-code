@@ -639,6 +639,20 @@ export class GitService {
     };
   }
 
+  async init(cwd: string): Promise<GitCommandResult> {
+    const insideRepo = await this.isInsideRepo(cwd);
+    if (insideRepo) {
+      return {
+        ok: true,
+        stdout: "Repository already initialized.",
+        stderr: ""
+      };
+    }
+
+    const result = await this.runGit(cwd, ["init"]);
+    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
+  }
+
   async checkoutBranch(cwd: string, branch: string): Promise<GitCommandResult> {
     const direct = await this.runGit(cwd, ["checkout", branch]);
     if (direct.ok) {

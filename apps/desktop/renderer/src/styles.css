@@ -589,6 +589,43 @@ webview {
   }
 }
 
+@keyframes branch-loader-orbit {
+  0% {
+    transform: rotate(0deg) translateX(6px) scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: rotate(180deg) translateX(6px) scale(0.75);
+    opacity: 0.6;
+  }
+  100% {
+    transform: rotate(360deg) translateX(6px) scale(1);
+    opacity: 0.95;
+  }
+}
+
+@keyframes branch-loader-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes branch-trigger-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .branch-dropdown-list {
   @apply max-h-52 overflow-y-auto p-1;
 }
@@ -621,8 +658,73 @@ webview {
   @apply inline-flex h-7 min-w-[13rem] items-center justify-between gap-2 rounded-md border border-border bg-black/25 px-2.5 text-xs text-slate-300 transition hover:bg-zinc-900 hover:text-white;
 }
 
+.branch-trigger-init {
+  border-color: rgba(34, 211, 238, 0.4);
+  background: linear-gradient(120deg, rgba(8, 47, 73, 0.7), rgba(15, 23, 42, 0.8));
+  color: rgb(186 230 253);
+}
+
+.branch-trigger-init:hover {
+  border-color: rgba(34, 211, 238, 0.55);
+  background: linear-gradient(120deg, rgba(14, 116, 144, 0.35), rgba(15, 23, 42, 0.85));
+  color: rgb(224 242 254);
+}
+
+.branch-trigger-reveal {
+  animation: branch-trigger-reveal 420ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
 .branch-trigger:disabled {
   @apply opacity-50;
+}
+
+.branch-init-loader {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 13rem;
+  height: 1.75rem;
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  border-radius: 0.375rem;
+  padding: 0 0.65rem;
+  color: rgb(186 230 253);
+  background:
+    radial-gradient(circle at 20% 50%, rgba(14, 116, 144, 0.24), transparent 55%),
+    rgba(15, 23, 42, 0.8);
+  animation: branch-loader-fade-in 180ms ease-out;
+}
+
+.branch-init-loader-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.015em;
+}
+
+.branch-init-loader-orbit {
+  position: relative;
+  width: 15px;
+  height: 15px;
+}
+
+.branch-init-loader-orbit > span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  margin-top: -2px;
+  border-radius: 999px;
+  background: rgba(103, 232, 249, 0.95);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+  animation: branch-loader-orbit 1s linear infinite;
+}
+
+.branch-init-loader-orbit > span:nth-child(2) {
+  animation-delay: -0.33s;
+}
+
+.branch-init-loader-orbit > span:nth-child(3) {
+  animation-delay: -0.66s;
 }
 
 .branch-search-input {
@@ -1350,7 +1452,7 @@ webview {
 }
 
 .activity-command {
-  @apply p-0;
+  @apply rounded-md border border-border/70 bg-black/20 p-2;
   transition: color 0.2s ease;
 }
 
@@ -1369,6 +1471,34 @@ webview {
 
 .activity-command-code {
   @apply block max-w-full whitespace-pre-wrap break-words px-0 py-0 text-sm text-slate-400 [overflow-wrap:anywhere];
+}
+
+.cmd-token {
+  font-weight: 500;
+}
+
+.cmd-token-command {
+  color: rgb(125 211 252);
+}
+
+.cmd-token-flag {
+  color: rgb(167 139 250);
+}
+
+.cmd-token-string {
+  color: rgb(134 239 172);
+}
+
+.cmd-token-path {
+  color: rgb(253 224 71);
+}
+
+.cmd-token-operator {
+  color: rgb(248 113 113);
+}
+
+.cmd-token-variable {
+  color: rgb(94 234 212);
 }
 
 .activity-command-body {
@@ -1425,7 +1555,7 @@ webview {
 }
 
 .file-item {
-  @apply p-0;
+  @apply rounded-md border border-border/70 bg-black/20 p-2;
   transition: color 0.2s ease;
 }
 

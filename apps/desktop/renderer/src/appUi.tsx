@@ -55,6 +55,71 @@ const MarkdownContent = ({ content }: { content: string }) => {
   );
 };
 
+const SHELL_OPERATOR_TOKENS = new Set([
+  "|",
+  "||",
+  "&&",
+  ";",
+  ">",
+  ">>",
+  "<",
+  "<<",
+  "2>",
+  "2>>",
+  "&>",
+  "1>",
+  "1>>"
+]);
+
+const COMMAND_TOKEN_PATTERN = /(\s+|"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|`(?:\\.|[^`])*`|\$\{[^}]+\}|\$[A-Za-z_]\w*|%[A-Za-z_]\w*%|2>>|2>|1>>|1>|>>|<<|\|\||&&|[|;<>]|--?[A-Za-z0-9][\w-]*|[^\s]+)/g;
+
+const classifyCommandToken = (token: string, isFirstCommandToken: boolean): string => {
+  if (/^\s+$/.test(token)) {
+    return "plain";
+  }
+  if (SHELL_OPERATOR_TOKENS.has(token)) {
+    return "operator";
+  }
+  if (/^"(?:\\.|[^"])*"$|^'(?:\\.|[^'])*'$|^`(?:\\.|[^`])*`$/.test(token)) {
+    return "string";
+  }
+  if (/^\$\{[^}]+\}$|^\$[A-Za-z_]\w*$|^%[A-Za-z_]\w*%$/.test(token)) {
+    return "variable";
+  }
+  if (/^--?[A-Za-z0-9][\w-]*$/.test(token)) {
+    return "flag";
+  }
+  if (/^[.~]|[\\/]/.test(token)) {
+    return "path";
+  }
+  if (isFirstCommandToken) {
+    return "command";
+  }
+  return "plain";
+};
+
+const renderHighlightedCommand = (command: string): ReactNode[] => {
+  const tokens = command.match(COMMAND_TOKEN_PATTERN) ?? [command];
+  let sawCommandToken = false;
+  return tokens.map((token, index) => {
+    if (/^\s+$/.test(token)) {
+      return <span key={`space-${index}`}>{token}</span>;
+    }
+    const tokenType = classifyCommandToken(token, !sawCommandToken);
+    if (tokenType === "command") {
+      sawCommandToken = true;
+    } else if (tokenType !== "operator") {
+      sawCommandToken = sawCommandToken || /[^\s]/.test(token);
+    }
+    const className = tokenType === "plain" ? undefined : `cmd-token cmd-token-${tokenType}`;
+    return (
+      <span key={`token-${index}`} className={className}>
+        {token}
+      </span>
+    );
+  });
+};
+
 const PlanSummaryCard = ({
   label,
   summary,
@@ -274,7 +339,7 @@ const TimelineItemsList = ({
                           </div>
                           <TraceOverflow id={`${item.id}:${run.id}`}>
                             <div className="activity-command-body">
-                              <code className="activity-command-code">{run.command}</code>
+                              <code className="activity-command-code">{renderHighlightedCommand(run.command)}</code>
                               {!isCommandGroup && <p className="activity-exploration">Explored: {describeExploration(run.command)}</p>}
                               {run.outputTail ? (
                                 <pre className="activity-command-output">{run.outputTail}</pre>

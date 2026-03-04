@@ -347,37 +347,6 @@ export const SettingsModal = memo(({
               </section>
 
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Thread UX</div>
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Auto-rename new threads</div>
-                  <ToggleButton
-                    enabled={settings.autoRenameThreadTitles ?? true}
-                    className="md:justify-self-end"
-                    onToggle={(enabled) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        autoRenameThreadTitles: enabled
-                      }))
-                    }
-                  />
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Show thread descriptions</div>
-                  <ToggleButton
-                    enabled={settings.showThreadSummaries ?? true}
-                    className="md:justify-self-end"
-                    onToggle={(enabled) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        showThreadSummaries: enabled
-                      }))
-                    }
-                  />
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
                 <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Interface</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Use turtle spinners</div>
@@ -402,6 +371,37 @@ export const SettingsModal = memo(({
                       setSettings((prev) => ({
                         ...prev,
                         condenseActivityTimeline: enabled
+                      }))
+                    }
+                  />
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Thread UX</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Auto-rename new threads</div>
+                  <ToggleButton
+                    enabled={settings.autoRenameThreadTitles ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        autoRenameThreadTitles: enabled
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mx-2 border-t border-border/70" />
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Show thread descriptions</div>
+                  <ToggleButton
+                    enabled={settings.showThreadSummaries ?? true}
+                    className="md:justify-self-end"
+                    onToggle={(enabled) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        showThreadSummaries: enabled
                       }))
                     }
                   />

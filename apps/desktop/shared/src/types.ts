@@ -32,6 +32,8 @@ export interface PromptAttachment {
   size: number;
 }
 
+export type ProjectTemplateId = "nextjs" | "electron";
+
 export interface Project {
   id: string;
   workspaceId: string;
@@ -134,6 +136,22 @@ export interface ProjectTerminalState {
 export interface ProjectPreviewState {
   projectId: string;
   url?: string;
+}
+
+export type ProjectSetupPhase =
+  | "creating_folder"
+  | "setting_up_files"
+  | "installing_dependencies"
+  | "running_setup_scripts"
+  | "ready"
+  | "failed";
+
+export interface ProjectSetupEvent {
+  projectId: string;
+  phase: ProjectSetupPhase;
+  status: "running" | "completed" | "failed";
+  message: string;
+  ts: string;
 }
 
 export type PreviewEventType = "popout_closed";

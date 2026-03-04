@@ -1056,6 +1056,50 @@ export class SessionManager {
     return true;
   }
 
+  async reviewThread(threadId: string, instructions?: string): Promise<boolean> {
+    const thread = this.deps.repository.getThread(threadId);
+    if (!thread || thread.provider !== "codex") {
+      return false;
+    }
+
+    const sessionRecord = this.deps.repository.getSession(threadId);
+    const project = this.deps.repository.getProject(thread.projectId);
+    const cwd = this.sessions.get(threadId)?.cwd ?? sessionRecord?.cwd ?? project?.path;
+    if (!cwd) {
+      return false;
+    }
+
+    const running = this.sessions.get(threadId) ?? (await this.startOrResumeRuntime(thread, cwd, undefined));
+    if (!running || running.kind !== "codex_app_server") {
+      return false;
+    }
+
+    const cleanedInstructions = instructions?.trim();
+    running.runQueue = running.runQueue
+      .then(() =>
+        this.runCodexReview(
+          running,
+          {
+            type: "custom",
+            instructions:
+              cleanedInstructions && cleanedInstructions.length > 0
+                ? cleanedInstructions
+                : "Review this thread and provide key findings."
+          },
+          "inline"
+        )
+      )
+      .catch((error) => {
+        this.deps.repository.setThreadErrored(threadId);
+        this.emitSessionEvent(threadId, "stderr", `Codex review failed: ${describeRuntimeError(error)}`, {
+          provider: "codex",
+          phase: "failed"
+        });
+      });
+
+    return true;
+  }
+
   async listSkills(projectId?: string): Promise<SkillRecord[]> {
     const project = projectId ? this.deps.repository.getProject(projectId) : null;
     const cwd = project?.path ?? process.cwd();

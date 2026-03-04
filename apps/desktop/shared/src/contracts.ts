@@ -21,6 +21,7 @@ import type {
   PermissionMode,
   Project,
   ProjectSettings,
+  ProjectSetupEvent,
   ProjectTerminalEvent,
   ProjectTerminalState,
   PromptAttachment,
@@ -42,7 +43,12 @@ export interface DesktopApi {
   projects: {
     list: () => Promise<Project[]>;
     create: (input: { name: string; path: string }) => Promise<Project>;
-    createInDirectory: (input: { name: string; parentDir: string }) => Promise<Project>;
+    createInDirectory: (input: {
+      name: string;
+      parentDir: string;
+      monorepo?: boolean;
+      templateIds?: Array<"nextjs" | "electron">;
+    }) => Promise<Project>;
     listGitRepositories: () => Promise<GitRepositoryCandidate[]>;
     importFromPath: (input: { path: string; name?: string }) => Promise<Project>;
     cloneFromGitUrl: (input: { url: string; name?: string }) => Promise<Project>;
@@ -55,6 +61,7 @@ export interface DesktopApi {
     listFiles: (input: { projectId: string; limit?: number }) => Promise<ProjectFileEntry[]>;
     openWebLink: (input: { url: string; name?: string; projectName?: string; focus?: boolean }) => Promise<{ ok: boolean }>;
     getWebLinkState: () => Promise<{ open: boolean; url?: string }>;
+    onSetupEvent: (listener: (event: ProjectSetupEvent) => void) => () => void;
   };
   workspaces: {
     list: () => Promise<Workspace[]>;
@@ -139,6 +146,7 @@ export interface DesktopApi {
       answersByQuestionId: Record<string, string>;
     }) => Promise<{ ok: boolean }>;
     compact: (input: { threadId: string }) => Promise<{ ok: boolean }>;
+    reviewThread: (input: { threadId: string; instructions?: string }) => Promise<{ ok: boolean }>;
     reviewCommit: (input: { threadId: string; sha: string; title?: string }) => Promise<{ ok: boolean }>;
     generateThreadMetadata: (input: {
       threadId: string;
@@ -191,6 +199,7 @@ export interface DesktopApi {
     unstage: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
     discard: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
     commit: (input: { projectId: string; message?: string }) => Promise<GitCommitResult>;
+    init: (input: { projectId: string }) => Promise<GitCommandResult>;
     checkoutBranch: (input: { projectId: string; branch: string }) => Promise<GitCommandResult>;
     createBranch: (input: { projectId: string; branch: string; checkout?: boolean }) => Promise<GitCommandResult>;
     openPopout: (input: { projectId: string; projectName?: string }) => Promise<{ ok: boolean }>;

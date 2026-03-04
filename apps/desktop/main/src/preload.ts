@@ -12,6 +12,8 @@ const settingsOpenWindowChannel =
   (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
 const projectsListFilesChannel =
   (IPC_CHANNELS as Record<string, string>).projectsListFiles ?? "projects:listFiles";
+const projectsSetupEventChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsSetupEvent ?? "projects:setupEvent";
 const gitDiscardChannel =
   (IPC_CHANNELS as Record<string, string>).gitDiscard ?? "git:discard";
 const gitGetOutgoingCommitsChannel =
@@ -22,6 +24,8 @@ const gitGetSharedHistoryChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetSharedHistory ?? "git:getSharedHistory";
 const gitGetSnapshotChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetSnapshot ?? "git:getSnapshot";
+const gitInitChannel =
+  (IPC_CHANNELS as Record<string, string>).gitInit ?? "git:init";
 const threadsForkChannel =
   (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
 const sessionsSteerChannel =
@@ -30,6 +34,8 @@ const sessionsSubmitUserInputChannel =
   (IPC_CHANNELS as Record<string, string>).sessionsSubmitUserInput ?? "sessions:submitUserInput";
 const sessionsCompactChannel =
   (IPC_CHANNELS as Record<string, string>).sessionsCompact ?? "sessions:compact";
+const sessionsReviewThreadChannel =
+  (IPC_CHANNELS as Record<string, string>).sessionsReviewThread ?? "sessions:reviewThread";
 const sessionsReviewCommitChannel =
   (IPC_CHANNELS as Record<string, string>).sessionsReviewCommit ?? "sessions:reviewCommit";
 const skillsListChannel =
@@ -54,11 +60,29 @@ const workspacesListChannel = (IPC_CHANNELS as Record<string, string>).workspace
 const workspacesCreateChannel = (IPC_CHANNELS as Record<string, string>).workspacesCreate ?? "workspaces:create";
 const workspacesUpdateChannel = (IPC_CHANNELS as Record<string, string>).workspacesUpdate ?? "workspaces:update";
 const workspacesDeleteChannel = (IPC_CHANNELS as Record<string, string>).workspacesDelete ?? "workspaces:delete";
+type ProjectSetupProgressEvent = {
+  projectId: string;
+  phase:
+    | "creating_folder"
+    | "setting_up_files"
+    | "installing_dependencies"
+    | "running_setup_scripts"
+    | "ready"
+    | "failed";
+  status: "running" | "completed" | "failed";
+  message: string;
+  ts: string;
+};
 type DesktopApiWithGitExtras = DesktopApi & {
   projects: DesktopApi["projects"] & {
     listFiles: (input: { projectId: string; limit?: number }) => Promise<Array<{ path: string; updatedAtMs: number }>>;
+    onSetupEvent: (listener: (event: ProjectSetupProgressEvent) => void) => () => void;
+  };
+  sessions: DesktopApi["sessions"] & {
+    reviewThread: (input: { threadId: string; instructions?: string }) => Promise<{ ok: boolean }>;
   };
   git: DesktopApi["git"] & {
+    init: (input: { projectId: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getSnapshot: (input: { projectId: string }) => Promise<GitSnapshot>;
     discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
@@ -92,6 +116,11 @@ const api: DesktopApiWithGitExtras = {
     listSystemTerminals: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsListSystemTerminals, input),
     openFiles: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenFiles, input),
     listFiles: (input: { projectId: string; limit?: number }) => ipcRenderer.invoke(projectsListFilesChannel, input),
+    onSetupEvent: (listener: (event: ProjectSetupProgressEvent) => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: ProjectSetupProgressEvent) => listener(payload);
+      ipcRenderer.on(projectsSetupEventChannel, wrapped);
+      return () => ipcRenderer.off(projectsSetupEventChannel, wrapped);
+    },
     openWebLink: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenWebLink, input),
     getWebLinkState: () => ipcRenderer.invoke(IPC_CHANNELS.projectsGetWebLinkState)
   },
@@ -151,6 +180,7 @@ const api: DesktopApiWithGitExtras = {
     steer: (input) => ipcRenderer.invoke(sessionsSteerChannel, input),
     submitUserInput: (input) => ipcRenderer.invoke(sessionsSubmitUserInputChannel, input),
     compact: (input) => ipcRenderer.invoke(sessionsCompactChannel, input),
+    reviewThread: (input) => ipcRenderer.invoke(sessionsReviewThreadChannel, input),
     reviewCommit: (input) => ipcRenderer.invoke(sessionsReviewCommitChannel, input),
     generateThreadMetadata: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsGenerateThreadMetadata, input),
     resize: (input) => ipcRenderer.invoke(IPC_CHANNELS.sessionsResize, input),
@@ -212,6 +242,7 @@ const api: DesktopApiWithGitExtras = {
     unstage: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitUnstage, input),
     discard: (input) => ipcRenderer.invoke(gitDiscardChannel, input),
     commit: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCommit, input),
+    init: (input: { projectId: string }) => ipcRenderer.invoke(gitInitChannel, input),
     checkoutBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCheckoutBranch, input),
     createBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCreateBranch, input),
     openPopout: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitOpenPopout, input),
