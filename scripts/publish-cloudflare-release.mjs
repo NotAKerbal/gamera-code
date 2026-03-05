@@ -9,6 +9,7 @@ const INSTALLER_PATTERN = /^GameraCode Setup (\d+\.\d+\.\d+)\.exe$/;
 const DEFAULT_RELEASE_DIR = resolve(process.cwd(), "apps/desktop/main/release");
 const DEFAULT_PREFIX = "gameracode";
 const DEFAULT_ENV_FILE = resolve(process.cwd(), ".env.release");
+const SUPPORTED_PLATFORMS = new Set(["win", "mac", "linux"]);
 
 const parseDotEnvContents = (contents) => {
   const result = {};
@@ -53,6 +54,7 @@ const parseArgs = (argv, envOverrides) => {
     bucket: getEnv("CF_R2_BUCKET"),
     prefix: getEnv("CF_R2_PREFIX") || DEFAULT_PREFIX,
     releaseDir: getEnv("CF_RELEASE_DIR") || DEFAULT_RELEASE_DIR,
+    platform: getEnv("CF_RELEASE_PLATFORM") || "win",
     version: "",
     dryRun: false
   };
@@ -74,6 +76,11 @@ const parseArgs = (argv, envOverrides) => {
       index += 1;
       continue;
     }
+    if (current === "--platform") {
+      args.platform = argv[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
     if (current === "--version") {
       args.version = argv[index + 1] ?? "";
       index += 1;
@@ -91,6 +98,9 @@ const parseArgs = (argv, envOverrides) => {
   }
   if (!args.releaseDir) {
     throw new Error("Missing release directory. Set CF_RELEASE_DIR or pass --release-dir <path>.");
+  }
+  if (!SUPPORTED_PLATFORMS.has(args.platform)) {
+    throw new Error(`Invalid platform "${args.platform}". Use one of: win, mac, linux.`);
   }
 
   args.releaseDir = resolve(process.cwd(), args.releaseDir);
@@ -165,6 +175,39 @@ const computeFileSha512Base64 = async (filePath) => {
   return createHash("sha512").update(content).digest("base64");
 };
 
+const getChannelFilenameForPlatform = (platform) => {
+  if (platform === "win") {
+    return "latest.yml";
+  }
+  if (platform === "mac") {
+    return "latest-mac.yml";
+  }
+  return "latest-linux.yml";
+};
+
+const parseChannelYml = (contents) => {
+  const versionMatch = contents.match(/^version:\s*([^\r\n]+)\s*$/m);
+  const urlMatches = Array.from(contents.matchAll(/^\s*url:\s*([^\r\n]+)\s*$/gm));
+  const pathMatch = contents.match(/^\s*path:\s*([^\r\n]+)\s*$/m);
+
+  const files = [];
+  for (const match of urlMatches) {
+    const raw = match[1]?.trim();
+    if (!raw) {
+      continue;
+    }
+    files.push(raw.replace(/^["']|["']$/g, ""));
+  }
+  if (pathMatch?.[1]) {
+    files.push(pathMatch[1].trim().replace(/^["']|["']$/g, ""));
+  }
+
+  return {
+    version: versionMatch?.[1]?.trim().replace(/^["']|["']$/g, "") || "",
+    files: Array.from(new Set(files))
+  };
+};
+
 const runCommand = (command, args, cwd, dryRun) =>
   new Promise((resolvePromise, rejectPromise) => {
     const printable = [command, ...args].join(" ");
@@ -200,9 +243,7 @@ const uploadObject = async ({ bucket, key, filePath, cwd, dryRun }) => {
   );
 };
 
-const main = async () => {
-  const envFromFile = await loadReleaseEnvFile();
-  const args = parseArgs(process.argv.slice(2), envFromFile);
+const prepareWindowsPublish = async (args) => {
   const installer = await findInstallerFile(args.releaseDir, args.version);
   const installerPath = join(args.releaseDir, installer.name);
   const blockmapPath = `${installerPath}.blockmap`;
@@ -224,7 +265,6 @@ const main = async () => {
     .then(() => true)
     .catch(() => false);
 
-  const prefix = args.prefix ? `${args.prefix}/` : "";
   const filesToUpload = [
     { localPath: latestYmlPath, remoteName: basename(latestYmlPath) },
     { localPath: installerPath, remoteName: installer.name }
@@ -233,13 +273,73 @@ const main = async () => {
     filesToUpload.push({ localPath: blockmapPath, remoteName: `${installer.name}.blockmap` });
   }
 
-  console.log(`Publishing version ${installer.version}`);
+  return {
+    version: installer.version,
+    channelFilePath: latestYmlPath,
+    filesToUpload
+  };
+};
+
+const prepareYamlBasedPublish = async (args, platform) => {
+  const channelFile = getChannelFilenameForPlatform(platform);
+  const channelFilePath = join(args.releaseDir, channelFile);
+  let channelContents = "";
+  try {
+    channelContents = await readFile(channelFilePath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      throw new Error(`Missing ${channelFilePath}. Run the matching package command first (e.g. npm run package:${platform}).`);
+    }
+    throw error;
+  }
+  const parsed = parseChannelYml(channelContents);
+
+  if (!parsed.version) {
+    throw new Error(`Could not parse version from ${channelFilePath}`);
+  }
+  if (args.version && parsed.version !== args.version) {
+    throw new Error(`Version mismatch: ${channelFile} has ${parsed.version}, expected ${args.version}`);
+  }
+  if (parsed.files.length === 0) {
+    throw new Error(`No artifact URLs found in ${channelFilePath}`);
+  }
+
+  const filesToUpload = [{ localPath: channelFilePath, remoteName: channelFile }];
+  for (const file of parsed.files) {
+    const localPath = join(args.releaseDir, file);
+    await stat(localPath);
+    filesToUpload.push({ localPath, remoteName: file });
+  }
+
+  return {
+    version: parsed.version,
+    channelFilePath,
+    filesToUpload
+  };
+};
+
+const main = async () => {
+  const envFromFile = await loadReleaseEnvFile();
+  const args = parseArgs(process.argv.slice(2), envFromFile);
+  const publishPlan =
+    args.platform === "win"
+      ? await prepareWindowsPublish(args)
+      : await prepareYamlBasedPublish(args, args.platform);
+
+  const prefix = args.prefix ? `${args.prefix}/` : "";
+  console.log(`Publishing ${args.platform} version ${publishPlan.version}`);
   console.log(`Release dir: ${args.releaseDir}`);
   console.log(`Bucket: ${args.bucket}`);
   console.log(`Prefix: ${args.prefix || "(root)"}`);
-  console.log(`${args.dryRun ? "Would generate" : "Generated"} latest.yml -> ${latestYmlPath}`);
+  if (args.platform === "win") {
+    console.log(
+      `${args.dryRun ? "Would generate" : "Generated"} ${basename(publishPlan.channelFilePath)} -> ${publishPlan.channelFilePath}`
+    );
+  } else {
+    console.log(`Using generated channel file ${publishPlan.channelFilePath}`);
+  }
 
-  for (const file of filesToUpload) {
+  for (const file of publishPlan.filesToUpload) {
     const key = `${prefix}${file.remoteName}`;
     await uploadObject({
       bucket: args.bucket,
@@ -255,7 +355,7 @@ const main = async () => {
     ? `https://download.isaacstuff.com/${trimmedPrefix}`
     : "https://download.isaacstuff.com";
   console.log("Upload complete.");
-  console.log(`latest.yml URL: ${baseUrl}/latest.yml`);
+  console.log(`${basename(publishPlan.channelFilePath)} URL: ${baseUrl}/${basename(publishPlan.channelFilePath)}`);
 };
 
 main().catch((error) => {

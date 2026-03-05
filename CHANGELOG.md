@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+- Massively improved Linux support
+- Merging and conflict resolution
+
 ## 0.4.0
 - Project templates
 - Git initialization flow
