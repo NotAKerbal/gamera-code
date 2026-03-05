@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
@@ -221,22 +221,10 @@ const runCommand = (command, args, cwd, dryRun) =>
       return;
     }
 
-    const isWindows = process.platform === "win32";
-    const escapeCmdArg = (value) => {
-      if (!/[\s"&^|<>]/.test(value)) {
-        return value;
-      }
-      return `"${value.replace(/"/g, '""')}"`;
-    };
-    const executable = isWindows ? "cmd.exe" : command;
-    const executableArgs = isWindows
-      ? ["/d", "/s", "/c", [command, ...args].map(escapeCmdArg).join(" ")]
-      : args;
-
-    const child = spawn(executable, executableArgs, {
+    const child = spawn(command, args, {
       cwd,
       stdio: "inherit",
-      shell: false
+      shell: process.platform === "win32"
     });
     child.on("error", (error) => rejectPromise(error));
     child.on("close", (code) => {
@@ -264,6 +252,8 @@ const prepareWindowsPublish = async (args) => {
   const blockmapPath = `${installerPath}.blockmap`;
   const latestYmlPath = join(args.releaseDir, "latest.yml");
   const remoteInstallerName = `GameraCode-Setup-${installer.version}.exe`;
+  const uploadInstallerPath = join(args.releaseDir, remoteInstallerName);
+  const uploadBlockmapPath = `${uploadInstallerPath}.blockmap`;
 
   const installerStats = await stat(installerPath);
   const installerSha512 = await computeFileSha512Base64(installerPath);
@@ -275,6 +265,9 @@ const prepareWindowsPublish = async (args) => {
   });
   if (!args.dryRun) {
     await writeFile(latestYmlPath, latestYml, "utf8");
+    if (uploadInstallerPath !== installerPath) {
+      await copyFile(installerPath, uploadInstallerPath);
+    }
   }
 
   const hasBlockmap = await stat(blockmapPath)
@@ -283,10 +276,16 @@ const prepareWindowsPublish = async (args) => {
 
   const filesToUpload = [
     { localPath: latestYmlPath, remoteName: basename(latestYmlPath) },
-    { localPath: installerPath, remoteName: remoteInstallerName }
+    { localPath: uploadInstallerPath, remoteName: remoteInstallerName }
   ];
   if (hasBlockmap) {
-    filesToUpload.push({ localPath: blockmapPath, remoteName: `${remoteInstallerName}.blockmap` });
+    if (!args.dryRun && uploadBlockmapPath !== blockmapPath) {
+      await copyFile(blockmapPath, uploadBlockmapPath);
+    }
+    filesToUpload.push({
+      localPath: uploadBlockmapPath,
+      remoteName: `${remoteInstallerName}.blockmap`
+    });
   }
 
   return {

@@ -24,10 +24,9 @@
     "package:win": "npm run build && npm run package:win --workspace @code-app/main",
     "package:linux": "npm run build && npm run package:linux --workspace @code-app/main",
     "package:all": "npm run build && npm run package:all --workspace @code-app/main",
-    "release:publish:cloudflare": "node scripts/publish-cloudflare-release.mjs",
-    "release:publish:cloudflare:win": "node scripts/publish-cloudflare-release.mjs --platform win",
-    "release:publish:cloudflare:mac": "node scripts/publish-cloudflare-release.mjs --platform mac",
-    "release:publish:cloudflare:linux": "node scripts/publish-cloudflare-release.mjs --platform linux",
+    "release:win": "node scripts/publish-cloudflare-release.mjs --platform win",
+    "release:mac": "node scripts/publish-cloudflare-release.mjs --platform mac",
+    "release:linux": "node scripts/publish-cloudflare-release.mjs --platform linux",
     "lint": "npm run lint --workspace @code-app/main && npm run lint --workspace @code-app/renderer"
   },
   "devDependencies": {
