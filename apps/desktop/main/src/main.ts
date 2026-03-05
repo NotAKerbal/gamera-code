@@ -20,6 +20,7 @@ let mainWindow: BrowserWindow | null = null;
 let startupSplashWindow: BrowserWindow | null = null;
 let previewPopoutWindow: BrowserWindow | null = null;
 let gitPopoutWindow: BrowserWindow | null = null;
+let codePanelWindow: BrowserWindow | null = null;
 let webLinkWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let webLinkCurrentUrl: string | null = null;
@@ -1541,6 +1542,49 @@ const ensureSettingsWindow = async () => {
   settingsWindow.focus();
 };
 
+const formatCodeWindowTitle = (projectName?: string) => {
+  const name = projectName?.trim();
+  return name ? `Code \u2014 ${name}` : "Code";
+};
+
+const ensureCodePanelWindow = async (projectName?: string) => {
+  const isMac = process.platform === "darwin";
+  if (!codePanelWindow || codePanelWindow.isDestroyed()) {
+    codePanelWindow = new BrowserWindow({
+      width: 1420,
+      height: 920,
+      minWidth: 980,
+      minHeight: 620,
+      title: formatCodeWindowTitle(projectName),
+      frame: isMac,
+      titleBarStyle: isMac ? "hiddenInset" : "default",
+      titleBarOverlay: false,
+      autoHideMenuBar: true,
+      backgroundColor: "#0b0d10",
+      ...getBrowserWindowIcon(),
+      webPreferences: {
+        preload: join(__dirname, "preload.js"),
+        contextIsolation: true,
+        sandbox: false,
+        nodeIntegration: false
+      }
+    });
+    codePanelWindow.on("closed", () => {
+      codePanelWindow = null;
+      BrowserWindow.getAllWindows().forEach((window) => {
+        if (!window.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.codePanelEvent, { type: "popout_closed" });
+        }
+      });
+    });
+  }
+
+  codePanelWindow.setTitle(formatCodeWindowTitle(projectName));
+  await loadRendererWindow(codePanelWindow, { codeWindow: "1" });
+  codePanelWindow.show();
+  codePanelWindow.focus();
+};
+
 const bootstrap = async () => {
   await app.whenReady();
   applyRuntimePathToProcessEnv();
@@ -1654,6 +1698,19 @@ const bootstrap = async () => {
     settingsWindow: {
       open: async () => {
         await ensureSettingsWindow();
+        return { ok: true };
+      }
+    },
+    codePanel: {
+      openPopout: async (projectName?: string) => {
+        await ensureCodePanelWindow(projectName);
+        return { ok: true };
+      },
+      closePopout: async () => {
+        if (codePanelWindow && !codePanelWindow.isDestroyed()) {
+          codePanelWindow.close();
+        }
+        codePanelWindow = null;
         return { ok: true };
       }
     }

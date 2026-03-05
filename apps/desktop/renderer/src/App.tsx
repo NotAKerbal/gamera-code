@@ -136,6 +136,7 @@ import {
   getProjectNameFromPath,
   getTerminalPopoutKey,
   isEditableKeyboardTarget,
+  isCodeWindowContext,
   isExplorationCommand,
   isLikelyGitRepositoryUrl,
   isSettingsWindowContext,
@@ -234,6 +235,7 @@ import { SetupModal } from "./appSetupModal";
 import { ComposerDropdownPortal } from "./appComposerDropdown";
 import { BranchDropdownPortal } from "./appBranchDropdown";
 import { MainHeader } from "./appMainHeader";
+import { MonacoCodePanel } from "./MonacoCodePanel";
 
 const api = window.desktopAPI;
 const platformHints = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
@@ -373,6 +375,7 @@ const MemoizedTimelinePlanRow = memo(TimelinePlanRow);
 
 export const App = () => {
   const isSettingsWindow = isSettingsWindowContext();
+  const isCodeWindow = isCodeWindowContext();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -519,6 +522,7 @@ export const App = () => {
   const [gitActivityExpandedByProjectId, setGitActivityExpandedByProjectId] = useState<Record<string, boolean>>({});
   const [isGitPoppedOut, setIsGitPoppedOut] = useState(false);
   const [isTerminalDashboardPoppedOut, setIsTerminalDashboardPoppedOut] = useState(false);
+  const [isCodePanelPoppedOut, setIsCodePanelPoppedOut] = useState(false);
   const planPopoutWindowRef = useRef<Window | null>(null);
   const [orchestrationRunsByParentId, setOrchestrationRunsByParentId] = useState<Record<string, OrchestrationRun[]>>({});
   const [orchestrationChildrenByRunId, setOrchestrationChildrenByRunId] = useState<Record<string, OrchestrationChild[]>>({});
@@ -2844,6 +2848,18 @@ export const App = () => {
         terminalDashboardWindowRef.current.close();
       }
       terminalDashboardWindowRef.current = null;
+      setIsCodePanelPoppedOut(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = api.codePanel.onEvent((event) => {
+      if (event.type === "popout_closed") {
+        setIsCodePanelPoppedOut(false);
+      }
+    });
+    return () => {
+      unsubscribe();
     };
   }, []);
 
@@ -7047,6 +7063,41 @@ TODO: Describe what this skill does.
       return next;
     });
   }, []);
+  const isCodePanelOpen = isCodePanelPoppedOut || isCodeWindow;
+  const toggleCodePanel = useCallback(() => {
+    if (isCodeWindow) {
+      return;
+    }
+    if (isCodePanelPoppedOut) {
+      api.codePanel
+        .closePopout()
+        .then((result) => {
+          if (result.ok) {
+            setIsCodePanelPoppedOut(false);
+          } else {
+            appendLog("Code pop-out failed to close.");
+          }
+        })
+        .catch((error) => {
+          appendLog(`Code pop-out close failed: ${String(error)}`);
+        });
+      return;
+    }
+    api.codePanel
+      .openPopout({ projectName: activeProject?.name })
+      .then((result) => {
+        if (result.ok) {
+          setIsCodePanelPoppedOut(true);
+        } else {
+          appendLog("Code pop-out failed to open.");
+        }
+      })
+      .catch((error) => {
+        appendLog(`Code pop-out failed: ${String(error)}`);
+      });
+    setIsPreviewOpen(false);
+    setIsGitPanelOpen(false);
+  }, [activeProject?.name, appendLog, isCodePanelPoppedOut, isCodeWindow]);
 
   const timelineItems = useMemo(() => {
     const messageItems: TimelineMessageItem[] = messages.map((message, idx) => {
@@ -7501,11 +7552,19 @@ TODO: Describe what this skill does.
     <div className="h-screen overflow-hidden bg-bg text-white theme-text">
       <div
         className={
-          isSettingsWindow ? "h-full w-full theme-app-shell" : `h-full w-full theme-app-shell ${isMacOS ? "pl-2" : ""}`
+          isSettingsWindow || isCodeWindow
+            ? "h-full w-full theme-app-shell"
+            : `h-full w-full theme-app-shell ${isMacOS ? "pl-2" : ""}`
         }
       >
-        <div className={isSettingsWindow ? "flex h-full flex-col overflow-hidden theme-settings-surface" : "flex h-full flex-col overflow-hidden rounded-2xl bg-black/40 shadow-neon backdrop-blur-xl"}>
-          {!isSettingsWindow && (
+        <div
+          className={
+            isSettingsWindow || isCodeWindow
+              ? "flex h-full flex-col overflow-hidden theme-settings-surface"
+              : "flex h-full flex-col overflow-hidden rounded-2xl bg-black/40 shadow-neon backdrop-blur-xl"
+          }
+        >
+          {!isSettingsWindow && !isCodeWindow && (
             <MainHeader
               isMacOS={isMacOS}
               isWindows={isWindows}
@@ -7547,8 +7606,10 @@ TODO: Describe what this skill does.
               onCopyTerminalOutput={copyTerminalOutput}
               onOpenProjectFiles={openProjectFiles}
               activeProjectBrowserEnabled={activeProjectBrowserEnabled}
+              isCodePanelOpen={isCodePanelOpen}
               isPreviewOpen={isPreviewOpen}
               isGitPanelOpen={isGitPanelOpen}
+              onToggleCodePanel={toggleCodePanel}
               onTogglePreviewPanel={togglePreviewPanel}
               onToggleGitPanel={toggleGitPanel}
               showHeaderGitDiffStats={Boolean(showHeaderGitDiffStats)}
@@ -7564,10 +7625,12 @@ TODO: Describe what this skill does.
 
           <div
             className={
-              isSettingsWindow
+              isSettingsWindow || isCodeWindow
                 ? "hidden"
                 : `grid flex-1 min-h-0 overflow-hidden ${
-                    isPreviewVisible || isGitPanelOpen ? "grid-cols-[300px_minmax(0,1fr)_420px]" : "grid-cols-[300px_1fr]"
+                    isPreviewVisible || isGitPanelOpen
+                      ? "grid-cols-[300px_minmax(0,1fr)_520px]"
+                      : "grid-cols-[300px_1fr]"
                   }`
             }
           >
@@ -9506,6 +9569,24 @@ TODO: Describe what this skill does.
               </aside>
             )}
           </div>
+
+          {isCodeWindow && (
+            <main className="flex min-h-0 flex-1 flex-col">
+              <MonacoCodePanel
+                activeProjectId={activeProjectId}
+                activeProjectPath={activeProject?.path}
+                projectName={activeProject?.name}
+                appIconSrc={appIconSrc}
+                isMacOS={isMacOS}
+                isWindows={isWindows}
+                isWindowMaximized={isWindowMaximized}
+                onMinimizeWindow={minimizeWindow}
+                onToggleMaximizeWindow={toggleMaximizeWindow}
+                onCloseWindow={closeWindow}
+                appendLog={appendLog}
+              />
+            </main>
+          )}
         </div>
       </div>
 

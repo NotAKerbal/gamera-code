@@ -59,6 +59,18 @@ export interface ProjectFileEntry {
   updatedAtMs: number;
 }
 
+export interface ProjectDirectoryEntry {
+  name: string;
+  path: string;
+  kind: "file" | "folder";
+}
+
+export interface ProjectFileContent {
+  path: string;
+  content: string;
+  mtimeMs: number;
+}
+
 export interface ProjectDevCommand {
   id: string;
   name: string;
@@ -159,6 +171,12 @@ export type PreviewEventType = "popout_closed";
 
 export interface PreviewEvent {
   type: PreviewEventType;
+}
+
+export type CodePanelEventType = "popout_closed";
+
+export interface CodePanelEvent {
+  type: CodePanelEventType;
 }
 
 export interface Thread {

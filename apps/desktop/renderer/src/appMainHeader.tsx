@@ -5,6 +5,7 @@ import {
   FaChevronRight,
   FaCodeBranch,
   FaCog,
+  FaCode,
   FaExternalLinkAlt,
   FaEye,
   FaFolderOpen,
@@ -69,8 +70,10 @@ type MainHeaderProps = {
   onCopyTerminalOutput: (name: string, output: string) => void;
   onOpenProjectFiles: () => Promise<void>;
   activeProjectBrowserEnabled: boolean;
+  isCodePanelOpen: boolean;
   isPreviewOpen: boolean;
   isGitPanelOpen: boolean;
+  onToggleCodePanel: () => void;
   onTogglePreviewPanel: () => void;
   onToggleGitPanel: () => void;
   showHeaderGitDiffStats: boolean;
@@ -173,8 +176,10 @@ const MainHeaderComponent = ({
   onCopyTerminalOutput,
   onOpenProjectFiles,
   activeProjectBrowserEnabled,
+  isCodePanelOpen,
   isPreviewOpen,
   isGitPanelOpen,
+  onToggleCodePanel,
   onTogglePreviewPanel,
   onToggleGitPanel,
   showHeaderGitDiffStats,
@@ -540,6 +545,18 @@ const MainHeaderComponent = ({
           <span className="inline-flex items-center gap-1"><FaEye className="text-[10px]" />{isPreviewOpen ? "Hide Preview" : "Preview"}</span>
         </button>
       )}
+      <button
+        className="btn-ghost app-tooltip-target"
+        data-app-tooltip={
+          isCodePanelOpen
+            ? tooltipText("Code Panel", "Code panel is already active.")
+            : tooltipText("Code Panel", "Switch to the code panel.")
+        }
+        aria-label={isCodePanelOpen ? "Code panel active" : "Show code panel"}
+        onClick={onToggleCodePanel}
+      >
+        <span className="inline-flex items-center gap-1"><FaCode className="text-[10px]" />Code</span>
+      </button>
       <button
         className="btn-ghost app-tooltip-target"
         data-app-tooltip={

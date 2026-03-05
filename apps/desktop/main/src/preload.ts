@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC_CHANNELS,
+  type CodePanelEvent,
   type DesktopApi,
   type GitSnapshot,
   type PreviewEvent,
@@ -12,6 +13,18 @@ const settingsOpenWindowChannel =
   (IPC_CHANNELS as Record<string, string>).settingsOpenWindow ?? "settings:openWindow";
 const projectsListFilesChannel =
   (IPC_CHANNELS as Record<string, string>).projectsListFiles ?? "projects:listFiles";
+const projectsListDirectoryChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsListDirectory ?? "projects:listDirectory";
+const projectsReadFileChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsReadFile ?? "projects:readFile";
+const projectsWriteFileChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsWriteFile ?? "projects:writeFile";
+const codePanelOpenPopoutChannel =
+  (IPC_CHANNELS as Record<string, string>).codePanelOpenPopout ?? "codePanel:openPopout";
+const codePanelClosePopoutChannel =
+  (IPC_CHANNELS as Record<string, string>).codePanelClosePopout ?? "codePanel:closePopout";
+const codePanelEventChannel =
+  (IPC_CHANNELS as Record<string, string>).codePanelEvent ?? "codePanel:event";
 const projectsSetupEventChannel =
   (IPC_CHANNELS as Record<string, string>).projectsSetupEvent ?? "projects:setupEvent";
 const gitDiscardChannel =
@@ -82,6 +95,17 @@ type ProjectSetupProgressEvent = {
 type DesktopApiWithGitExtras = DesktopApi & {
   projects: DesktopApi["projects"] & {
     listFiles: (input: { projectId: string; limit?: number }) => Promise<Array<{ path: string; updatedAtMs: number }>>;
+    listDirectory: (input: { projectId: string; relativePath?: string }) => Promise<Array<{
+      name: string;
+      path: string;
+      kind: "file" | "folder";
+    }>>;
+    readFile: (input: { projectId: string; relativePath: string }) => Promise<{ path: string; content: string; mtimeMs: number }>;
+    writeFile: (input: {
+      projectId: string;
+      relativePath: string;
+      content: string;
+    }) => Promise<{ ok: boolean; mtimeMs: number }>;
     onSetupEvent: (listener: (event: ProjectSetupProgressEvent) => void) => () => void;
   };
   sessions: DesktopApi["sessions"] & {
@@ -123,6 +147,12 @@ const api: DesktopApiWithGitExtras = {
     listSystemTerminals: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsListSystemTerminals, input),
     openFiles: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenFiles, input),
     listFiles: (input: { projectId: string; limit?: number }) => ipcRenderer.invoke(projectsListFilesChannel, input),
+    listDirectory: (input: { projectId: string; relativePath?: string }) =>
+      ipcRenderer.invoke(projectsListDirectoryChannel, input),
+    readFile: (input: { projectId: string; relativePath: string }) =>
+      ipcRenderer.invoke(projectsReadFileChannel, input),
+    writeFile: (input: { projectId: string; relativePath: string; content: string }) =>
+      ipcRenderer.invoke(projectsWriteFileChannel, input),
     onSetupEvent: (listener: (event: ProjectSetupProgressEvent) => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: ProjectSetupProgressEvent) => listener(payload);
       ipcRenderer.on(projectsSetupEventChannel, wrapped);
@@ -163,6 +193,15 @@ const api: DesktopApiWithGitExtras = {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: PreviewEvent) => listener(payload);
       ipcRenderer.on(IPC_CHANNELS.previewEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.previewEvent, wrapped);
+    }
+  },
+  codePanel: {
+    openPopout: (input?: { projectName?: string }) => ipcRenderer.invoke(codePanelOpenPopoutChannel, input),
+    closePopout: () => ipcRenderer.invoke(codePanelClosePopoutChannel),
+    onEvent: (listener: (event: CodePanelEvent) => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, payload: CodePanelEvent) => listener(payload);
+      ipcRenderer.on(codePanelEventChannel, wrapped);
+      return () => ipcRenderer.off(codePanelEventChannel, wrapped);
     }
   },
   threads: {

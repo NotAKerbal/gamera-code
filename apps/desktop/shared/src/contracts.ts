@@ -9,6 +9,7 @@ import type {
   GitSnapshot,
   GitRepositoryCandidate,
   GitState,
+  CodePanelEvent,
   InstallDependenciesResult,
   InstallDependencyKey,
   InstallStatus,
@@ -18,6 +19,8 @@ import type {
   OrchestrationChild,
   OrchestrationRun,
   ProjectFileEntry,
+  ProjectDirectoryEntry,
+  ProjectFileContent,
   PreviewEvent,
   ThreadEventsPage,
   PermissionMode,
@@ -61,6 +64,9 @@ export interface DesktopApi {
     listSystemTerminals: (input?: { refresh?: boolean }) => Promise<SystemTerminalOption[]>;
     openFiles: (input: { projectId: string }) => Promise<{ ok: boolean }>;
     listFiles: (input: { projectId: string; limit?: number }) => Promise<ProjectFileEntry[]>;
+    listDirectory: (input: { projectId: string; relativePath?: string }) => Promise<ProjectDirectoryEntry[]>;
+    readFile: (input: { projectId: string; relativePath: string }) => Promise<ProjectFileContent>;
+    writeFile: (input: { projectId: string; relativePath: string; content: string }) => Promise<{ ok: boolean; mtimeMs: number }>;
     openWebLink: (input: { url: string; name?: string; projectName?: string; focus?: boolean }) => Promise<{ ok: boolean }>;
     getWebLinkState: () => Promise<{ open: boolean; url?: string }>;
     onSetupEvent: (listener: (event: ProjectSetupEvent) => void) => () => void;
@@ -99,6 +105,11 @@ export interface DesktopApi {
     navigate: (input: { url: string; projectName?: string }) => Promise<{ ok: boolean }>;
     openDevTools: () => Promise<{ ok: boolean }>;
     onEvent: (listener: (event: PreviewEvent) => void) => () => void;
+  };
+  codePanel: {
+    openPopout: (input?: { projectName?: string }) => Promise<{ ok: boolean }>;
+    closePopout: () => Promise<{ ok: boolean }>;
+    onEvent: (listener: (event: CodePanelEvent) => void) => () => void;
   };
   threads: {
     list: (input?: { projectId?: string; includeArchived?: boolean }) => Promise<Thread[]>;
