@@ -27,6 +27,7 @@ interface RunningProjectTerminal {
 interface ProjectTerminalManagerDeps {
   repository: Repository;
   emit: (event: ProjectTerminalEvent) => void;
+  hasActiveAgentSessionInProject?: (projectId: string) => boolean;
 }
 
 const MAX_OUTPUT_CHARS = 12000;
@@ -187,7 +188,8 @@ export class ProjectTerminalManager {
     if (previous) {
       const previousSettings = this.deps.repository.getProjectSettings(previous);
       const previousBehavior = this.resolveSwitchBehavior(previousSettings);
-      if (previousBehavior === "start_stop") {
+      const hasActiveAgentSession = this.deps.hasActiveAgentSessionInProject?.(previous) ?? false;
+      if (previousBehavior === "start_stop" && !hasActiveAgentSession) {
         this.stop(previous);
       }
     }

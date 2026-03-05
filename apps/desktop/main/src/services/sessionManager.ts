@@ -497,6 +497,14 @@ const isUserInputRequestTool = (tool: string | null) => {
   return normalized === "request_user_input" || normalized.endsWith(".request_user_input");
 };
 
+const usesPlaywrightInteractiveSkill = (skills: Array<{ name: string; path: string }> = []): boolean => {
+  return skills.some((skill) => {
+    const name = (skill.name ?? "").trim().toLowerCase();
+    const normalizedPath = (skill.path ?? "").replace(/\\/g, "/").toLowerCase();
+    return name === "playwright-interactive" || normalizedPath.includes("/playwright-interactive/");
+  });
+};
+
 const ACTIVITY_EVENT_PREFIX = "__codeapp_activity__:";
 const SUBTHREAD_PROPOSAL_TAG = "subthread_proposal_v1";
 const SUBTHREAD_PROPOSAL_PATTERN = new RegExp(
@@ -672,6 +680,16 @@ export class SessionManager {
 
   constructor(private readonly deps: SessionManagerDeps) {}
 
+  hasActiveAgentSessionInProject(projectId: string): boolean {
+    for (const [threadId] of this.sessions) {
+      const thread = this.deps.repository.getThread(threadId);
+      if (thread?.projectId === projectId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   async start(thread: Thread, projectPath: string, options?: CodexThreadOptions): Promise<Session> {
     const existing = this.deps.repository.getSession(thread.id);
     const existingRuntime = this.sessions.get(thread.id);
@@ -772,11 +790,12 @@ export class SessionManager {
     }
 
     let running = this.sessions.get(threadId);
+    const effectiveOptions = this.applySkillRuntimeOverrides(threadId, options, skills ?? []);
     if (thread.provider === "codex") {
-      await this.start(thread, cwd, options);
+      await this.start(thread, cwd, effectiveOptions);
       running = this.sessions.get(threadId);
     } else {
-      running = running ?? ((await this.startOrResumeRuntime(thread, cwd, options)) ?? undefined);
+      running = running ?? ((await this.startOrResumeRuntime(thread, cwd, effectiveOptions)) ?? undefined);
     }
     if (!running) {
       return false;
@@ -798,7 +817,7 @@ export class SessionManager {
       return true;
     }
 
-    const codexInput = this.buildCodexInput(input, savedAttachments, skills ?? []);
+    const codexInput = this.buildCodexInput(thread.projectId, input, savedAttachments, skills ?? []);
     running.runQueue = running.runQueue
       .then(() => this.runCodexPromptWithRecovery(running, codexInput))
       .catch((error) => {
@@ -837,7 +856,7 @@ export class SessionManager {
     }
 
     const savedAttachments = this.persistPromptAttachments(threadId, attachments ?? []);
-    const codexInput = this.buildCodexInput(input, savedAttachments, skills ?? []);
+    const codexInput = this.buildCodexInput(thread.projectId, input, savedAttachments, skills ?? []);
     const inputItems: CodexInputItem[] =
       typeof codexInput === "string" ? [{ type: "text", text: codexInput }] : codexInput;
     await running.appServer.steerTurn(inputItems);
@@ -1526,6 +1545,7 @@ export class SessionManager {
   }
 
   private buildCodexInput(
+    projectId: string,
     input: string,
     attachments: StoredAttachment[],
     skills: Array<{ name: string; path: string }>
@@ -1559,9 +1579,16 @@ export class SessionManager {
             "Use these attached file references directly when answering."
           ].join("\n")
         : "";
+    const previewUrl = this.deps.repository.getProjectSettings(projectId).lastDetectedPreviewUrl?.trim() ?? "";
+    const playwrightPreviewHint =
+      usesPlaywrightInteractiveSkill(skills) && previewUrl
+        ? `Detected preview URL: ${previewUrl}\nIf you use Playwright tools, navigate to this URL first.`
+        : "";
     parts.push({
       type: "text",
-      text: [trimmed || "Please analyze the attached files.", attachmentManifest].filter(Boolean).join("\n\n")
+      text: [trimmed || "Please analyze the attached files.", attachmentManifest, playwrightPreviewHint]
+        .filter(Boolean)
+        .join("\n\n")
     });
     attachments.forEach((attachment) => {
       if (attachment.kind === "image") {
@@ -1801,9 +1828,44 @@ export class SessionManager {
     return normalized.length > 0 ? normalized : undefined;
   }
 
+  private applySkillRuntimeOverrides(
+    threadId: string,
+    options: CodexThreadOptions | undefined,
+    skills: Array<{ name: string; path: string }>
+  ): CodexThreadOptions | undefined {
+    if (!usesPlaywrightInteractiveSkill(skills)) {
+      return options;
+    }
+
+    const sandboxMode = options?.sandboxMode;
+    const networkAccessEnabled = options?.networkAccessEnabled;
+    const alreadyCompatible = sandboxMode === "danger-full-access" && networkAccessEnabled === true;
+    if (alreadyCompatible) {
+      return options;
+    }
+
+    this.emitSessionEvent(
+      threadId,
+      "progress",
+      "Playwright interactive skill detected. Enabling danger-full-access sandbox and network access.",
+      {
+        provider: "codex",
+        category: "skill_runtime_override",
+        skill: "playwright-interactive"
+      }
+    );
+
+    return {
+      ...(options ?? {}),
+      sandboxMode: "danger-full-access",
+      networkAccessEnabled: true
+    };
+  }
+
   private buildThreadEnv(threadId: string, projectId: string, provider: Thread["provider"]) {
     const settings = this.deps.repository.getSettings();
     const projectSettings = this.deps.repository.getProjectSettings(projectId);
+    const previewUrl = projectSettings.lastDetectedPreviewUrl?.trim() ?? "";
     const merged = withBundledRipgrepInPath(
       withRuntimePath({
         ...process.env,
@@ -1813,7 +1875,9 @@ export class SessionManager {
         CLICOLOR: "0",
         TERM: "dumb",
         CODE_APP_THREAD_ID: threadId,
-        CODE_APP_PROVIDER: provider
+        CODE_APP_PROVIDER: provider,
+        CODE_APP_PROJECT_ID: projectId,
+        ...(previewUrl ? { CODE_APP_PREVIEW_URL: previewUrl } : {})
       })
     );
     const env = Object.fromEntries(

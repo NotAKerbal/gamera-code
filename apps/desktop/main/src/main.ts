@@ -25,6 +25,8 @@ let settingsWindow: BrowserWindow | null = null;
 let webLinkCurrentUrl: string | null = null;
 const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
 const PREVIEW_LOAD_BASE_DELAY_MS = 350;
+const PREVIEW_WINDOW_TITLE_BASE = "Project Preview";
+const PREVIEW_AUTOMATION_KIND = "preview-browser";
 const APP_ICON_FILENAME = "icon_rounded.png";
 const MAIN_WINDOW_SPLASH_QUERY_KEY = "bootSplash";
 
@@ -353,6 +355,7 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="codeapp-window-kind" content="${PREVIEW_AUTOMATION_KIND}" />
     <title>Project Preview</title>
     <style>
       :root {
@@ -482,41 +485,54 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
       }
     </style>
   </head>
-  <body>
+  <body data-codeapp-window-kind="${PREVIEW_AUTOMATION_KIND}">
     <div class="app-header${isMac ? " macos" : ""}">
       <div class="app-brand">
         <img src="${safeIconSrc}" class="app-icon" alt="" />
         <div class="app-title">GameraCode - Browser</div>
       </div>
       ${!isMac ? `<div class="window-controls">
-        <button id="windowMinBtn" class="window-btn" title="Minimize">-</button>
-        <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">□</button>
-        <button id="windowCloseBtn" class="window-btn close" title="Close">×</button>
+        <button id="windowMinBtn" data-testid="preview-window-minimize" class="window-btn" title="Minimize">-</button>
+        <button id="windowMaxBtn" data-testid="preview-window-maximize" class="window-btn" title="Maximize or restore">□</button>
+        <button id="windowCloseBtn" data-testid="preview-window-close" class="window-btn close" title="Close">×</button>
       </div>` : ""}
     </div>
     <div class="toolbar">
-      <input id="urlInput" class="url" value="${safeUrl}" />
-      <button id="goBtn" class="btn">Go</button>
-      <button id="refreshBtn" class="btn">Refresh</button>
-      <span id="status" class="status">Ready</span>
+      <input id="urlInput" data-testid="preview-url-input" class="url" value="${safeUrl}" />
+      <button id="goBtn" data-testid="preview-go" class="btn">Go</button>
+      <button id="refreshBtn" data-testid="preview-refresh" class="btn">Refresh</button>
+      <span id="status" data-testid="preview-status" class="status">Ready</span>
     </div>
     <div class="layout">
       <div class="viewport-wrap">
-        <iframe id="previewFrame" allow="clipboard-read; clipboard-write"></iframe>
+        <iframe
+          id="previewFrame"
+          data-testid="preview-frame"
+          name="codeapp-preview-frame"
+          allow="clipboard-read; clipboard-write"
+        ></iframe>
       </div>
     </div>
     <script>
+      window.name = "codeapp-preview-browser";
       const allowLocalOnly = ${allowLocalOnly ? "true" : "false"};
       const api = window.desktopAPI;
       const allowedHosts = new Set(["localhost", "127.0.0.1"]);
       const statusEl = document.getElementById("status");
       const urlInput = document.getElementById("urlInput");
       const frame = document.getElementById("previewFrame");
+      const previewState = {
+        kind: "${PREVIEW_AUTOMATION_KIND}",
+        lastRequestedUrl: "",
+        lastLoadedUrl: "",
+        status: "Ready"
+      };
       const windowMinBtn = document.getElementById("windowMinBtn");
       const windowMaxBtn = document.getElementById("windowMaxBtn");
       const windowCloseBtn = document.getElementById("windowCloseBtn");
       const setStatus = (text) => {
-        if (statusEl) statusEl.textContent = text;
+        previewState.status = String(text || "");
+        if (statusEl) statusEl.textContent = previewState.status;
       };
       const normalizeUrl = (value) => {
         try {
@@ -534,13 +550,19 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
           setStatus(allowLocalOnly ? "Invalid preview URL. Use localhost/127.0.0.1." : "Invalid URL.");
           return false;
         }
+        previewState.lastRequestedUrl = normalized;
         if (urlInput) urlInput.value = normalized;
         frame.src = normalized;
         setStatus(attempts > 0 ? "Retrying..." : "Loading...");
         return true;
       };
+      window.__codeappPreviewBrowser = {
+        kind: "${PREVIEW_AUTOMATION_KIND}",
+        getState: () => ({ ...previewState }),
+        navigate: (nextUrl) => tryNavigate(nextUrl)
+      };
       window.__codeappNavigate = (nextUrl) => {
-        tryNavigate(nextUrl);
+        return tryNavigate(nextUrl);
       };
       const syncWindowState = async () => {
         if (!api?.windowControls || !windowMaxBtn) {
@@ -595,6 +617,7 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
           }, 500);
           return;
         }
+        previewState.lastLoadedUrl = href || frame.src || "";
         setStatus("Loaded");
       });
       document.getElementById("goBtn").addEventListener("click", () => {
@@ -619,7 +642,7 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
 
 const formatPreviewWindowTitle = (projectName?: string) => {
   const name = projectName?.trim();
-  return name ? `Project Preview — ${name}` : "Project Preview";
+  return name ? `${PREVIEW_WINDOW_TITLE_BASE} — ${name}` : PREVIEW_WINDOW_TITLE_BASE;
 };
 
 const ensurePreviewPopout = async (url: string, projectName?: string) => {
@@ -1363,10 +1386,18 @@ const loadEmbeddedBrowserWindow = async (window: BrowserWindow, url: string, all
 };
 
 const navigateEmbeddedBrowserWindow = async (window: BrowserWindow, url: string) => {
-  await window.webContents.executeJavaScript(
-    `window.__codeappNavigate && window.__codeappNavigate("${escapeJsString(url)}");`,
+  const didNavigate = await window.webContents.executeJavaScript(
+    `(() => {
+      if (typeof window.__codeappNavigate !== "function") {
+        return false;
+      }
+      return Boolean(window.__codeappNavigate("${escapeJsString(url)}"));
+    })();`,
     true
   );
+  if (!didNavigate) {
+    throw new Error("Preview browser navigate bridge is unavailable.");
+  }
 };
 
 const formatGitWindowTitle = (projectName?: string) => {
@@ -1548,6 +1579,7 @@ const bootstrap = async () => {
   });
   const projectTerminalManager = new ProjectTerminalManager({
     repository,
+    hasActiveAgentSessionInProject: (projectId) => sessionManager.hasActiveAgentSessionInProject(projectId),
     emit: (event) => emitProjectTerminalEvent(event)
   });
 

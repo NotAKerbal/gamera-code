@@ -249,6 +249,13 @@ const SUBTHREAD_PROPOSAL_INSTRUCTIONS = [
   "Use at most 8 tasks. Keep keys unique and lowercase. Do not emit this block for small tasks."
 ].join("\n");
 
+const buildThreadConfig = () => ({
+  features: {
+    collaboration_modes: true,
+    js_repl: true
+  }
+});
+
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly env: Record<string, string>;
@@ -345,11 +352,7 @@ export class CodexAppServerClient {
       model: options.model ?? null,
       sandbox: options.sandboxMode,
       approvalPolicy: options.approvalPolicy,
-      config: {
-        features: {
-          collaboration_modes: true
-        }
-      }
+      config: buildThreadConfig()
     };
 
     if (existingProviderThreadId) {
@@ -490,11 +493,7 @@ export class CodexAppServerClient {
         model: options.model ?? null,
         sandbox: options.sandboxMode,
         approvalPolicy: options.approvalPolicy,
-        config: {
-          features: {
-            collaboration_modes: true
-          }
-        }
+        config: buildThreadConfig()
       })
     );
     const forkedId = asString(asRecord(result?.thread)?.id);

@@ -97,6 +97,40 @@ describe("projectTerminalManager switching", () => {
     expect(startSpy).toHaveBeenCalledWith("p1", undefined, true);
   });
 
+  it("skips stopping previous project when an agent session is active there", () => {
+    const repository = {
+      getProjectSettings: vi.fn((projectId: string) => ({
+        ...baseSettings,
+        projectId
+      })),
+      getSettings: vi.fn(() => ({
+        projectTerminalSwitchBehaviorDefault: "start_stop"
+      }))
+    } as unknown as ConstructorParameters<typeof ProjectTerminalManager>[0]["repository"];
+
+    const manager = new ProjectTerminalManager({
+      repository,
+      hasActiveAgentSessionInProject: vi.fn((projectId: string) => projectId === "p1"),
+      emit: vi.fn()
+    });
+
+    const stopSpy = vi.spyOn(manager, "stop").mockReturnValue({ ok: true });
+    const startSpy = vi.spyOn(manager, "start").mockImplementation((projectId: string) => ({
+      projectId,
+      running: true,
+      terminals: [],
+      outputTail: "",
+      updatedAt: new Date().toISOString()
+    }));
+
+    manager.setActiveProject("p1");
+    manager.setActiveProject("p2");
+
+    expect(startSpy).toHaveBeenCalledWith("p1", undefined, true);
+    expect(stopSpy).not.toHaveBeenCalledWith("p1");
+    expect(startSpy).toHaveBeenCalledWith("p2", undefined, true);
+  });
+
   it("does not restart already-running terminals during auto-start-only start", () => {
     const repository = {
       getProject: vi.fn((projectId: string) => ({ id: projectId, name: projectId, path: process.cwd() })),
