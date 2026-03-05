@@ -85,6 +85,7 @@ export const IPC_CHANNELS = {
   gitUnstage: "git:unstage",
   gitDiscard: "git:discard",
   gitCommit: "git:commit",
+  gitResolveConflictsAi: "git:resolveConflictsAi",
   gitInit: "git:init",
   gitCheckoutBranch: "git:checkoutBranch",
   gitCreateBranch: "git:createBranch",

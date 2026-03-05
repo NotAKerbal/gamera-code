@@ -50,6 +50,7 @@ interface RunningCodexSession {
 }
 
 interface StoredAttachment {
+  kind: "image" | "text";
   name: string;
   mimeType: string;
   size: number;
@@ -177,6 +178,27 @@ const THREAD_METADATA_SCHEMA = {
   required: ["title", "description"]
 } as const;
 
+const MERGE_RESOLUTION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summary: { type: "string" },
+    files: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" }
+        },
+        required: ["path", "content"]
+      }
+    }
+  },
+  required: ["summary", "files"]
+} as const;
+
 const normalizeMetadataField = (value: string, maxLength: number, maxWords?: number) =>
   value
     .replace(/\s+/g, " ")
@@ -209,24 +231,35 @@ const extensionFromMimeType = (mimeType: string): string => {
   return "png";
 };
 
-const parseDataUrlImage = (dataUrl: string): { mimeType: string; data: Buffer } | null => {
-  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(dataUrl.trim());
-  if (!match?.[1] || !match[2]) {
+const DEFAULT_TEXT_ATTACHMENT_MIME = "text/plain";
+
+const parseDataUrlPayload = (dataUrl: string): { mimeType: string; data: Buffer } | null => {
+  const match = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/i.exec(dataUrl.trim());
+  if (!match) {
     return null;
   }
+  const mimeType = (match[1] ?? DEFAULT_TEXT_ATTACHMENT_MIME).toLowerCase().trim();
+  const isBase64 = Boolean(match[2]);
+  const rawPayload = match[3] ?? "";
 
   try {
-    const decoded = Buffer.from(match[2].replace(/\s+/g, ""), "base64");
+    const decoded = isBase64
+      ? Buffer.from(rawPayload.replace(/\s+/g, ""), "base64")
+      : Buffer.from(decodeURIComponent(rawPayload), "utf8");
     if (decoded.length === 0) {
       return null;
     }
     return {
-      mimeType: match[1].toLowerCase(),
+      mimeType,
       data: decoded
     };
   } catch {
     return null;
   }
+};
+
+const inferAttachmentKind = (mimeType: string): "image" | "text" => {
+  return mimeType.startsWith("image/") ? "image" : "text";
 };
 
 const lastLinePreview = (text: string): string | undefined => {
@@ -1498,13 +1531,33 @@ export class SessionManager {
         path: skillPath
       });
     });
+    const attachmentManifest =
+      attachments.length > 0
+        ? [
+            "Attached file references:",
+            ...attachments.map((attachment, index) => {
+              const typeLabel = attachment.kind === "image" ? "image" : "text/code";
+              return `${index + 1}. [${typeLabel}] ${attachment.name} (${attachment.path})`;
+            }),
+            "Use these attached file references directly when answering."
+          ].join("\n")
+        : "";
     parts.push({
       type: "text",
-      text: trimmed || "Please analyze the attached image(s)."
+      text: [trimmed || "Please analyze the attached files.", attachmentManifest].filter(Boolean).join("\n\n")
     });
     attachments.forEach((attachment) => {
+      if (attachment.kind === "image") {
+        parts.push({
+          type: "local_image",
+          path: attachment.path
+        });
+        return;
+      }
+
       parts.push({
-        type: "local_image",
+        type: "mention",
+        name: attachment.name,
         path: attachment.path
       });
     });
@@ -1512,55 +1565,221 @@ export class SessionManager {
     return parts;
   }
 
+  async resolveMergeConflicts(
+    cwd: string,
+    files: Array<{ path: string; content: string }>
+  ): Promise<{ files: Array<{ path: string; content: string }>; summary?: string } | null> {
+    const normalizedFiles = files
+      .map((file) => {
+        const pathValue = asString(file.path);
+        if (!pathValue) {
+          return null;
+        }
+        const contentValue = typeof file.content === "string" ? file.content : "";
+        if (!contentValue.includes("<<<<<<<") || !contentValue.includes(">>>>>>>")) {
+          return null;
+        }
+        return {
+          path: pathValue,
+          content: contentValue
+        };
+      })
+      .filter((entry): entry is { path: string; content: string } => Boolean(entry));
+
+    if (normalizedFiles.length === 0) {
+      return null;
+    }
+
+    const settings = this.deps.repository.getSettings();
+    const env = Object.fromEntries(
+      Object.entries(
+        withRuntimePath({
+          ...process.env,
+          ...settings.envVars,
+          FORCE_COLOR: "0",
+          NO_COLOR: "1",
+          CLICOLOR: "0",
+          TERM: "dumb",
+          CODE_APP_PROVIDER: "codex"
+        })
+      ).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+
+    const threadOptions = normalizeCodexThreadOptions(cwd, {
+      ...settings.codexDefaults,
+      collaborationMode: "coding",
+      sandboxMode: "read-only"
+    });
+    const prompt = [
+      "You are resolving git merge conflicts.",
+      "For each provided file, remove all conflict markers and return a complete resolved file content.",
+      "Rules:",
+      "- Keep the output compileable and internally consistent.",
+      "- Preserve intended behavior from both sides when possible.",
+      "- Do not add extra commentary inside file contents.",
+      "- Every input path must appear once in the output files array.",
+      "",
+      "Conflicted files:",
+      ...normalizedFiles.flatMap((file) => [`<file path=\"${file.path}\">`, file.content, "</file>"])
+    ].join("\n");
+
+    const appServer = new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: `merge-conflicts-${Date.now()}`
+    });
+    await appServer.connect();
+
+    try {
+      const providerThreadId = await appServer.startOrResumeThread(null, threadOptions);
+      let latestDraft = "";
+      let finalText = "";
+      await appServer.runTurn(
+        providerThreadId,
+        [{ type: "text", text: prompt }],
+        threadOptions,
+        (event) => {
+          const eventType = asString((event as UnknownRecord).type) ?? "";
+          if (eventType !== "item.updated" && eventType !== "item.completed") {
+            return;
+          }
+          const item = asRecord((event as UnknownRecord).item);
+          if (!item || asString(item.type) !== "agent_message") {
+            return;
+          }
+          const text = sanitizePtyOutput(asString(item.text) ?? "");
+          if (!text) {
+            return;
+          }
+          if (eventType === "item.completed") {
+            finalText = text;
+          } else {
+            latestDraft = text;
+          }
+        },
+        {
+          outputSchema: MERGE_RESOLUTION_SCHEMA
+        }
+      );
+
+      const payload = (finalText || latestDraft).trim();
+      if (!payload) {
+        return null;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        const match = /\{[\s\S]*\}/.exec(payload);
+        if (!match) {
+          return null;
+        }
+        parsed = JSON.parse(match[0]);
+      }
+      const record = asRecord(parsed);
+      if (!record) {
+        return null;
+      }
+      const summary = asString(record.summary) ?? undefined;
+      const filesRaw = Array.isArray(record.files) ? record.files : [];
+      const resolvedFiles = filesRaw
+        .map((entry) => {
+          const row = asRecord(entry);
+          const pathValue = asString(row?.path);
+          const contentValue = typeof row?.content === "string" ? row.content : null;
+          if (!pathValue || contentValue === null) {
+            return null;
+          }
+          return {
+            path: pathValue,
+            content: contentValue
+          };
+        })
+        .filter((entry): entry is { path: string; content: string } => Boolean(entry));
+
+      if (resolvedFiles.length === 0) {
+        return null;
+      }
+      return {
+        files: resolvedFiles,
+        summary
+      };
+    } catch {
+      return null;
+    } finally {
+      await appServer.close().catch(() => undefined);
+    }
+  }
+
   private persistPromptAttachments(threadId: string, attachments: PromptAttachment[]): StoredAttachment[] {
     if (attachments.length === 0) {
       return [];
     }
 
-    const { threadDir } = this.deps.repository.getThreadStoragePaths(threadId);
-    const attachDir = path.join(threadDir, "attachments");
+    const thread = this.deps.repository.getThread(threadId);
+    const project = thread ? this.deps.repository.getProject(thread.projectId) : null;
+    const attachDir = project
+      ? path.join(project.path, ".code-app", "attachments", threadId)
+      : path.join(this.deps.repository.getThreadStoragePaths(threadId).threadDir, "attachments");
     mkdirSync(attachDir, { recursive: true });
 
-    return attachments
-      .map((attachment, index) => {
-        const name = asString(attachment.name) ?? `image-${index + 1}.png`;
-        const parsed = parseDataUrlImage(attachment.dataUrl);
-        if (!parsed) {
-          return null;
-        }
+    const stored: StoredAttachment[] = [];
+    attachments.forEach((attachment, index) => {
+      const name = asString(attachment.name) ?? `attachment-${index + 1}`;
+      const parsed = parseDataUrlPayload(attachment.dataUrl);
+      if (!parsed) {
+        return;
+      }
+      const kind = inferAttachmentKind(parsed.mimeType);
 
-        const extension = extensionFromMimeType(parsed.mimeType);
-        const safeBase = name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/\.[a-zA-Z0-9]+$/, "");
-        const fileName = `${Date.now()}-${index + 1}-${safeBase || "image"}.${extension}`;
+      if (kind === "text") {
+        const safeBase = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const extension = safeBase.includes(".") ? "" : ".txt";
+        const fileName = `${Date.now()}-${index + 1}-${safeBase || "attachment"}${extension}`;
         const filePath = path.join(attachDir, fileName);
         writeFileSync(filePath, parsed.data);
-
-        return {
+        stored.push({
+          kind: "text",
           name,
-          mimeType: parsed.mimeType,
+          mimeType: parsed.mimeType || DEFAULT_TEXT_ATTACHMENT_MIME,
           size: typeof attachment.size === "number" ? attachment.size : parsed.data.length,
           path: filePath
-        } satisfies StoredAttachment;
-      })
-      .filter((attachment): attachment is StoredAttachment => Boolean(attachment));
+        });
+        return;
+      }
+
+      const extension = extensionFromMimeType(parsed.mimeType);
+      const safeBase = name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/\.[a-zA-Z0-9]+$/, "");
+      const fileName = `${Date.now()}-${index + 1}-${safeBase || "image"}.${extension}`;
+      const filePath = path.join(attachDir, fileName);
+      writeFileSync(filePath, parsed.data);
+      stored.push({
+        kind: "image",
+        name,
+        mimeType: parsed.mimeType,
+        size: typeof attachment.size === "number" ? attachment.size : parsed.data.length,
+        path: filePath
+      });
+    });
+
+    return stored;
   }
 
   private normalizePromptAttachmentsForMessage(attachments: PromptAttachment[]): PromptAttachment[] | undefined {
-    const normalized = attachments
-      .map((attachment, index) => {
-        const parsed = parseDataUrlImage(attachment.dataUrl);
-        if (!parsed) {
-          return null;
-        }
-
-        return {
-          name: asString(attachment.name) ?? `image-${index + 1}.png`,
-          mimeType: parsed.mimeType,
-          dataUrl: attachment.dataUrl.trim(),
-          size: typeof attachment.size === "number" && Number.isFinite(attachment.size) ? attachment.size : parsed.data.length
-        } satisfies PromptAttachment;
-      })
-      .filter((attachment): attachment is PromptAttachment => Boolean(attachment));
+    const normalized: PromptAttachment[] = [];
+    attachments.forEach((attachment, index) => {
+      const parsed = parseDataUrlPayload(attachment.dataUrl);
+      if (!parsed) {
+        return;
+      }
+      normalized.push({
+        name: asString(attachment.name) ?? `attachment-${index + 1}`,
+        mimeType: parsed.mimeType,
+        dataUrl: attachment.dataUrl.trim(),
+        size: typeof attachment.size === "number" && Number.isFinite(attachment.size) ? attachment.size : parsed.data.length
+      });
+    });
 
     return normalized.length > 0 ? normalized : undefined;
   }

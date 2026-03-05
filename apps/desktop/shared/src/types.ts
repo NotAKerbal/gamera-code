@@ -26,6 +26,7 @@ export interface CodexThreadOptions {
 }
 
 export interface PromptAttachment {
+  kind?: "image" | "text";
   name: string;
   mimeType: string;
   dataUrl: string;

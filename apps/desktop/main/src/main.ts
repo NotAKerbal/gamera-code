@@ -1543,7 +1543,8 @@ const bootstrap = async () => {
   });
   const gitService = new GitService({
     suggestCommitMessage: async (input) =>
-      sessionManager.suggestCommitMessage(input.cwd, input.files, input.diff)
+      sessionManager.suggestCommitMessage(input.cwd, input.files, input.diff),
+    resolveMergeConflicts: async (input) => sessionManager.resolveMergeConflicts(input.cwd, input.files)
   });
   const projectTerminalManager = new ProjectTerminalManager({
     repository,

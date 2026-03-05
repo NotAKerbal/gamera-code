@@ -219,12 +219,25 @@ const UserMessageContent = ({ content, attachments }: { content: string; attachm
       {normalizedAttachments.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {normalizedAttachments.map((attachment, index) => (
-            <img
-              key={`${attachment.name}-${index}`}
-              src={attachment.dataUrl}
-              alt={attachment.name}
-              className="h-24 w-auto max-w-[220px] rounded-md border border-border/70 object-cover"
-            />
+            attachment.mimeType.startsWith("image/") ? (
+              <img
+                key={`${attachment.name}-${index}`}
+                src={attachment.dataUrl}
+                alt={attachment.name}
+                className="h-24 w-auto max-w-[220px] rounded-md border border-border/70 object-cover"
+              />
+            ) : (
+              <div
+                key={`${attachment.name}-${index}`}
+                className="inline-flex max-w-[240px] items-center gap-2 rounded-md border border-border/70 bg-zinc-900/80 px-2 py-1 text-xs text-slate-200"
+                title={attachment.name}
+              >
+                <span className="rounded border border-border/70 bg-zinc-800 px-1 text-[10px] uppercase tracking-wide text-slate-300">
+                  file
+                </span>
+                <span className="truncate">{attachment.name}</span>
+              </div>
+            )
           ))}
         </div>
       ) : null}

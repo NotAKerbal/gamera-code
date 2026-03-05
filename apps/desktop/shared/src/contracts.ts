@@ -199,6 +199,7 @@ export interface DesktopApi {
     unstage: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
     discard: (input: { projectId: string; path?: string }) => Promise<GitCommandResult>;
     commit: (input: { projectId: string; message?: string }) => Promise<GitCommitResult>;
+    resolveConflictsAi: (input: { projectId: string }) => Promise<GitCommandResult>;
     init: (input: { projectId: string }) => Promise<GitCommandResult>;
     checkoutBranch: (input: { projectId: string; branch: string }) => Promise<GitCommandResult>;
     createBranch: (input: { projectId: string; branch: string; checkout?: boolean }) => Promise<GitCommandResult>;

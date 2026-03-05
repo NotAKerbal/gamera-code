@@ -1654,6 +1654,10 @@ webview {
   @apply h-9 w-9 rounded object-cover;
 }
 
+.attachment-thumb-file {
+  @apply flex items-center justify-center border border-zinc-600 bg-zinc-900 text-[10px] font-semibold tracking-wide text-zinc-300;
+}
+
 .attachment-meta {
   @apply min-w-0 flex-1;
 }

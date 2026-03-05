@@ -222,30 +222,29 @@ const parseMessageAttachments = (value: unknown): MessageEvent["attachments"] =>
     return undefined;
   }
 
-  const attachments = value
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return null;
-      }
-      const row = entry as Record<string, unknown>;
-      const name = typeof row.name === "string" ? row.name.trim() : "";
-      const mimeType = typeof row.mimeType === "string" ? row.mimeType.trim() : "";
-      const dataUrl = typeof row.dataUrl === "string" ? row.dataUrl.trim() : "";
-      const size = typeof row.size === "number" && Number.isFinite(row.size) ? Math.max(0, row.size) : 0;
-      if (!name || !mimeType || !dataUrl) {
-        return null;
-      }
-      if (!/^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(dataUrl)) {
-        return null;
-      }
-      return {
-        name,
-        mimeType,
-        dataUrl,
-        size
-      };
-    })
-    .filter((entry): entry is NonNullable<MessageEvent["attachments"]>[number] => Boolean(entry));
+  const attachments: NonNullable<MessageEvent["attachments"]> = [];
+  value.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const row = entry as Record<string, unknown>;
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    const mimeType = typeof row.mimeType === "string" ? row.mimeType.trim() : "";
+    const dataUrl = typeof row.dataUrl === "string" ? row.dataUrl.trim() : "";
+    const size = typeof row.size === "number" && Number.isFinite(row.size) ? Math.max(0, row.size) : 0;
+    if (!name || !mimeType || !dataUrl) {
+      return;
+    }
+    if (!/^data:[^;,]+(?:;base64)?,/i.test(dataUrl)) {
+      return;
+    }
+    attachments.push({
+      name,
+      mimeType,
+      dataUrl,
+      size
+    });
+  });
 
   return attachments.length > 0 ? attachments : undefined;
 };

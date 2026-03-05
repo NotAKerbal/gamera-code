@@ -730,6 +730,16 @@ export const App = () => {
     () => (activeGitState?.files ?? []).filter((file) => file.unstaged || file.untracked),
     [activeGitState?.files]
   );
+  const activeConflictFiles = useMemo(
+    () => {
+      const conflictPairs = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+      return (activeGitState?.files ?? []).filter((file) => {
+        const pair = `${file.indexStatus}${file.workTreeStatus}`;
+        return conflictPairs.has(pair);
+      });
+    },
+    [activeGitState?.files]
+  );
   const gitBranchInput = gitBranchSearch.trim();
   const deferredGitBranchInput = useDeferredValue(gitBranchInput);
   const filteredBranches = useMemo(() => {
@@ -776,6 +786,7 @@ export const App = () => {
     [activeUnstagedFiles]
   );
   const hasStageableFiles = activeUnstagedFiles.length > 0;
+  const hasMergeConflicts = activeConflictFiles.length > 0;
   const isWorkingTreeClean = hasStageableFiles === false && activeStagedFiles.length === 0;
   const activeRunState: ThreadRunState = activeThreadId ? runStateByThreadId[activeThreadId] ?? "idle" : "idle";
   const activeThreadSendPending = activeThreadId ? Boolean(sendPendingByThreadId[activeThreadId]) : false;
@@ -1505,9 +1516,64 @@ export const App = () => {
       }));
     }
   };
-  const addImageFiles = async (files: File[]) => {
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    if (imageFiles.length === 0) {
+  const TEXT_FILE_EXTENSIONS = new Set([
+    "txt",
+    "md",
+    "markdown",
+    "json",
+    "jsonc",
+    "yaml",
+    "yml",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "xml",
+    "html",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    "js",
+    "jsx",
+    "ts",
+    "tsx",
+    "mjs",
+    "cjs",
+    "py",
+    "go",
+    "rs",
+    "java",
+    "kt",
+    "swift",
+    "rb",
+    "php",
+    "sh",
+    "bash",
+    "zsh",
+    "ps1",
+    "sql",
+    "c",
+    "cc",
+    "cpp",
+    "h",
+    "hpp"
+  ]);
+  const MAX_TEXT_ATTACHMENT_BYTES = 300 * 1024;
+  const isTextLikeFile = (file: File) => {
+    if (file.type.startsWith("text/")) {
+      return true;
+    }
+    if (/(json|xml|yaml|javascript|typescript|x-sh|x-httpd-php|x-python|x-rust|x-c|x-c\+\+)/i.test(file.type)) {
+      return true;
+    }
+    const ext = file.name.toLowerCase().split(".").pop() ?? "";
+    return TEXT_FILE_EXTENSIONS.has(ext);
+  };
+
+  const addComposerFiles = async (files: File[]) => {
+    const supportedFiles = files.filter((file) => file.type.startsWith("image/") || isTextLikeFile(file));
+    if (supportedFiles.length === 0) {
       return;
     }
 
@@ -1517,25 +1583,34 @@ export const App = () => {
       return;
     }
 
-    const picked = imageFiles.slice(0, availableSlots);
-    if (picked.length < imageFiles.length) {
-      setLogs((prev) => [...prev, `Only the first ${availableSlots} images were added.`]);
+    const picked = supportedFiles.slice(0, availableSlots);
+    if (picked.length < supportedFiles.length) {
+      setLogs((prev) => [...prev, `Only the first ${availableSlots} attachments were added.`]);
     }
 
     const additions: ComposerAttachment[] = [];
     for (const file of picked) {
       try {
+        if (!file.type.startsWith("image/") && file.size > MAX_TEXT_ATTACHMENT_BYTES) {
+          setLogs((prev) => [
+            ...prev,
+            `Attachment skipped (${file.name}): text/code files must be <= ${Math.round(MAX_TEXT_ATTACHMENT_BYTES / 1024)} KB.`
+          ]);
+          continue;
+        }
         const dataUrl = await fileToDataUrl(file);
+        const isImage = file.type.startsWith("image/");
         additions.push({
           id: crypto.randomUUID(),
-          name: file.name || `image-${Date.now()}.png`,
-          mimeType: file.type || "image/png",
+          kind: isImage ? "image" : "text",
+          name: file.name || `attachment-${Date.now()}`,
+          mimeType: file.type || (isImage ? "image/png" : "text/plain"),
           size: file.size,
           dataUrl,
-          previewUrl: URL.createObjectURL(file)
+          previewUrl: isImage ? URL.createObjectURL(file) : undefined
         });
       } catch (error) {
-        setLogs((prev) => [...prev, `Image attach failed (${file.name}): ${String(error)}`]);
+        setLogs((prev) => [...prev, `Attach failed (${file.name}): ${String(error)}`]);
       }
     }
 
@@ -1550,7 +1625,7 @@ export const App = () => {
     setComposerAttachments((prev) => {
       const next = prev.filter((attachment) => attachment.id !== id);
       const removed = prev.find((attachment) => attachment.id === id);
-      if (removed) {
+      if (removed?.previewUrl) {
         URL.revokeObjectURL(removed.previewUrl);
       }
       return next;
@@ -1721,7 +1796,9 @@ export const App = () => {
         composerResizeRafRef.current = null;
       }
       attachmentsRef.current.forEach((attachment) => {
-        URL.revokeObjectURL(attachment.previewUrl);
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
       });
       completionAudioContextRef.current?.close().catch(() => {});
     },
@@ -3153,7 +3230,11 @@ export const App = () => {
         if (prev.length === 0) {
           return prev;
         }
-        prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+        prev.forEach((attachment) => {
+          if (attachment.previewUrl) {
+            URL.revokeObjectURL(attachment.previewUrl);
+          }
+        });
         return [];
       });
       return;
@@ -3168,7 +3249,11 @@ export const App = () => {
         if (prev.length === 0) {
           return prev;
         }
-        prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+        prev.forEach((attachment) => {
+          if (attachment.previewUrl) {
+            URL.revokeObjectURL(attachment.previewUrl);
+          }
+        });
         return [];
       });
       setIsDraggingFiles((prev) => (prev ? false : prev));
@@ -3680,6 +3765,13 @@ export const App = () => {
       return;
     }
     await runGitAction("discard-unstaged", (projectId) => api.git.discard({ projectId }));
+  };
+
+  const resolveMergeConflictsWithAi = async () => {
+    if (!activeGitState?.insideRepo || !hasMergeConflicts) {
+      return;
+    }
+    await runGitAction("resolve-conflicts-ai", (projectId) => api.git.resolveConflictsAi({ projectId }));
   };
 
   const initializeGitRepository = async () => {
@@ -5190,7 +5282,11 @@ export const App = () => {
         [targetThreadId]: ""
       }));
       setComposerAttachments((prev) => {
-        prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+        prev.forEach((attachment) => {
+          if (attachment.previewUrl) {
+            URL.revokeObjectURL(attachment.previewUrl);
+          }
+        });
         return [];
       });
     };
@@ -5316,7 +5412,11 @@ export const App = () => {
       [threadId]: ""
     }));
     setComposerAttachments((prev) => {
-      prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+      prev.forEach((attachment) => {
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
+      });
       return [];
     });
   };
@@ -6415,7 +6515,7 @@ const stopActiveRun = async () => {
     items.forEach((item) => {
       if (item.kind === "file") {
         const file = item.getAsFile();
-        if (file && file.type.startsWith("image/")) {
+        if (file && (file.type.startsWith("image/") || isTextLikeFile(file))) {
           files.push(file);
         }
       }
@@ -6426,8 +6526,8 @@ const stopActiveRun = async () => {
     }
 
     event.preventDefault();
-    addImageFiles(files).catch((error) => {
-      setLogs((prev) => [...prev, `Paste image failed: ${String(error)}`]);
+    addComposerFiles(files).catch((error) => {
+      setLogs((prev) => [...prev, `Paste attach failed: ${String(error)}`]);
     });
   };
 
@@ -6457,8 +6557,8 @@ const stopActiveRun = async () => {
     if (files.length === 0) {
       return;
     }
-    addImageFiles(files).catch((error) => {
-      setLogs((prev) => [...prev, `Drop image failed: ${String(error)}`]);
+    addComposerFiles(files).catch((error) => {
+      setLogs((prev) => [...prev, `Drop attach failed: ${String(error)}`]);
     });
   };
 
@@ -8101,7 +8201,7 @@ const stopActiveRun = async () => {
                   <input
                     ref={imagePickerRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,.txt,.md,.markdown,.json,.jsonc,.yaml,.yml,.toml,.xml,.html,.css,.scss,.less,.js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.go,.rs,.java,.kt,.swift,.rb,.php,.sh,.bash,.zsh,.ps1,.sql,.c,.cc,.cpp,.h,.hpp"
                     multiple
                     className="hidden"
                     onChange={(event) => {
@@ -8109,8 +8209,8 @@ const stopActiveRun = async () => {
                       if (files.length === 0) {
                         return;
                       }
-                      addImageFiles(files).catch((error) => {
-                        setLogs((prev) => [...prev, `Image attach failed: ${String(error)}`]);
+                      addComposerFiles(files).catch((error) => {
+                        setLogs((prev) => [...prev, `Attach failed: ${String(error)}`]);
                       });
                       event.currentTarget.value = "";
                     }}
@@ -8119,7 +8219,11 @@ const stopActiveRun = async () => {
                     <div className="mb-2 flex flex-wrap gap-2">
                       {composerAttachments.map((attachment) => (
                         <div key={attachment.id} className="attachment-chip">
-                          <img src={attachment.previewUrl} alt={attachment.name} className="attachment-thumb" />
+                          {attachment.previewUrl ? (
+                            <img src={attachment.previewUrl} alt={attachment.name} className="attachment-thumb" />
+                          ) : (
+                            <div className="attachment-thumb attachment-thumb-file">TXT</div>
+                          )}
                           <div className="attachment-meta">
                             <div className="truncate text-xs text-slate-100">{attachment.name}</div>
                             <div className="text-[10px] text-slate-400">{Math.max(1, Math.round(attachment.size / 1024))} KB</div>
@@ -8306,7 +8410,7 @@ const stopActiveRun = async () => {
                                     <div className="min-w-0">
                                       <div className="text-[10px] uppercase tracking-wide text-slate-400">
                                         #{index + 1}
-                                        {prompt.attachments.length > 0 ? ` | ${prompt.attachments.length} image(s)` : ""}
+                                        {prompt.attachments.length > 0 ? ` | ${prompt.attachments.length} attachment(s)` : ""}
                                         {prompt.skills.length > 0 ? ` | ${prompt.skills.length} skill(s)` : ""}
                                       </div>
                                       <div className="truncate text-slate-200">{preview}</div>
@@ -8448,8 +8552,8 @@ const stopActiveRun = async () => {
                     <div className="composer-toolbar">
                       <button
                         className="composer-plus-btn composer-tooltip-target"
-                        data-composer-tooltip={composerTooltipText("Attach Images", "Add up to 4 images to this prompt.")}
-                        aria-label="Attach images"
+                        data-composer-tooltip={composerTooltipText("Attach Files", "Add up to 8 image/text/code files to this prompt.")}
+                        aria-label="Attach files"
                         disabled={!activeThreadId || activeThreadSendPending}
                         onClick={() => imagePickerRef.current?.click()}
                       >
@@ -8493,7 +8597,7 @@ const stopActiveRun = async () => {
                         <FaChevronDown className="text-[10px] text-slate-500" />
                       </button>
                       {composerAttachments.length > 0 && (
-                        <span className="text-xs text-muted">{composerAttachments.length} image(s)</span>
+                        <span className="text-xs text-muted">{composerAttachments.length} attachment(s)</span>
                       )}
                     </div>
                     {activeRunState === "running" ? (
@@ -9076,7 +9180,27 @@ const stopActiveRun = async () => {
                           <div className="git-panel-card">
                             <div className="git-panel-card-title">
                               Unstaged / Untracked ({activeUnstagedFiles.length})
+                              {hasMergeConflicts ? ` | Conflicts ${activeConflictFiles.length}` : ""}
                             </div>
+                            {hasMergeConflicts && (
+                              <button
+                                className="btn-ghost mt-1 mb-2 w-full justify-center"
+                                onClick={() =>
+                                  resolveMergeConflictsWithAi().catch((error) =>
+                                    setLogs((prev) => [...prev, `AI conflict resolve failed: ${String(error)}`])
+                                  )
+                                }
+                                disabled={Boolean(gitBusyAction)}
+                                title="Attempt AI merge conflict resolution and stage resolved files"
+                              >
+                                <span className="inline-flex items-center gap-1">
+                                  {gitBusyAction === "resolve-conflicts-ai" && (
+                                    <span className={settings.useTurtleSpinners ? "loading-ring turtle-spinner" : "loading-ring"} />
+                                  )}
+                                  Resolve Conflicts (AI)
+                                </span>
+                              </button>
+                            )}
                             {hasStageableFiles && (
                               <button
                                 className="btn-ghost mt-1 mb-2 w-full justify-center"

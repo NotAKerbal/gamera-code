@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { access, readdir } from "node:fs/promises";
+import { access, readFile, readdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { basename, join } from "node:path";
 import type {
@@ -17,6 +17,8 @@ import { withRuntimePath } from "../utils/runtimeEnv";
 const DIFF_MAX_CHARS = 120000;
 const AI_COMMIT_DIFF_MAX_CHARS = 40000;
 const ORIGIN_PREFIX = "origin/";
+const CONFLICT_STATUS_PAIRS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+const MERGE_RESOLVE_MAX_BYTES = 1_500_000;
 
 const parseAheadBehind = (value: string | undefined): { ahead: number; behind: number } => {
   if (!value) {
@@ -144,8 +146,17 @@ export class GitService {
   constructor(
     private readonly deps: {
       suggestCommitMessage?: (input: { cwd: string; files: string[]; diff: string }) => Promise<string | null>;
+      resolveMergeConflicts?: (input: {
+        cwd: string;
+        files: Array<{ path: string; content: string }>;
+      }) => Promise<{ files: Array<{ path: string; content: string }>; summary?: string } | null>;
     } = {}
   ) {}
+
+  private isConflictFile(file: GitFileStatus): boolean {
+    const pair = `${file.indexStatus}${file.workTreeStatus}`;
+    return CONFLICT_STATUS_PAIRS.has(pair);
+  }
 
   private normalizeCommitMessage(value: string | null): string | null {
     if (!value) {
@@ -674,6 +685,117 @@ export class GitService {
     const args = checkout ? ["checkout", "-b", branch] : ["branch", branch];
     const result = await this.runGit(cwd, args);
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  async resolveConflictsAi(cwd: string): Promise<GitCommandResult> {
+    const insideRepo = await this.isInsideRepo(cwd);
+    if (!insideRepo) {
+      return {
+        ok: false,
+        stdout: "",
+        stderr: "Project is not a git repository."
+      };
+    }
+    if (!this.deps.resolveMergeConflicts) {
+      return {
+        ok: false,
+        stdout: "",
+        stderr: "AI merge conflict resolver is not configured."
+      };
+    }
+
+    const state = await this.getState(cwd);
+    const conflictedFiles = state.files.filter((file) => this.isConflictFile(file)).map((file) => file.path);
+    if (conflictedFiles.length === 0) {
+      return {
+        ok: false,
+        stdout: "",
+        stderr: "No merge conflicts detected."
+      };
+    }
+
+    const mergeFiles: Array<{ path: string; content: string }> = [];
+    let totalBytes = 0;
+    for (const relativePath of conflictedFiles) {
+      const absolutePath = join(cwd, relativePath);
+      let raw: Buffer;
+      try {
+        raw = await readFile(absolutePath);
+      } catch (error) {
+        return {
+          ok: false,
+          stdout: "",
+          stderr: `Failed to read conflicted file ${relativePath}: ${String(error)}`
+        };
+      }
+      if (raw.includes(0)) {
+        return {
+          ok: false,
+          stdout: "",
+          stderr: `Conflicted file ${relativePath} appears to be binary and cannot be AI-resolved.`
+        };
+      }
+      totalBytes += raw.byteLength;
+      if (totalBytes > MERGE_RESOLVE_MAX_BYTES) {
+        return {
+          ok: false,
+          stdout: "",
+          stderr: "Conflicted files are too large for a single AI resolution pass."
+        };
+      }
+      mergeFiles.push({
+        path: relativePath,
+        content: raw.toString("utf8")
+      });
+    }
+
+    const resolved = await this.deps.resolveMergeConflicts({ cwd, files: mergeFiles });
+    if (!resolved || resolved.files.length === 0) {
+      return {
+        ok: false,
+        stdout: "",
+        stderr: "AI merge conflict resolver did not return any file updates."
+      };
+    }
+
+    const updatesByPath = new Map(resolved.files.map((entry) => [entry.path, entry.content]));
+    for (const relativePath of conflictedFiles) {
+      const nextContent = updatesByPath.get(relativePath);
+      if (typeof nextContent !== "string") {
+        return {
+          ok: false,
+          stdout: "",
+          stderr: `AI merge conflict resolver did not return content for ${relativePath}.`
+        };
+      }
+      const absolutePath = join(cwd, relativePath);
+      await writeFile(absolutePath, nextContent, "utf8");
+    }
+
+    const stageResult = await this.runGit(cwd, ["add", "--", ...conflictedFiles]);
+    if (!stageResult.ok) {
+      return {
+        ok: false,
+        stdout: stageResult.stdout,
+        stderr: stageResult.stderr || "Failed to stage AI-resolved conflict files."
+      };
+    }
+
+    const refreshed = await this.getState(cwd);
+    const remaining = refreshed.files.filter((file) => this.isConflictFile(file));
+    if (remaining.length > 0) {
+      return {
+        ok: false,
+        stdout: `Resolved ${conflictedFiles.length - remaining.length}/${conflictedFiles.length} conflicted file(s).`,
+        stderr: `Remaining conflicts: ${remaining.map((file) => file.path).join(", ")}`
+      };
+    }
+
+    return {
+      ok: true,
+      stdout: resolved.summary?.trim() || `AI resolved and staged ${conflictedFiles.length} conflicted file(s).`,
+      stderr: ""
+    };
   }
 
   async discoverRepositories(rootDir: string, maxDepth = 4): Promise<GitRepositoryCandidate[]> {

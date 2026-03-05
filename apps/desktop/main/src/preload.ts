@@ -26,6 +26,8 @@ const gitGetSnapshotChannel =
   (IPC_CHANNELS as Record<string, string>).gitGetSnapshot ?? "git:getSnapshot";
 const gitInitChannel =
   (IPC_CHANNELS as Record<string, string>).gitInit ?? "git:init";
+const gitResolveConflictsAiChannel =
+  (IPC_CHANNELS as Record<string, string>).gitResolveConflictsAi ?? "git:resolveConflictsAi";
 const threadsForkChannel =
   (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
 const sessionsSteerChannel =
@@ -85,6 +87,7 @@ type DesktopApiWithGitExtras = DesktopApi & {
     init: (input: { projectId: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getSnapshot: (input: { projectId: string }) => Promise<GitSnapshot>;
     discard: (input: { projectId: string; path?: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
+    resolveConflictsAi: (input: { projectId: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
     getOutgoingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
     getIncomingCommits: (input: { projectId: string }) => Promise<Array<{ hash: string; summary: string }>>;
     getSharedHistory: (
@@ -242,6 +245,7 @@ const api: DesktopApiWithGitExtras = {
     unstage: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitUnstage, input),
     discard: (input) => ipcRenderer.invoke(gitDiscardChannel, input),
     commit: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCommit, input),
+    resolveConflictsAi: (input: { projectId: string }) => ipcRenderer.invoke(gitResolveConflictsAiChannel, input),
     init: (input: { projectId: string }) => ipcRenderer.invoke(gitInitChannel, input),
     checkoutBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCheckoutBranch, input),
     createBranch: (input) => ipcRenderer.invoke(IPC_CHANNELS.gitCreateBranch, input),
