@@ -59,6 +59,7 @@ import type {
   GitOutgoingCommit,
   GitState,
   InstallStatus,
+  CodexAuthStatus,
   MessageEvent,
   OrchestrationChild,
   OrchestrationRun,
@@ -103,6 +104,7 @@ import {
   QUICK_PROMPTS,
   REASONING_OPTIONS,
   REQUIRED_SETUP_KEYS,
+  SETUP_BLOCKING_KEYS,
   SANDBOX_OPTIONS,
   SHOW_TERMINAL,
   SKILL_MENTION_MATCH_LIMIT,
@@ -356,6 +358,9 @@ export const App = () => {
   const [threadDraftTitle, setThreadDraftTitle] = useState("New thread");
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
+  const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus | null>(null);
+  const [isCodexAuthCardDismissed, setIsCodexAuthCardDismissed] = useState(false);
+  const [codexLoginInFlight, setCodexLoginInFlight] = useState(false);
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [setupPermissionGranted, setSetupPermissionGranted] = useState(false);
   const [setupInstalling, setSetupInstalling] = useState(false);
@@ -730,16 +735,6 @@ export const App = () => {
     () => (activeGitState?.files ?? []).filter((file) => file.unstaged || file.untracked),
     [activeGitState?.files]
   );
-  const activeConflictFiles = useMemo(
-    () => {
-      const conflictPairs = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
-      return (activeGitState?.files ?? []).filter((file) => {
-        const pair = `${file.indexStatus}${file.workTreeStatus}`;
-        return conflictPairs.has(pair);
-      });
-    },
-    [activeGitState?.files]
-  );
   const gitBranchInput = gitBranchSearch.trim();
   const deferredGitBranchInput = useDeferredValue(gitBranchInput);
   const filteredBranches = useMemo(() => {
@@ -786,7 +781,6 @@ export const App = () => {
     [activeUnstagedFiles]
   );
   const hasStageableFiles = activeUnstagedFiles.length > 0;
-  const hasMergeConflicts = activeConflictFiles.length > 0;
   const isWorkingTreeClean = hasStageableFiles === false && activeStagedFiles.length === 0;
   const activeRunState: ThreadRunState = activeThreadId ? runStateByThreadId[activeThreadId] ?? "idle" : "idle";
   const activeThreadSendPending = activeThreadId ? Boolean(sendPendingByThreadId[activeThreadId]) : false;
@@ -1419,6 +1413,25 @@ export const App = () => {
     setInstallStatus(status);
   };
 
+  const loadCodexAuthStatus = async () => {
+    const status = await api.installer.getCodexAuthStatus();
+    setCodexAuthStatus(status);
+    if (status.authenticated) {
+      setIsCodexAuthCardDismissed(false);
+    }
+    return status;
+  };
+
+  const isCodexUnauthenticatedError = (payload: string) => {
+    const text = payload.toLowerCase();
+    return (
+      text.includes("401 unauthorized") &&
+      (text.includes("missing bearer") ||
+        text.includes("missing bearer or basic authentication") ||
+        text.includes("authentication"))
+    );
+  };
+
   const loadProjectSettings = async (projectId: string) => {
     const settingsForProject = await api.projectSettings.get({ projectId });
     setProjectSettingsById((prev) => ({
@@ -1516,64 +1529,9 @@ export const App = () => {
       }));
     }
   };
-  const TEXT_FILE_EXTENSIONS = new Set([
-    "txt",
-    "md",
-    "markdown",
-    "json",
-    "jsonc",
-    "yaml",
-    "yml",
-    "toml",
-    "ini",
-    "cfg",
-    "conf",
-    "xml",
-    "html",
-    "css",
-    "scss",
-    "sass",
-    "less",
-    "js",
-    "jsx",
-    "ts",
-    "tsx",
-    "mjs",
-    "cjs",
-    "py",
-    "go",
-    "rs",
-    "java",
-    "kt",
-    "swift",
-    "rb",
-    "php",
-    "sh",
-    "bash",
-    "zsh",
-    "ps1",
-    "sql",
-    "c",
-    "cc",
-    "cpp",
-    "h",
-    "hpp"
-  ]);
-  const MAX_TEXT_ATTACHMENT_BYTES = 300 * 1024;
-  const isTextLikeFile = (file: File) => {
-    if (file.type.startsWith("text/")) {
-      return true;
-    }
-    if (/(json|xml|yaml|javascript|typescript|x-sh|x-httpd-php|x-python|x-rust|x-c|x-c\+\+)/i.test(file.type)) {
-      return true;
-    }
-    const ext = file.name.toLowerCase().split(".").pop() ?? "";
-    return TEXT_FILE_EXTENSIONS.has(ext);
-  };
-
-  const addComposerFiles = async (files: File[]) => {
-    const supportedFiles = files.filter((file) => file.type.startsWith("image/") || isTextLikeFile(file));
-    if (supportedFiles.length === 0) {
+  const addImageFiles = async (files: File[]) => {
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) {
       return;
     }
 
@@ -1583,34 +1541,25 @@ export const App = () => {
       return;
     }
 
-    const picked = supportedFiles.slice(0, availableSlots);
-    if (picked.length < supportedFiles.length) {
-      setLogs((prev) => [...prev, `Only the first ${availableSlots} attachments were added.`]);
+    const picked = imageFiles.slice(0, availableSlots);
+    if (picked.length < imageFiles.length) {
+      setLogs((prev) => [...prev, `Only the first ${availableSlots} images were added.`]);
     }
 
     const additions: ComposerAttachment[] = [];
     for (const file of picked) {
       try {
-        if (!file.type.startsWith("image/") && file.size > MAX_TEXT_ATTACHMENT_BYTES) {
-          setLogs((prev) => [
-            ...prev,
-            `Attachment skipped (${file.name}): text/code files must be <= ${Math.round(MAX_TEXT_ATTACHMENT_BYTES / 1024)} KB.`
-          ]);
-          continue;
-        }
         const dataUrl = await fileToDataUrl(file);
-        const isImage = file.type.startsWith("image/");
         additions.push({
           id: crypto.randomUUID(),
-          kind: isImage ? "image" : "text",
-          name: file.name || `attachment-${Date.now()}`,
-          mimeType: file.type || (isImage ? "image/png" : "text/plain"),
+          name: file.name || `image-${Date.now()}.png`,
+          mimeType: file.type || "image/png",
           size: file.size,
           dataUrl,
-          previewUrl: isImage ? URL.createObjectURL(file) : undefined
+          previewUrl: URL.createObjectURL(file)
         });
       } catch (error) {
-        setLogs((prev) => [...prev, `Attach failed (${file.name}): ${String(error)}`]);
+        setLogs((prev) => [...prev, `Image attach failed (${file.name}): ${String(error)}`]);
       }
     }
 
@@ -1625,7 +1574,7 @@ export const App = () => {
     setComposerAttachments((prev) => {
       const next = prev.filter((attachment) => attachment.id !== id);
       const removed = prev.find((attachment) => attachment.id === id);
-      if (removed?.previewUrl) {
+      if (removed) {
         URL.revokeObjectURL(removed.previewUrl);
       }
       return next;
@@ -1796,9 +1745,7 @@ export const App = () => {
         composerResizeRafRef.current = null;
       }
       attachmentsRef.current.forEach((attachment) => {
-        if (attachment.previewUrl) {
-          URL.revokeObjectURL(attachment.previewUrl);
-        }
+        URL.revokeObjectURL(attachment.previewUrl);
       });
       completionAudioContextRef.current?.close().catch(() => {});
     },
@@ -2049,6 +1996,7 @@ export const App = () => {
       await loadSettings();
       await loadSystemTerminals();
       await loadInstallerStatus();
+      await loadCodexAuthStatus();
       await checkUpdatesOnLaunch();
     };
 
@@ -2349,6 +2297,23 @@ export const App = () => {
         if (previousThreadRunState === "running" && nextThreadRunState !== "running") {
           drainPromptQueueForThread(event.threadId);
         }
+      }
+
+      const authRequiredFromData = Boolean(data?.authRequired);
+      const authRequiredFromError = event.type === "stderr" && isCodexUnauthenticatedError(event.payload);
+      if (authRequiredFromData || authRequiredFromError) {
+        setCodexAuthStatus((prev) => ({
+          authenticated: false,
+          requiresOpenaiAuth: true,
+          accountType: prev?.accountType,
+          email: prev?.email,
+          planType: prev?.planType,
+          message: "Codex authentication is required."
+        }));
+        setIsCodexAuthCardDismissed(false);
+        loadCodexAuthStatus().catch((error) => {
+          setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
+        });
       }
 
       if (event.threadId !== activeThreadIdRef.current) {
@@ -3230,11 +3195,7 @@ export const App = () => {
         if (prev.length === 0) {
           return prev;
         }
-        prev.forEach((attachment) => {
-          if (attachment.previewUrl) {
-            URL.revokeObjectURL(attachment.previewUrl);
-          }
-        });
+        prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
         return [];
       });
       return;
@@ -3249,11 +3210,7 @@ export const App = () => {
         if (prev.length === 0) {
           return prev;
         }
-        prev.forEach((attachment) => {
-          if (attachment.previewUrl) {
-            URL.revokeObjectURL(attachment.previewUrl);
-          }
-        });
+        prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
         return [];
       });
       setIsDraggingFiles((prev) => (prev ? false : prev));
@@ -3765,13 +3722,6 @@ export const App = () => {
       return;
     }
     await runGitAction("discard-unstaged", (projectId) => api.git.discard({ projectId }));
-  };
-
-  const resolveMergeConflictsWithAi = async () => {
-    if (!activeGitState?.insideRepo || !hasMergeConflicts) {
-      return;
-    }
-    await runGitAction("resolve-conflicts-ai", (projectId) => api.git.resolveConflictsAi({ projectId }));
   };
 
   const initializeGitRepository = async () => {
@@ -5282,11 +5232,7 @@ export const App = () => {
         [targetThreadId]: ""
       }));
       setComposerAttachments((prev) => {
-        prev.forEach((attachment) => {
-          if (attachment.previewUrl) {
-            URL.revokeObjectURL(attachment.previewUrl);
-          }
-        });
+        prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
         return [];
       });
     };
@@ -5412,11 +5358,7 @@ export const App = () => {
       [threadId]: ""
     }));
     setComposerAttachments((prev) => {
-      prev.forEach((attachment) => {
-        if (attachment.previewUrl) {
-          URL.revokeObjectURL(attachment.previewUrl);
-        }
-      });
+      prev.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
       return [];
     });
   };
@@ -6515,7 +6457,7 @@ const stopActiveRun = async () => {
     items.forEach((item) => {
       if (item.kind === "file") {
         const file = item.getAsFile();
-        if (file && (file.type.startsWith("image/") || isTextLikeFile(file))) {
+        if (file && file.type.startsWith("image/")) {
           files.push(file);
         }
       }
@@ -6526,8 +6468,8 @@ const stopActiveRun = async () => {
     }
 
     event.preventDefault();
-    addComposerFiles(files).catch((error) => {
-      setLogs((prev) => [...prev, `Paste attach failed: ${String(error)}`]);
+    addImageFiles(files).catch((error) => {
+      setLogs((prev) => [...prev, `Paste image failed: ${String(error)}`]);
     });
   };
 
@@ -6557,8 +6499,8 @@ const stopActiveRun = async () => {
     if (files.length === 0) {
       return;
     }
-    addComposerFiles(files).catch((error) => {
-      setLogs((prev) => [...prev, `Drop attach failed: ${String(error)}`]);
+    addImageFiles(files).catch((error) => {
+      setLogs((prev) => [...prev, `Drop image failed: ${String(error)}`]);
     });
   };
 
@@ -6567,6 +6509,32 @@ const stopActiveRun = async () => {
     const result = await api.installer.installCli({ provider: "codex" });
     setLogs((prev) => [...prev, ...result.logs]);
     await loadInstallerStatus();
+  };
+
+  const startCodexLogin = async () => {
+    if (codexLoginInFlight) {
+      return;
+    }
+
+    setCodexLoginInFlight(true);
+    try {
+      const result = await api.installer.loginCodex();
+      setLogs((prev) => [...prev, result.message]);
+      await loadCodexAuthStatus();
+      if (!result.ok) {
+        return;
+      }
+
+      window.setTimeout(() => {
+        loadCodexAuthStatus().catch((error) => {
+          setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
+        });
+      }, 3000);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Codex login failed: ${String(error)}`]);
+    } finally {
+      setCodexLoginInFlight(false);
+    }
   };
 
   const runAutomaticSetup = async () => {
@@ -6768,13 +6736,33 @@ const stopActiveRun = async () => {
 
   const setupBlocked = Boolean(
     installStatus &&
-      (!installStatus.nodeOk || !installStatus.npmOk || !installStatus.gitOk || !installStatus.rgOk || !installStatus.codexOk)
+      installStatus.details.some((detail) => SETUP_BLOCKING_KEYS.has(detail.key) && !detail.ok)
   );
+  const codexAuthBlocked = Boolean(codexAuthStatus?.requiresOpenaiAuth && !codexAuthStatus?.authenticated);
   useEffect(() => {
     if (!setupBlocked) {
       setIsSetupCardDismissed(false);
     }
   }, [setupBlocked]);
+  useEffect(() => {
+    if (!codexAuthBlocked) {
+      setIsCodexAuthCardDismissed(false);
+    }
+  }, [codexAuthBlocked]);
+
+  useEffect(() => {
+    if (!codexAuthBlocked) {
+      return;
+    }
+    const timerId = window.setInterval(() => {
+      loadCodexAuthStatus().catch((error) => {
+        setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
+      });
+    }, 30_000);
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [codexAuthBlocked]);
   const planArtifacts = useMemo<PlanArtifact[]>(() => {
     const plans: PlanArtifact[] = [];
 
@@ -7919,6 +7907,51 @@ const stopActiveRun = async () => {
             </aside>
 
             <main className="main-layout-content flex h-full min-h-0 min-w-0 flex-col">
+              {codexAuthBlocked && !isCodexAuthCardDismissed && (
+                <section className="mx-4 mt-3 rounded-xl border border-border bg-panel/70 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold tracking-wide text-slate-100">Codex Sign-In Required</h3>
+                    <button
+                      type="button"
+                      className="btn-ghost h-7 px-2 py-0 text-xs"
+                      onClick={() => setIsCodexAuthCardDismissed(true)}
+                      aria-label="Dismiss Codex sign-in notice"
+                      title="Dismiss"
+                    >
+                      <FaTimes className="text-[10px]" />
+                    </button>
+                  </div>
+                  <p className="mb-3 text-sm text-slate-300">
+                    {codexAuthStatus?.email
+                      ? `Current account: ${codexAuthStatus.email}. Re-authenticate to continue using Codex.`
+                      : "You are not signed in to Codex. Sign in to start or continue Codex runs."}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="btn-primary"
+                      onClick={() => {
+                        startCodexLogin().catch((error) => {
+                          setLogs((prev) => [...prev, `Codex login failed: ${String(error)}`]);
+                        });
+                      }}
+                      disabled={codexLoginInFlight}
+                    >
+                      {codexLoginInFlight ? "Opening Sign-In..." : "Sign In to Codex"}
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        loadCodexAuthStatus().catch((error) => {
+                          setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
+                        });
+                      }}
+                    >
+                      Refresh Status
+                    </button>
+                  </div>
+                </section>
+              )}
+
               {hasUserPromptInThread && installStatus && setupBlocked && !isSetupCardDismissed && (
                 <section className="mx-4 mt-3 rounded-xl border border-border bg-panel/70 p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -8201,7 +8234,7 @@ const stopActiveRun = async () => {
                   <input
                     ref={imagePickerRef}
                     type="file"
-                    accept="image/*,.txt,.md,.markdown,.json,.jsonc,.yaml,.yml,.toml,.xml,.html,.css,.scss,.less,.js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.go,.rs,.java,.kt,.swift,.rb,.php,.sh,.bash,.zsh,.ps1,.sql,.c,.cc,.cpp,.h,.hpp"
+                    accept="image/*"
                     multiple
                     className="hidden"
                     onChange={(event) => {
@@ -8209,8 +8242,8 @@ const stopActiveRun = async () => {
                       if (files.length === 0) {
                         return;
                       }
-                      addComposerFiles(files).catch((error) => {
-                        setLogs((prev) => [...prev, `Attach failed: ${String(error)}`]);
+                      addImageFiles(files).catch((error) => {
+                        setLogs((prev) => [...prev, `Image attach failed: ${String(error)}`]);
                       });
                       event.currentTarget.value = "";
                     }}
@@ -8219,11 +8252,7 @@ const stopActiveRun = async () => {
                     <div className="mb-2 flex flex-wrap gap-2">
                       {composerAttachments.map((attachment) => (
                         <div key={attachment.id} className="attachment-chip">
-                          {attachment.previewUrl ? (
-                            <img src={attachment.previewUrl} alt={attachment.name} className="attachment-thumb" />
-                          ) : (
-                            <div className="attachment-thumb attachment-thumb-file">TXT</div>
-                          )}
+                          <img src={attachment.previewUrl} alt={attachment.name} className="attachment-thumb" />
                           <div className="attachment-meta">
                             <div className="truncate text-xs text-slate-100">{attachment.name}</div>
                             <div className="text-[10px] text-slate-400">{Math.max(1, Math.round(attachment.size / 1024))} KB</div>
@@ -8410,7 +8439,7 @@ const stopActiveRun = async () => {
                                     <div className="min-w-0">
                                       <div className="text-[10px] uppercase tracking-wide text-slate-400">
                                         #{index + 1}
-                                        {prompt.attachments.length > 0 ? ` | ${prompt.attachments.length} attachment(s)` : ""}
+                                        {prompt.attachments.length > 0 ? ` | ${prompt.attachments.length} image(s)` : ""}
                                         {prompt.skills.length > 0 ? ` | ${prompt.skills.length} skill(s)` : ""}
                                       </div>
                                       <div className="truncate text-slate-200">{preview}</div>
@@ -8552,8 +8581,8 @@ const stopActiveRun = async () => {
                     <div className="composer-toolbar">
                       <button
                         className="composer-plus-btn composer-tooltip-target"
-                        data-composer-tooltip={composerTooltipText("Attach Files", "Add up to 8 image/text/code files to this prompt.")}
-                        aria-label="Attach files"
+                        data-composer-tooltip={composerTooltipText("Attach Images", "Add up to 4 images to this prompt.")}
+                        aria-label="Attach images"
                         disabled={!activeThreadId || activeThreadSendPending}
                         onClick={() => imagePickerRef.current?.click()}
                       >
@@ -8597,7 +8626,7 @@ const stopActiveRun = async () => {
                         <FaChevronDown className="text-[10px] text-slate-500" />
                       </button>
                       {composerAttachments.length > 0 && (
-                        <span className="text-xs text-muted">{composerAttachments.length} attachment(s)</span>
+                        <span className="text-xs text-muted">{composerAttachments.length} image(s)</span>
                       )}
                     </div>
                     {activeRunState === "running" ? (
@@ -9180,27 +9209,7 @@ const stopActiveRun = async () => {
                           <div className="git-panel-card">
                             <div className="git-panel-card-title">
                               Unstaged / Untracked ({activeUnstagedFiles.length})
-                              {hasMergeConflicts ? ` | Conflicts ${activeConflictFiles.length}` : ""}
                             </div>
-                            {hasMergeConflicts && (
-                              <button
-                                className="btn-ghost mt-1 mb-2 w-full justify-center"
-                                onClick={() =>
-                                  resolveMergeConflictsWithAi().catch((error) =>
-                                    setLogs((prev) => [...prev, `AI conflict resolve failed: ${String(error)}`])
-                                  )
-                                }
-                                disabled={Boolean(gitBusyAction)}
-                                title="Attempt AI merge conflict resolution and stage resolved files"
-                              >
-                                <span className="inline-flex items-center gap-1">
-                                  {gitBusyAction === "resolve-conflicts-ai" && (
-                                    <span className={settings.useTurtleSpinners ? "loading-ring turtle-spinner" : "loading-ring"} />
-                                  )}
-                                  Resolve Conflicts (AI)
-                                </span>
-                              </button>
-                            )}
                             {hasStageableFiles && (
                               <button
                                 className="btn-ghost mt-1 mb-2 w-full justify-center"
@@ -9427,4 +9436,3 @@ const stopActiveRun = async () => {
     </div>
   );
 };
-

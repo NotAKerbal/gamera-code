@@ -24,6 +24,13 @@ interface PendingTurn {
   reject: (error: Error) => void;
 }
 
+interface PendingAccountLogin {
+  loginId: string | null;
+  resolve: (result: { success: boolean; error?: string | null }) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout> | null;
+}
+
 type InputItem =
   | { type: "text"; text: string }
   | { type: "local_image"; path: string }
@@ -65,6 +72,14 @@ export interface CodexAppServerClientOptions {
   executablePath?: string;
   env: Record<string, string>;
   threadId: string;
+}
+
+export interface CodexAccountStatus {
+  authenticated: boolean;
+  requiresOpenaiAuth: boolean;
+  accountType?: "apiKey" | "chatgpt";
+  email?: string;
+  planType?: string;
 }
 
 const asRecord = (value: unknown): UnknownRecord | null => {
@@ -254,6 +269,7 @@ export class CodexAppServerClient {
   private nextId = 1;
   private closed = false;
   private pendingTurn: PendingTurn | null = null;
+  private pendingAccountLogin: PendingAccountLogin | null = null;
 
   constructor(options: CodexAppServerClientOptions) {
     this.executablePath = options.executablePath || "codex";
@@ -312,6 +328,10 @@ export class CodexAppServerClient {
     }
     this.child = null;
     this.pending.clear();
+    if (this.pendingAccountLogin?.timeoutId) {
+      clearTimeout(this.pendingAccountLogin.timeoutId);
+    }
+    this.pendingAccountLogin = null;
     this.pendingTurn = null;
   }
 
@@ -556,6 +576,65 @@ export class CodexAppServerClient {
     });
   }
 
+  async getAccountStatus(refreshToken = false): Promise<CodexAccountStatus> {
+    const response = asRecord(
+      await this.request("account/read", {
+        refreshToken
+      })
+    );
+    const requiresOpenaiAuth = Boolean(response?.requiresOpenaiAuth);
+    const account = asRecord(response?.account);
+    const accountType = asString(account?.type);
+
+    return {
+      authenticated: !requiresOpenaiAuth || Boolean(account),
+      requiresOpenaiAuth,
+      accountType: accountType === "apiKey" || accountType === "chatgpt" ? accountType : undefined,
+      email: asString(account?.email) ?? undefined,
+      planType: asString(account?.planType) ?? undefined
+    };
+  }
+
+  async startChatGptLogin(): Promise<{ authUrl: string; loginId: string | null }> {
+    const response = asRecord(
+      await this.request("account/login/start", {
+        type: "chatgpt"
+      })
+    );
+    const authUrl = asString(response?.authUrl);
+    if (!authUrl) {
+      throw new Error("Codex app server did not return an auth URL for account/login/start.");
+    }
+    const loginId = asString(response?.loginId);
+    return {
+      authUrl,
+      loginId
+    };
+  }
+
+  async waitForLoginCompletion(loginId: string | null, timeoutMs = 180_000): Promise<{ success: boolean; error?: string | null }> {
+    if (this.pendingAccountLogin) {
+      throw new Error("Account login is already in progress.");
+    }
+
+    return new Promise<{ success: boolean; error?: string | null }>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        if (!this.pendingAccountLogin) {
+          return;
+        }
+        this.pendingAccountLogin = null;
+        reject(new Error("Timed out waiting for Codex account login completion."));
+      }, timeoutMs);
+
+      this.pendingAccountLogin = {
+        loginId,
+        resolve,
+        reject,
+        timeoutId
+      };
+    });
+  }
+
   private request(method: string, params: unknown): Promise<unknown> {
     const id = this.nextId++;
     const payload: JsonRpcRequest = {
@@ -760,12 +839,36 @@ export class CodexAppServerClient {
   }
 
   private handleNotification(method: string, params: unknown): void {
+    const paramsRecord = asRecord(params) ?? {};
+
+    if (method === "account/login/completed" || method === "loginChatGptComplete") {
+      const pendingLogin = this.pendingAccountLogin;
+      if (!pendingLogin) {
+        return;
+      }
+
+      const completedLoginId = asString(paramsRecord.loginId);
+      if (pendingLogin.loginId && completedLoginId && pendingLogin.loginId !== completedLoginId) {
+        return;
+      }
+
+      if (pendingLogin.timeoutId) {
+        clearTimeout(pendingLogin.timeoutId);
+      }
+      this.pendingAccountLogin = null;
+
+      const success = Boolean(paramsRecord.success);
+      pendingLogin.resolve({
+        success,
+        error: asString(paramsRecord.error)
+      });
+      return;
+    }
+
     const turn = this.pendingTurn;
     if (!turn) {
       return;
     }
-
-    const paramsRecord = asRecord(params) ?? {};
     const notificationThreadId = asString(paramsRecord.threadId);
     if (notificationThreadId && notificationThreadId !== turn.threadId) {
       return;
@@ -991,6 +1094,13 @@ export class CodexAppServerClient {
   private failAllPending(error: Error) {
     this.pending.forEach(({ reject }) => reject(error));
     this.pending.clear();
+    if (this.pendingAccountLogin) {
+      if (this.pendingAccountLogin.timeoutId) {
+        clearTimeout(this.pendingAccountLogin.timeoutId);
+      }
+      this.pendingAccountLogin.reject(error);
+      this.pendingAccountLogin = null;
+    }
     this.pendingUserInput.forEach(({ reject }) => reject(error));
     this.pendingUserInput.clear();
     if (this.pendingTurn) {

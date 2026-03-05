@@ -317,6 +317,17 @@ const describeRuntimeError = (error: unknown) => {
   return `${error.message} (${details.join(", ")})`;
 };
 
+const isCodexUnauthenticatedRuntimeError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("401 unauthorized") &&
+    (message.includes("missing bearer") ||
+      message.includes("missing bearer or basic authentication") ||
+      message.includes("authentication") ||
+      message.includes("/v1/responses"))
+  );
+};
+
 const isRecoverableCodexResumeError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (
@@ -789,13 +800,16 @@ export class SessionManager {
       .then(() => this.runCodexPromptWithRecovery(running, codexInput))
       .catch((error) => {
         this.deps.repository.setThreadErrored(threadId);
+        const authRequired = isCodexUnauthenticatedRuntimeError(error);
         this.emitSessionEvent(
           threadId,
           "stderr",
           `Codex run failed: ${describeRuntimeError(error)}`,
           {
             provider: "codex",
-            phase: "failed"
+            phase: "failed",
+            category: authRequired ? "auth" : "runtime_error",
+            authRequired
           }
         );
       });

@@ -207,7 +207,8 @@ const MainHeaderComponent = ({
   const launchSystemTerminal = (terminalId?: string) => {
     const launchId = terminalId ?? defaultSystemTerminal?.id ?? "default-terminal";
     setLaunchingSystemTerminalId(launchId);
-    onOpenProjectTerminal(terminalId)
+    const resolvedTerminalId = terminalId ?? defaultSystemTerminal?.id;
+    onOpenProjectTerminal(resolvedTerminalId)
       .catch((error) => appendLog(`Open terminal failed: ${String(error)}`))
       .finally(() => {
         window.setTimeout(() => {

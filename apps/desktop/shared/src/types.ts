@@ -236,6 +236,22 @@ export interface InstallDependenciesResult {
   status: InstallStatus;
 }
 
+export interface CodexAuthStatus {
+  authenticated: boolean;
+  requiresOpenaiAuth: boolean;
+  accountType?: "apiKey" | "chatgpt";
+  email?: string;
+  planType?: string;
+  message?: string;
+}
+
+export interface CodexLoginResult {
+  ok: boolean;
+  authUrl?: string;
+  alreadyAuthenticated?: boolean;
+  message: string;
+}
+
 export interface ProviderInstallCommand {
   command: string;
   args: string[];
