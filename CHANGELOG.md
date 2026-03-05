@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+- Code editor
+- Better Subagent visuals in thread history
+
 ## 0.4.3
 - Browser Automation support
 - GPT-5.4 support
