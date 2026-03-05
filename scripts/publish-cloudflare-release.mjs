@@ -61,6 +61,10 @@ const parseArgs = (argv, envOverrides) => {
 
   for (let index = 0; index < argv.length; index += 1) {
     const current = argv[index];
+    if (SUPPORTED_PLATFORMS.has(current)) {
+      args.platform = current;
+      continue;
+    }
     if (current === "--bucket") {
       args.bucket = argv[index + 1] ?? "";
       index += 1;
@@ -217,7 +221,19 @@ const runCommand = (command, args, cwd, dryRun) =>
       return;
     }
 
-    const child = spawn(command, args, {
+    const isWindows = process.platform === "win32";
+    const escapeCmdArg = (value) => {
+      if (!/[\s"&^|<>]/.test(value)) {
+        return value;
+      }
+      return `"${value.replace(/"/g, '""')}"`;
+    };
+    const executable = isWindows ? "cmd.exe" : command;
+    const executableArgs = isWindows
+      ? ["/d", "/s", "/c", [command, ...args].map(escapeCmdArg).join(" ")]
+      : args;
+
+    const child = spawn(executable, executableArgs, {
       cwd,
       stdio: "inherit",
       shell: false
@@ -233,10 +249,9 @@ const runCommand = (command, args, cwd, dryRun) =>
   });
 
 const uploadObject = async ({ bucket, key, filePath, cwd, dryRun }) => {
-  const wranglerExecutable = process.platform === "win32" ? "npx.cmd" : "npx";
   const target = `${bucket}/${toPosixPath(key)}`;
   await runCommand(
-    wranglerExecutable,
+    "npx",
     ["--yes", "wrangler", "r2", "object", "put", target, "--file", filePath, "--remote"],
     cwd,
     dryRun
@@ -248,12 +263,13 @@ const prepareWindowsPublish = async (args) => {
   const installerPath = join(args.releaseDir, installer.name);
   const blockmapPath = `${installerPath}.blockmap`;
   const latestYmlPath = join(args.releaseDir, "latest.yml");
+  const remoteInstallerName = `GameraCode-Setup-${installer.version}.exe`;
 
   const installerStats = await stat(installerPath);
   const installerSha512 = await computeFileSha512Base64(installerPath);
   const latestYml = buildLatestYml({
     version: installer.version,
-    installerName: installer.name,
+    installerName: remoteInstallerName,
     sha512: installerSha512,
     size: installerStats.size
   });
@@ -267,10 +283,10 @@ const prepareWindowsPublish = async (args) => {
 
   const filesToUpload = [
     { localPath: latestYmlPath, remoteName: basename(latestYmlPath) },
-    { localPath: installerPath, remoteName: installer.name }
+    { localPath: installerPath, remoteName: remoteInstallerName }
   ];
   if (hasBlockmap) {
-    filesToUpload.push({ localPath: blockmapPath, remoteName: `${installer.name}.blockmap` });
+    filesToUpload.push({ localPath: blockmapPath, remoteName: `${remoteInstallerName}.blockmap` });
   }
 
   return {

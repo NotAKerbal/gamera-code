@@ -67,7 +67,7 @@ cp .env.release.example .env.release
 # edit .env.release with your values
 
 npm run package:win
-npm run release:publish:cloudflare
+npm run release:publish:cloudflare:win
 ```
 
 The publish script will:
@@ -91,11 +91,14 @@ Publish other platforms:
 
 ```bash
 npm run package:mac
-npm run release:publish:cloudflare -- --platform mac
+npm run release:publish:cloudflare:mac
 
 npm run package:linux
-npm run release:publish:cloudflare -- --platform linux
+npm run release:publish:cloudflare:linux
 ```
+
+Note:
+- `release:publish:cloudflare:win` uploads installer as `GameraCode-Setup-X.Y.Z.exe` (no spaces) and writes `latest.yml` with that filename.
 
 Run all targets in one command (best for CI runners with full tooling):
 
