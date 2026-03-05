@@ -24,6 +24,7 @@
     "package:win": "npm run build && npm run package:win --workspace @code-app/main",
     "package:linux": "npm run build && npm run package:linux --workspace @code-app/main",
     "package:all": "npm run build && npm run package:all --workspace @code-app/main",
+    "release:publish:cloudflare": "node scripts/publish-cloudflare-release.mjs",
     "lint": "npm run lint --workspace @code-app/main && npm run lint --workspace @code-app/renderer"
   },
   "devDependencies": {

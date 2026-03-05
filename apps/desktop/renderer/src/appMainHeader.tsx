@@ -8,7 +8,6 @@ import {
   FaExternalLinkAlt,
   FaEye,
   FaFolderOpen,
-  FaSyncAlt,
   FaTerminal,
   FaTimes,
   FaPlus,
@@ -45,9 +44,12 @@ type MainHeaderProps = {
   isChangelogOpen: boolean;
   setIsChangelogOpen: Dispatch<SetStateAction<boolean>>;
   updateMessage: string;
+  showUpdatePrompt: boolean;
+  updateInstallPending: boolean;
+  onApplyUpdate: () => void;
+  onDismissUpdate: () => void;
   activeProjectWebLinks: ProjectWebLink[];
   onOpenProjectWebLink: (link: ProjectWebLink) => Promise<void>;
-  onCheckUpdates: () => void;
   terminalMenuRef: RefObject<HTMLDivElement | null>;
   terminalMenuTriggerRef: RefObject<HTMLButtonElement | null>;
   terminalMenuContentRef: RefObject<HTMLDivElement | null>;
@@ -146,9 +148,12 @@ const MainHeaderComponent = ({
   isChangelogOpen,
   setIsChangelogOpen,
   updateMessage,
+  showUpdatePrompt,
+  updateInstallPending,
+  onApplyUpdate,
+  onDismissUpdate,
   activeProjectWebLinks,
   onOpenProjectWebLink,
-  onCheckUpdates,
   terminalMenuRef,
   terminalMenuTriggerRef,
   terminalMenuContentRef,
@@ -306,6 +311,28 @@ const MainHeaderComponent = ({
     </div>
     <div className="no-drag flex items-center gap-2">
       {updateMessage && <span className="hidden text-xs text-slate-400 md:inline">{updateMessage}</span>}
+      {showUpdatePrompt ? (
+        <>
+          <button
+            className="btn-ghost app-tooltip-target"
+            data-app-tooltip={tooltipText("Install Update", "Download and install the available update.")}
+            aria-label="Install available update"
+            onClick={onApplyUpdate}
+            disabled={updateInstallPending}
+          >
+            {updateInstallPending ? "Installing..." : "Install now"}
+          </button>
+          <button
+            className="btn-ghost app-tooltip-target"
+            data-app-tooltip={tooltipText("Later", "Dismiss this update prompt until next launch.")}
+            aria-label="Remind me later about update"
+            onClick={onDismissUpdate}
+            disabled={updateInstallPending}
+          >
+            Later
+          </button>
+        </>
+      ) : null}
       {activeProjectWebLinks.map((link) => (
         <button
           key={link.id}
@@ -322,14 +349,6 @@ const MainHeaderComponent = ({
           </span>
         </button>
       ))}
-      <button
-        className="btn-ghost app-tooltip-target"
-        data-app-tooltip={tooltipText("Check for Updates", "Check for the latest app version.")}
-        aria-label="Check for updates"
-        onClick={onCheckUpdates}
-      >
-        <span className="inline-flex items-center gap-1"><FaSyncAlt className="text-[10px]" />Updates</span>
-      </button>
       <div className="relative" ref={terminalMenuRef}>
         <button
           ref={terminalMenuTriggerRef}

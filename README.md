@@ -59,6 +59,29 @@ npm run package:win    # produces NSIS .exe installer
 npm run package:linux  # produces .AppImage
 ```
 
+Publish the latest Windows installer + `latest.yml` to Cloudflare R2:
+
+```bash
+# one-time setup
+cp .env.release.example .env.release
+# edit .env.release with your values
+
+npm run package:win
+npm run release:publish:cloudflare
+```
+
+The publish script will:
+- pick the latest `GameraCode Setup X.Y.Z.exe` in `apps/desktop/main/release`
+- regenerate `apps/desktop/main/release/latest.yml` with matching `sha512` and `size`
+- upload installer, `.blockmap` (if present), and `latest.yml` to `CF_R2_BUCKET/CF_R2_PREFIX`
+- read config from `.env.release` (process env vars still override file values)
+
+You can dry-run uploads:
+
+```bash
+npm run release:publish:cloudflare -- --dry-run
+```
+
 Run all targets in one command (best for CI runners with full tooling):
 
 ```bash

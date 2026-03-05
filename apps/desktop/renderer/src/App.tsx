@@ -420,7 +420,9 @@ export const App = () => {
   const [projectSetupById, setProjectSetupById] = useState<Record<string, ProjectSetupEvent>>({});
   const projectSetupClearTimeoutByIdRef = useRef<Record<string, number>>({});
   const [logs, setLogs] = useState<string[]>([]);
-  const [updateMessage, setUpdateMessage] = useState<string>("");
+  const [updateAvailableVersion, setUpdateAvailableVersion] = useState<string | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [updateInstallPending, setUpdateInstallPending] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const tooltipTargetRef = useRef<HTMLElement | null>(null);
   const tooltipElementRef = useRef<HTMLDivElement | null>(null);
@@ -1995,6 +1997,7 @@ export const App = () => {
       await loadSystemTerminals();
       await loadInstallerStatus();
       await loadCodexAuthStatus();
+      await checkUpdatesOnLaunch();
     };
 
     initialize().catch((error) => {
@@ -6663,14 +6666,44 @@ const stopActiveRun = async () => {
     }
   };
 
-  const checkUpdates = async () => {
-    const result = await api.updates.check();
-    if (!result.available) {
-      setUpdateMessage("No update available.");
+  const checkUpdatesOnLaunch = async () => {
+    try {
+      const result = await api.updates.check();
+      if (!result.available) {
+        setUpdateAvailableVersion(null);
+        setUpdateDismissed(false);
+        setUpdateInstallPending(false);
+        return;
+      }
+      setUpdateAvailableVersion(result.version ?? "available");
+      setUpdateDismissed(false);
+      setUpdateInstallPending(false);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Update check failed: ${String(error)}`]);
+    }
+  };
+
+  const applyUpdate = async () => {
+    if (updateInstallPending) {
       return;
     }
+    setUpdateInstallPending(true);
+    try {
+      const result = await api.updates.apply();
+      if (!result.ok) {
+        throw new Error("Update apply failed.");
+      }
+    } catch (error) {
+      setLogs((prev) => [...prev, `Update install failed: ${String(error)}`]);
+      setUpdateInstallPending(false);
+    }
+  };
 
-    setUpdateMessage(`Update ${result.version} available.`);
+  const dismissUpdatePrompt = () => {
+    if (updateInstallPending) {
+      return;
+    }
+    setUpdateDismissed(true);
   };
 
   const openSkillEditor = async (path: string) => {
@@ -7249,6 +7282,8 @@ const stopActiveRun = async () => {
     },
     [activeThread, forkThreadFromPrompt]
   );
+  const updateMessage = updateAvailableVersion ? `Update ${updateAvailableVersion} available.` : "";
+  const showUpdatePrompt = Boolean(updateAvailableVersion) && !updateDismissed;
 
   return (
     <div className="h-screen overflow-hidden bg-bg text-white theme-text">
@@ -7275,9 +7310,12 @@ const stopActiveRun = async () => {
               isChangelogOpen={isChangelogOpen}
               setIsChangelogOpen={setIsChangelogOpen}
               updateMessage={updateMessage}
+              showUpdatePrompt={showUpdatePrompt}
+              updateInstallPending={updateInstallPending}
+              onApplyUpdate={applyUpdate}
+              onDismissUpdate={dismissUpdatePrompt}
               activeProjectWebLinks={activeProjectWebLinks}
               onOpenProjectWebLink={openProjectWebLink}
-              onCheckUpdates={checkUpdates}
               terminalMenuRef={terminalMenuRef}
               terminalMenuTriggerRef={terminalMenuTriggerRef}
               terminalMenuContentRef={terminalMenuContentRef}
