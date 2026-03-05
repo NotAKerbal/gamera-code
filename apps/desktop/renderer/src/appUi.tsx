@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { FaChevronDown, FaCodeBranch, FaGlobeAmericas } from "react-icons/fa";
-import type { MessageEvent, PromptAttachment } from "@code-app/shared";
+import type { MessageEvent, PromptAttachment, SubthreadProposal } from "@code-app/shared";
 import {
   splitAssistantContentSegments,
   MARKDOWN_REMARK_PLUGINS,
@@ -150,6 +150,32 @@ const PlanSummaryCard = ({
   </section>
 );
 
+const SubthreadProposalCard = ({ proposal }: { proposal: SubthreadProposal }) => (
+  <section className="rounded-lg border border-border/70 bg-zinc-900/60 p-4">
+    <div className="mb-2 text-[11px] uppercase tracking-[0.12em] text-slate-400">Sub-thread Proposal</div>
+    <p className="text-[14px] text-slate-100">{proposal.reason}</p>
+    <p className="mt-1 text-xs text-slate-400">Goal: {proposal.parentGoal}</p>
+    <div className="mt-3 grid grid-cols-1 gap-2">
+      {proposal.tasks.map((task) => (
+        <article key={task.key} className="rounded-md border border-border/70 bg-black/25 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm text-slate-100">{task.title}</h4>
+            <span className="rounded border border-border/70 bg-zinc-900 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-slate-400">
+              {task.key}
+            </span>
+          </div>
+          <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-300">{task.prompt}</p>
+          {task.expectedOutput ? (
+            <p className="mt-2 text-xs text-slate-400">
+              <span className="font-semibold text-slate-300">Expected:</span> {task.expectedOutput}
+            </p>
+          ) : null}
+        </article>
+      ))}
+    </div>
+  </section>
+);
+
 const AssistantMarkdown = ({
   messageId,
   content,
@@ -174,6 +200,9 @@ const AssistantMarkdown = ({
   return (
     <div className="space-y-3">
       {segments.map((segment, index) => {
+        if (segment.kind === "subthread_proposal" && segment.proposal) {
+          return <SubthreadProposalCard key={`subthread-${messageId}-${index}`} proposal={segment.proposal} />;
+        }
         if (segment.kind === "markdown") {
           if (!segment.content.trim()) {
             return null;
