@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+- Auto update
+- Better Subagent execution
+
 ## 0.4.0
 - Project templates
 - Git initialization flow
