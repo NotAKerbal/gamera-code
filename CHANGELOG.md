@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+- Browser Automation support
+- GPT-5.4 support
+
 ## 0.4.2
 - Massively improved Linux support
 - Merging and conflict resolution
