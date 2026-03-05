@@ -115,6 +115,9 @@ const normalizeCodexModel = (value: string | null): string | undefined => {
   }
 
   const normalized = value.toLowerCase();
+  if (normalized === "codex-5.4") {
+    return "gpt-5.4";
+  }
   if (normalized === "codex-5.3") {
     return "gpt-5.3-codex";
   }

@@ -50,7 +50,7 @@ type SettingsModalProps = {
   onClose: () => void;
   onCloseWindow: () => void | Promise<void>;
   onSaveSettings: (draft: { settings: AppSettings; composerOptions: CodexThreadOptions; settingsEnvText: string }) => void | Promise<void>;
-  onSaveSkillEditor: () => void | Promise<void>;
+  onSaveSkillEditor: () => Promise<boolean>;
   onToggleAppSkillEnabled: (path: string, enabled: boolean) => Promise<void>;
   onOpenSkillEditor: (path: string) => Promise<void>;
   onPickDefaultProjectDirectory: () => Promise<string | null>;
@@ -228,6 +228,7 @@ export const SettingsModal = memo(({
   const [composerOptions, setComposerOptions] = useState<CodexThreadOptions>(initialDraft.composerOptions);
   const [settingsEnvText, setSettingsEnvText] = useState(initialDraft.settingsEnvText);
   const [pendingDangerSandboxMode, setPendingDangerSandboxMode] = useState<CodexSandboxMode | null>(null);
+  const [skillEditorNotice, setSkillEditorNotice] = useState("");
 
   useEffect(() => {
     setSettingsTab(initialDraft.settingsTab);
@@ -725,10 +726,23 @@ export const SettingsModal = memo(({
                       onChange={(event) => setSkillEditorContent(event.target.value)}
                     />
                     <div className="flex justify-end">
-                      <button className="btn-primary h-8 px-3 py-0 text-xs" onClick={onSaveSkillEditor} disabled={skillEditorSaving}>
+                      <button
+                        className="btn-primary h-8 px-3 py-0 text-xs"
+                        onClick={() => {
+                          onSaveSkillEditor()
+                            .then((ok) => {
+                              setSkillEditorNotice(ok ? "Saved." : "Save failed. Check logs.");
+                            })
+                            .catch((error) => {
+                              setSkillEditorNotice(`Save failed: ${String(error)}`);
+                            });
+                        }}
+                        disabled={skillEditorSaving}
+                      >
                         {skillEditorSaving ? "Saving..." : "Save Skill"}
                       </button>
                     </div>
+                    {skillEditorNotice ? <p className="text-xs text-slate-400">{skillEditorNotice}</p> : null}
                   </div>
                 </section>
               )}

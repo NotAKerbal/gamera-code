@@ -64,6 +64,7 @@ const WORKSPACE_COLOR_PRESETS = [
 
 type ProjectSettingsModalProps = {
   activeProjectId: string;
+  activeProjectPath: string;
   initialDraft: ProjectSettingsDraft;
   workspaces: Workspace[];
   skillsByProjectId: Record<string, SkillRecord[]>;
@@ -71,19 +72,22 @@ type ProjectSettingsModalProps = {
   skillEditorContent: string;
   setSkillEditorContent: Dispatch<SetStateAction<string>>;
   skillEditorSaving: boolean;
-  saveSkillEditor: () => Promise<void>;
+  saveSkillEditor: () => Promise<boolean>;
   removingProject: boolean;
   onClose: () => void;
   onRemoveProject: () => Promise<void>;
   onSaveProjectSettings: (draft: ProjectSettingsDraft) => Promise<void>;
   onMoveProjectWorkspace: (workspaceId: string) => Promise<void>;
   onToggleProjectSkillEnabled: (path: string, enabled: boolean) => Promise<void>;
+  onRefreshProjectSkills: () => Promise<void>;
+  onCreateProjectSkill: (name: string) => Promise<void>;
   onOpenSkillEditor: (path: string) => Promise<void>;
   appendLog: (line: string) => void;
 };
 
 export const ProjectSettingsModal = memo(({
   activeProjectId,
+  activeProjectPath,
   initialDraft,
   workspaces,
   skillsByProjectId,
@@ -98,6 +102,8 @@ export const ProjectSettingsModal = memo(({
   onSaveProjectSettings,
   onMoveProjectWorkspace,
   onToggleProjectSkillEnabled,
+  onRefreshProjectSkills,
+  onCreateProjectSkill,
   onOpenSkillEditor,
   appendLog
 }: ProjectSettingsModalProps) => {
@@ -114,6 +120,20 @@ export const ProjectSettingsModal = memo(({
   const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">(
     initialDraft.projectSubthreadPolicyOverride
   );
+  const [newProjectSkillName, setNewProjectSkillName] = useState("");
+  const [projectSkillsBusy, setProjectSkillsBusy] = useState(false);
+  const [skillEditorNotice, setSkillEditorNotice] = useState("");
+  const normalizedProjectPath = activeProjectPath.replace(/\\/g, "/").toLowerCase();
+  const projectScopedSkills = (skillsByProjectId[activeProjectId] ?? []).filter((skill) => {
+    if (skill.scope === "repo") {
+      return true;
+    }
+    const normalizedSkillPath = skill.path.replace(/\\/g, "/").toLowerCase();
+    return (
+      normalizedSkillPath.startsWith(`${normalizedProjectPath}/`) &&
+      normalizedSkillPath.includes("/.agents/skills/")
+    );
+  });
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
@@ -417,12 +437,59 @@ export const ProjectSettingsModal = memo(({
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
                 <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Skills</div>
                 <div className="mx-2 space-y-2 px-2 py-3">
-                  {(skillsByProjectId[activeProjectId] ?? []).filter((skill) => skill.scope === "repo").length === 0 ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      className="input h-8 min-w-[14rem] flex-1 text-xs"
+                      value={newProjectSkillName}
+                      onChange={(event) => setNewProjectSkillName(event.target.value)}
+                      placeholder="new-skill-name"
+                    />
+                    <button
+                      className="btn-secondary h-8 px-2 py-0 text-xs"
+                      disabled={projectSkillsBusy}
+                      onClick={() => {
+                        const nextName = newProjectSkillName.trim();
+                        if (!nextName) {
+                          appendLog("Skill create failed: Skill name is required.");
+                          return;
+                        }
+                        setProjectSkillsBusy(true);
+                        onCreateProjectSkill(nextName)
+                          .then(() => setNewProjectSkillName(""))
+                          .catch((error) => {
+                            appendLog(`Skill create failed: ${String(error)}`);
+                          })
+                          .finally(() => {
+                            setProjectSkillsBusy(false);
+                          });
+                      }}
+                    >
+                      Add Skill
+                    </button>
+                    <button
+                      className="btn-ghost h-8 px-2 py-0 text-xs"
+                      disabled={projectSkillsBusy}
+                      onClick={() => {
+                        setProjectSkillsBusy(true);
+                        onRefreshProjectSkills()
+                          .catch((error) => {
+                            appendLog(`Skill refresh failed: ${String(error)}`);
+                          })
+                          .finally(() => {
+                            setProjectSkillsBusy(false);
+                          });
+                      }}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Creates project skills at <code>.agents/skills/&lt;name&gt;/SKILL.md</code>.
+                  </p>
+                  {projectScopedSkills.length === 0 ? (
                     <p className="text-xs text-slate-400">No project-scoped skills found for this repository.</p>
                   ) : (
-                    (skillsByProjectId[activeProjectId] ?? [])
-                      .filter((skill) => skill.scope === "repo")
-                      .map((skill) => (
+                    projectScopedSkills.map((skill) => (
                         <div key={skill.path} className="rounded border border-border/70 bg-black/20 p-2 text-xs">
                           <div className="flex items-center justify-between gap-2">
                             <div className="min-w-0">
@@ -469,10 +536,23 @@ export const ProjectSettingsModal = memo(({
                       onChange={(event) => setSkillEditorContent(event.target.value)}
                     />
                     <div className="flex justify-end">
-                      <button className="btn-primary h-8 px-3 py-0 text-xs" onClick={saveSkillEditor} disabled={skillEditorSaving}>
+                      <button
+                        className="btn-primary h-8 px-3 py-0 text-xs"
+                        onClick={() => {
+                          saveSkillEditor()
+                            .then((ok) => {
+                              setSkillEditorNotice(ok ? "Saved." : "Save failed. Check logs.");
+                            })
+                            .catch((error) => {
+                              setSkillEditorNotice(`Save failed: ${String(error)}`);
+                            });
+                        }}
+                        disabled={skillEditorSaving}
+                      >
                         {skillEditorSaving ? "Saving..." : "Save Skill"}
                       </button>
                     </div>
+                    {skillEditorNotice ? <p className="text-xs text-slate-400">{skillEditorNotice}</p> : null}
                   </div>
                 </section>
               )}

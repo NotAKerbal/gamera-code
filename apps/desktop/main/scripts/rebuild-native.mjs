@@ -19,6 +19,7 @@ process.env.USERPROFILE = cacheHome;
 process.env.npm_config_devdir = gypDir;
 
 const electronVersion = "35.0.1";
+const buildFromSource = process.env.CODE_APP_NATIVE_BUILD_FROM_SOURCE === "1";
 
 const run = async () => {
   await rebuild({
@@ -28,7 +29,7 @@ const run = async () => {
     projectRootPath: workspaceRoot,
     electronVersion,
     force: true,
-    buildFromSource: true,
+    buildFromSource,
     onlyModules: ["better-sqlite3", "node-pty"],
     mode: process.platform === "win32" ? "sequential" : "parallel"
   });

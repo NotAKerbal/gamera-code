@@ -196,6 +196,39 @@ import {
   RenameThreadModal,
   WorkspaceModal
 } from "./appOverlays";
+
+const normalizeSkillFrontmatterYaml = (content: string) => {
+  const lines = content.split(/\r?\n/);
+  let inFrontmatter = false;
+  let frontmatterSeen = 0;
+  let changed = false;
+  const next = lines.map((line) => {
+    if (line.trim() === "---") {
+      frontmatterSeen += 1;
+      inFrontmatter = frontmatterSeen === 1 ? true : false;
+      return line;
+    }
+    if (!inFrontmatter) {
+      return line;
+    }
+    const match = line.match(/^(\s*description:\s*)(.*)$/);
+    if (!match) {
+      return line;
+    }
+    const prefix = match[1] ?? "";
+    const rawValue = (match[2] ?? "").trim();
+    if (!rawValue || rawValue.startsWith('"') || rawValue.startsWith("'") || !rawValue.includes(":")) {
+      return line;
+    }
+    const escaped = rawValue.replace(/"/g, '\\"');
+    changed = true;
+    return `${prefix}"${escaped}"`;
+  });
+  return {
+    content: next.join("\n"),
+    changed
+  };
+};
 import { SettingsModal } from "./appSettingsModal";
 import { SetupModal } from "./appSetupModal";
 import { ComposerDropdownPortal } from "./appComposerDropdown";
@@ -735,6 +768,12 @@ export const App = () => {
     () => (activeGitState?.files ?? []).filter((file) => file.unstaged || file.untracked),
     [activeGitState?.files]
   );
+  const activeConflictFiles = useMemo(() => {
+    const conflictStatusPairs = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+    return (activeGitState?.files ?? []).filter((file) =>
+      conflictStatusPairs.has(`${file.indexStatus}${file.workTreeStatus}`)
+    );
+  }, [activeGitState?.files]);
   const gitBranchInput = gitBranchSearch.trim();
   const deferredGitBranchInput = useDeferredValue(gitBranchInput);
   const filteredBranches = useMemo(() => {
@@ -781,6 +820,7 @@ export const App = () => {
     [activeUnstagedFiles]
   );
   const hasStageableFiles = activeUnstagedFiles.length > 0;
+  const hasMergeConflicts = activeConflictFiles.length > 0;
   const isWorkingTreeClean = hasStageableFiles === false && activeStagedFiles.length === 0;
   const activeRunState: ThreadRunState = activeThreadId ? runStateByThreadId[activeThreadId] ?? "idle" : "idle";
   const activeThreadSendPending = activeThreadId ? Boolean(sendPendingByThreadId[activeThreadId]) : false;
@@ -3722,6 +3762,60 @@ export const App = () => {
       return;
     }
     await runGitAction("discard-unstaged", (projectId) => api.git.discard({ projectId }));
+  };
+
+  const resolveMergeConflictsWithAi = async () => {
+    if (!activeProjectId || !activeGitState?.insideRepo || activeConflictFiles.length === 0) {
+      return;
+    }
+
+    const conflictPaths = activeConflictFiles.map((file) => file.path);
+    const thread = await api.threads.create({
+      projectId: activeProjectId,
+      title: `Resolve merge conflicts (${conflictPaths.length})`,
+      provider: "codex"
+    });
+    await loadThreads();
+    setActiveThreadId(thread.id);
+
+    const promptBody = [
+      "Help me resolve these git merge conflicts.",
+      "Workflow requirements:",
+      "- First summarize each conflict and propose a resolution plan.",
+      "- Ask for confirmation before editing files.",
+      "- After confirmation, apply edits and run minimal validation.",
+      "- Do not run git add/commit/push unless explicitly requested.",
+      "",
+      `Conflicted files (${conflictPaths.length}):`,
+      ...conflictPaths.map((path) => `- ${path}`)
+    ].join("\n");
+
+    const prompt: QueuedPrompt = {
+      id: crypto.randomUUID(),
+      input: buildPromptInputWithMentionedFiles(promptBody, conflictPaths),
+      attachments: [],
+      skills: [],
+      options: {
+        ...composerOptions,
+        collaborationMode: "coding"
+      }
+    };
+    await dispatchPromptToThread(thread.id, prompt);
+    setGitActivityByProjectId((prev) => {
+      const existing = prev[activeProjectId] ?? [];
+      return {
+        ...prev,
+        [activeProjectId]: [
+          ...existing,
+          {
+            id: crypto.randomUUID(),
+            ts: new Date().toISOString(),
+            message: `Opened merge conflict thread with ${conflictPaths.length} conflicted file(s).`,
+            tone: "info" as const
+          }
+        ].slice(-80)
+      };
+    });
   };
 
   const initializeGitRepository = async () => {
@@ -6712,23 +6806,133 @@ const stopActiveRun = async () => {
     setSkillEditorContent(doc.content);
   };
 
-  const saveSkillEditor = async () => {
+  const createProjectSkill = useCallback(
+    async (requestedName: string) => {
+      if (!activeProjectId) {
+        throw new Error("No active project selected.");
+      }
+      const projectForSettings = projects.find((project) => project.id === activeProjectId);
+      if (!projectForSettings?.path) {
+        throw new Error("Project path not found.");
+      }
+
+      const normalizedName = requestedName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .replace(/-{2,}/g, "-");
+      if (!normalizedName) {
+        throw new Error("Skill name must include letters or numbers.");
+      }
+
+      const projectPath = projectForSettings.path.replace(/[\\/]+$/, "");
+      const skillDocPath = `${projectPath}/.agents/skills/${normalizedName}/SKILL.md`;
+      const normalizePath = (value: string) => value.replace(/\\/g, "/").toLowerCase();
+      const hasExisting = (skillsByProjectId[activeProjectId] ?? []).some(
+        (skill) => normalizePath(skill.path) === normalizePath(skillDocPath)
+      );
+      if (hasExisting) {
+        throw new Error(`A skill already exists at ${skillDocPath}.`);
+      }
+
+      const skillTemplate = `---
+name: ${normalizedName}
+description: "TODO: short description"
+---
+
+# ${normalizedName}
+
+## Purpose
+TODO: Describe what this skill does.
+
+## When To Use
+- TODO: Trigger condition 1
+- TODO: Trigger condition 2
+
+## Instructions
+1. TODO: First action
+2. TODO: Second action
+`;
+
+      await api.skills.writeDocument({
+        path: skillDocPath,
+        content: skillTemplate
+      });
+      await loadProjectSkills(activeProjectId);
+      await openSkillEditor(skillDocPath);
+    },
+    [activeProjectId, loadProjectSkills, openSkillEditor, projects, skillsByProjectId]
+  );
+
+  const saveSkillEditor = async (): Promise<boolean> => {
     if (!skillEditorPath) {
-      return;
+      return false;
     }
     setSkillEditorSaving(true);
     try {
+      const normalized = normalizeSkillFrontmatterYaml(skillEditorContent);
+      if (normalized.changed) {
+        setSkillEditorContent(normalized.content);
+        setLogs((prev) => [...prev, "Skill save note: auto-quoted description field for valid YAML frontmatter."]);
+      }
       await api.skills.writeDocument({
         path: skillEditorPath,
-        content: skillEditorContent
+        content: normalized.content
       });
-      if (activeProjectId) {
-        await loadProjectSkills(activeProjectId);
+      const normalizedSkillPath = skillEditorPath.replace(/\\/g, "/").toLowerCase();
+      const ownerProject = projects
+        .filter((project) => {
+          const normalizedProjectPath = project.path.replace(/\\/g, "/").toLowerCase();
+          return normalizedSkillPath.startsWith(`${normalizedProjectPath}/`);
+        })
+        .sort((a, b) => b.path.length - a.path.length)[0];
+      if (ownerProject && normalizedSkillPath.includes("/.agents/skills/")) {
+        const lines = skillEditorContent.split(/\r?\n/);
+        const nameLine = lines.find((line) => line.trim().toLowerCase().startsWith("name:"));
+        const descriptionLine = lines.find((line) => line.trim().toLowerCase().startsWith("description:"));
+        const inferredName =
+          nameLine?.split(":").slice(1).join(":").trim() ||
+          skillEditorPath.replace(/\\/g, "/").split("/").slice(-2, -1)[0] ||
+          "skill";
+        const inferredDescription = descriptionLine?.split(":").slice(1).join(":").trim() || "";
+        setSkillsByProjectId((prev) => {
+          const current = prev[ownerProject.id] ?? [];
+          const hasExisting = current.some(
+            (skill) => skill.path.replace(/\\/g, "/").toLowerCase() === normalizedSkillPath
+          );
+          if (hasExisting) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [ownerProject.id]: [
+              ...current,
+              {
+                name: inferredName,
+                path: skillEditorPath,
+                description: inferredDescription,
+                enabled: true,
+                scope: "repo"
+              }
+            ]
+          };
+        });
       }
-      await loadAppSkills();
+      if (ownerProject) {
+        void loadProjectSkills(ownerProject.id).catch((error) => {
+          setLogs((prev) => [...prev, `Project skill refresh failed: ${String(error)}`]);
+        });
+      }
+      void loadAppSkills().catch((error) => {
+        setLogs((prev) => [...prev, `App skill refresh failed: ${String(error)}`]);
+      });
+      setLogs((prev) => [...prev, `Skill saved: ${skillEditorPath}`]);
+      return true;
     } catch (error) {
       const message = `Skill save failed: ${String(error)}`;
       setLogs((prev) => [...prev, message]);
+      return false;
     } finally {
       setSkillEditorSaving(false);
     }
@@ -7263,6 +7467,14 @@ const stopActiveRun = async () => {
     },
     [activeProjectId, loadProjectSkills]
   );
+
+  const refreshActiveProjectSkills = useCallback(async () => {
+    if (!activeProjectId) {
+      return;
+    }
+    await loadProjectSkills(activeProjectId);
+  }, [activeProjectId, loadProjectSkills]);
+
   const handleSelectWorkspace = useCallback(
     (workspaceId: string) => {
       focusWorkspace(workspaceId).catch((error) => {
@@ -9209,7 +9421,22 @@ const stopActiveRun = async () => {
                           <div className="git-panel-card">
                             <div className="git-panel-card-title">
                               Unstaged / Untracked ({activeUnstagedFiles.length})
+                              {hasMergeConflicts ? ` | Conflicts ${activeConflictFiles.length}` : ""}
                             </div>
+                            {hasMergeConflicts && (
+                              <button
+                                className="btn-ghost mt-1 mb-2 w-full justify-center"
+                                onClick={() =>
+                                  resolveMergeConflictsWithAi().catch((error) =>
+                                    setLogs((prev) => [...prev, `Open merge conflict thread failed: ${String(error)}`])
+                                  )
+                                }
+                                disabled={Boolean(gitBusyAction)}
+                                title="Open a dedicated AI thread for conflict resolution"
+                              >
+                                Resolve Conflicts (AI)
+                              </button>
+                            )}
                             {hasStageableFiles && (
                               <button
                                 className="btn-ghost mt-1 mb-2 w-full justify-center"
@@ -9360,6 +9587,7 @@ const stopActiveRun = async () => {
       {showProjectSettings && activeProjectId && projectSettingsInitialDraft && (
         <ProjectSettingsModal
           activeProjectId={activeProjectId}
+          activeProjectPath={selectedProject?.path ?? ""}
           initialDraft={projectSettingsInitialDraft}
           workspaces={workspaces}
           skillsByProjectId={skillsByProjectId}
@@ -9374,6 +9602,8 @@ const stopActiveRun = async () => {
           onSaveProjectSettings={saveProjectSettings}
           onMoveProjectWorkspace={moveProjectWorkspace}
           onToggleProjectSkillEnabled={toggleProjectSkillEnabled}
+          onRefreshProjectSkills={refreshActiveProjectSkills}
+          onCreateProjectSkill={createProjectSkill}
           onOpenSkillEditor={openSkillEditor}
           appendLog={appendLog}
         />
