@@ -1,6 +1,8 @@
 import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 import type {
+  CodexAuthStatus,
+  CodexLoginResult,
   InstallDependenciesResult,
   InstallDetail,
   InstallDependencyKey,
@@ -11,6 +13,7 @@ import { Repository } from "./repository";
 import { createCommandRunner, type CommandRunner } from "../utils/commandRunner";
 import { resolveCodexBinaryPath } from "../utils/codexBinary";
 import { resolveBundledRipgrepBinaryPath } from "../utils/ripgrepBinary";
+import { CodexAppServerClient } from "./codexAppServer";
 
 interface InstallCommand {
   label: string;
@@ -98,6 +101,75 @@ export class InstallerManager {
 
   async verify(): Promise<InstallStatus> {
     return this.doctor();
+  }
+
+  async getCodexAuthStatus(): Promise<CodexAuthStatus> {
+    const appServer = this.createCodexAppServerClient();
+    try {
+      await appServer.connect();
+      const status = await appServer.getAccountStatus(true);
+      return {
+        ...status,
+        message: status.authenticated ? "Signed in to Codex." : "Codex account sign-in is required."
+      };
+    } catch (error) {
+      return {
+        authenticated: false,
+        requiresOpenaiAuth: true,
+        message: error instanceof Error ? error.message : String(error)
+      };
+    } finally {
+      await appServer.close();
+    }
+  }
+
+  async loginCodex(onAuthUrl?: (url: string) => void | Promise<void>): Promise<CodexLoginResult> {
+    const appServer = this.createCodexAppServerClient();
+    try {
+      await appServer.connect();
+      const status = await appServer.getAccountStatus(true);
+      if (status.authenticated) {
+        return {
+          ok: true,
+          alreadyAuthenticated: true,
+          message: "Already signed in to Codex."
+        };
+      }
+
+      const { authUrl, loginId } = await appServer.startChatGptLogin();
+      if (onAuthUrl) {
+        await onAuthUrl(authUrl);
+      }
+
+      const completion = await appServer.waitForLoginCompletion(loginId, 180_000);
+      if (!completion.success) {
+        return {
+          ok: false,
+          message: completion.error || "Codex sign-in did not complete."
+        };
+      }
+
+      const finalStatus = await appServer.getAccountStatus(true);
+      if (!finalStatus.authenticated) {
+        return {
+          ok: false,
+          message: "Codex sign-in callback finished, but account is still unauthenticated."
+        };
+      }
+
+      return {
+        ok: true,
+        authUrl,
+        message: "Signed in to Codex."
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error)
+      };
+    } finally {
+      await appServer.close();
+    }
   }
 
   async installCli(provider: Provider): Promise<{ ok: boolean; logs: string[] }> {
@@ -396,6 +468,26 @@ export class InstallerManager {
       version,
       message: "Codex app server ready"
     };
+  }
+
+  private createCodexAppServerClient() {
+    const env = Object.fromEntries(
+      Object.entries({
+        ...process.env,
+        FORCE_COLOR: "0",
+        NO_COLOR: "1",
+        CLICOLOR: "0",
+        TERM: "dumb",
+        CODE_APP_PROVIDER: "codex",
+        CODE_APP_THREAD_ID: "installer-auth-check"
+      }).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+
+    return new CodexAppServerClient({
+      executablePath: resolveCodexBinaryPath(),
+      env,
+      threadId: "installer-auth-check"
+    });
   }
 
   private readCodexVersion(): string | undefined {

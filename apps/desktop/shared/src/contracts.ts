@@ -12,6 +12,8 @@ import type {
   InstallDependenciesResult,
   InstallDependencyKey,
   InstallStatus,
+  CodexAuthStatus,
+  CodexLoginResult,
   MessageEvent,
   OrchestrationChild,
   OrchestrationRun,
@@ -160,6 +162,8 @@ export interface DesktopApi {
     doctor: () => Promise<InstallStatus>;
     installCli: (input: { provider: Provider }) => Promise<{ ok: boolean; logs: string[] }>;
     installDependencies: (input?: { targets?: InstallDependencyKey[] }) => Promise<InstallDependenciesResult>;
+    getCodexAuthStatus: () => Promise<CodexAuthStatus>;
+    loginCodex: () => Promise<CodexLoginResult>;
     verify: () => Promise<InstallStatus>;
     onInstallLog: (listener: (line: string) => void) => () => void;
   };

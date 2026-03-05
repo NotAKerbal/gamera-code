@@ -59,6 +59,7 @@ import type {
   GitOutgoingCommit,
   GitState,
   InstallStatus,
+  CodexAuthStatus,
   MessageEvent,
   OrchestrationChild,
   OrchestrationRun,
@@ -103,6 +104,7 @@ import {
   QUICK_PROMPTS,
   REASONING_OPTIONS,
   REQUIRED_SETUP_KEYS,
+  SETUP_BLOCKING_KEYS,
   SANDBOX_OPTIONS,
   SHOW_TERMINAL,
   SKILL_MENTION_MATCH_LIMIT,
@@ -356,6 +358,9 @@ export const App = () => {
   const [threadDraftTitle, setThreadDraftTitle] = useState("New thread");
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
+  const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus | null>(null);
+  const [isCodexAuthCardDismissed, setIsCodexAuthCardDismissed] = useState(false);
+  const [codexLoginInFlight, setCodexLoginInFlight] = useState(false);
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [setupPermissionGranted, setSetupPermissionGranted] = useState(false);
   const [setupInstalling, setSetupInstalling] = useState(false);
@@ -1406,6 +1411,25 @@ export const App = () => {
     setInstallStatus(status);
   };
 
+  const loadCodexAuthStatus = async () => {
+    const status = await api.installer.getCodexAuthStatus();
+    setCodexAuthStatus(status);
+    if (status.authenticated) {
+      setIsCodexAuthCardDismissed(false);
+    }
+    return status;
+  };
+
+  const isCodexUnauthenticatedError = (payload: string) => {
+    const text = payload.toLowerCase();
+    return (
+      text.includes("401 unauthorized") &&
+      (text.includes("missing bearer") ||
+        text.includes("missing bearer or basic authentication") ||
+        text.includes("authentication"))
+    );
+  };
+
   const loadProjectSettings = async (projectId: string) => {
     const settingsForProject = await api.projectSettings.get({ projectId });
     setProjectSettingsById((prev) => ({
@@ -1970,6 +1994,7 @@ export const App = () => {
       await loadSettings();
       await loadSystemTerminals();
       await loadInstallerStatus();
+      await loadCodexAuthStatus();
     };
 
     initialize().catch((error) => {
@@ -2269,6 +2294,23 @@ export const App = () => {
         if (previousThreadRunState === "running" && nextThreadRunState !== "running") {
           drainPromptQueueForThread(event.threadId);
         }
+      }
+
+      const authRequiredFromData = Boolean(data?.authRequired);
+      const authRequiredFromError = event.type === "stderr" && isCodexUnauthenticatedError(event.payload);
+      if (authRequiredFromData || authRequiredFromError) {
+        setCodexAuthStatus((prev) => ({
+          authenticated: false,
+          requiresOpenaiAuth: true,
+          accountType: prev?.accountType,
+          email: prev?.email,
+          planType: prev?.planType,
+          message: "Codex authentication is required."
+        }));
+        setIsCodexAuthCardDismissed(false);
+        loadCodexAuthStatus().catch((error) => {
+          setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
+        });
       }
 
       if (event.threadId !== activeThreadIdRef.current) {
@@ -6466,6 +6508,32 @@ const stopActiveRun = async () => {
     await loadInstallerStatus();
   };
 
+  const startCodexLogin = async () => {
+    if (codexLoginInFlight) {
+      return;
+    }
+
+    setCodexLoginInFlight(true);
+    try {
+      const result = await api.installer.loginCodex();
+      setLogs((prev) => [...prev, result.message]);
+      await loadCodexAuthStatus();
+      if (!result.ok) {
+        return;
+      }
+
+      window.setTimeout(() => {
+        loadCodexAuthStatus().catch((error) => {
+          setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
+        });
+      }, 3000);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Codex login failed: ${String(error)}`]);
+    } finally {
+      setCodexLoginInFlight(false);
+    }
+  };
+
   const runAutomaticSetup = async () => {
     if (!setupPermissionGranted || setupInstalling) {
       return;
@@ -6635,13 +6703,33 @@ const stopActiveRun = async () => {
 
   const setupBlocked = Boolean(
     installStatus &&
-      (!installStatus.nodeOk || !installStatus.npmOk || !installStatus.gitOk || !installStatus.rgOk || !installStatus.codexOk)
+      installStatus.details.some((detail) => SETUP_BLOCKING_KEYS.has(detail.key) && !detail.ok)
   );
+  const codexAuthBlocked = Boolean(codexAuthStatus?.requiresOpenaiAuth && !codexAuthStatus?.authenticated);
   useEffect(() => {
     if (!setupBlocked) {
       setIsSetupCardDismissed(false);
     }
   }, [setupBlocked]);
+  useEffect(() => {
+    if (!codexAuthBlocked) {
+      setIsCodexAuthCardDismissed(false);
+    }
+  }, [codexAuthBlocked]);
+
+  useEffect(() => {
+    if (!codexAuthBlocked) {
+      return;
+    }
+    const timerId = window.setInterval(() => {
+      loadCodexAuthStatus().catch((error) => {
+        setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
+      });
+    }, 30_000);
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [codexAuthBlocked]);
   const planArtifacts = useMemo<PlanArtifact[]>(() => {
     const plans: PlanArtifact[] = [];
 
@@ -7781,6 +7869,51 @@ const stopActiveRun = async () => {
             </aside>
 
             <main className="main-layout-content flex h-full min-h-0 min-w-0 flex-col">
+              {codexAuthBlocked && !isCodexAuthCardDismissed && (
+                <section className="mx-4 mt-3 rounded-xl border border-border bg-panel/70 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold tracking-wide text-slate-100">Codex Sign-In Required</h3>
+                    <button
+                      type="button"
+                      className="btn-ghost h-7 px-2 py-0 text-xs"
+                      onClick={() => setIsCodexAuthCardDismissed(true)}
+                      aria-label="Dismiss Codex sign-in notice"
+                      title="Dismiss"
+                    >
+                      <FaTimes className="text-[10px]" />
+                    </button>
+                  </div>
+                  <p className="mb-3 text-sm text-slate-300">
+                    {codexAuthStatus?.email
+                      ? `Current account: ${codexAuthStatus.email}. Re-authenticate to continue using Codex.`
+                      : "You are not signed in to Codex. Sign in to start or continue Codex runs."}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="btn-primary"
+                      onClick={() => {
+                        startCodexLogin().catch((error) => {
+                          setLogs((prev) => [...prev, `Codex login failed: ${String(error)}`]);
+                        });
+                      }}
+                      disabled={codexLoginInFlight}
+                    >
+                      {codexLoginInFlight ? "Opening Sign-In..." : "Sign In to Codex"}
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        loadCodexAuthStatus().catch((error) => {
+                          setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
+                        });
+                      }}
+                    >
+                      Refresh Status
+                    </button>
+                  </div>
+                </section>
+              )}
+
               {hasUserPromptInThread && installStatus && setupBlocked && !isSetupCardDismissed && (
                 <section className="mx-4 mt-3 rounded-xl border border-border bg-panel/70 p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -9265,4 +9398,3 @@ const stopActiveRun = async () => {
     </div>
   );
 };
-

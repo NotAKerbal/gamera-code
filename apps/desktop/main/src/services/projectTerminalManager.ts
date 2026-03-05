@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { accessSync, constants as fsConstants } from "node:fs";
 import * as pty from "node-pty";
 import type {
   AppSettings,
@@ -12,6 +13,7 @@ import type {
 import { Repository } from "./repository";
 import { sanitizePtyOutput } from "../utils/stripAnsi";
 import { withBundledRipgrepInPath } from "../utils/ripgrepBinary";
+import { withRuntimePath } from "../utils/runtimeEnv";
 
 interface RunningProjectTerminal {
   projectId: string;
@@ -32,6 +34,36 @@ const URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]+/gi;
 
 const nowIso = () => new Date().toISOString();
 const toRunningKey = (projectId: string, commandId: string) => `${projectId}:${commandId}`;
+
+const isExecutableFile = (path: string): boolean => {
+  try {
+    accessSync(path, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const resolvePosixShell = (): string | null => {
+  const candidates = [
+    process.env["SHELL"],
+    "/bin/bash",
+    "/usr/bin/bash",
+    "/bin/sh",
+    "/usr/bin/sh",
+    "/bin/zsh",
+    "/usr/bin/zsh"
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (isExecutableFile(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+};
 
 export const fallbackUrlFromCommand = (command: string): string | undefined => {
   const normalized = command.toLowerCase();
@@ -268,16 +300,44 @@ export class ProjectTerminalManager {
   private startCommand(project: Project, settings: ProjectSettings, command: ProjectDevCommand) {
     this.stop(project.id, command.id);
 
-    const env = withBundledRipgrepInPath({
-      ...process.env,
-      ...settings.envVars,
-      FORCE_COLOR: "1",
-      CLICOLOR: "1",
-      CLICOLOR_FORCE: "1",
-      TERM: "xterm-256color",
-      CODE_APP_PROJECT_ID: project.id
-    } as Record<string, string>);
-    const shell = process.platform === "win32" ? "cmd.exe" : "/bin/zsh";
+    const posixShell = process.platform === "win32" ? null : resolvePosixShell();
+    if (process.platform !== "win32" && !posixShell) {
+      const message = "No compatible shell found (tried $SHELL, bash, sh, zsh).";
+      this.updateTerminal(project.id, command.id, {
+        name: command.name,
+        command: command.command,
+        running: false,
+        pid: undefined,
+        outputTail: message,
+        lastExitCode: 127,
+        updatedAt: nowIso(),
+        autoStart: Boolean(command.autoStart),
+        useForPreview: Boolean(command.useForPreview)
+      });
+      this.emit(project.id, "stderr", message, {
+        commandId: command.id,
+        commandName: command.name
+      });
+      this.emit(project.id, "exit", `Exited ${command.name} with code 127`, {
+        commandId: command.id,
+        commandName: command.name,
+        exitCode: 127
+      });
+      return;
+    }
+
+    const env = withBundledRipgrepInPath(
+      withRuntimePath({
+        ...process.env,
+        ...settings.envVars,
+        FORCE_COLOR: "1",
+        CLICOLOR: "1",
+        CLICOLOR_FORCE: "1",
+        TERM: "xterm-256color",
+        CODE_APP_PROJECT_ID: project.id
+      } as Record<string, string>)
+    );
+    const shell = process.platform === "win32" ? "cmd.exe" : (posixShell as string);
     const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", command.command] : ["-lc", command.command];
     const ptyProcess = pty.spawn(shell, shellArgs, {
       name: "xterm-256color",

@@ -64,7 +64,18 @@ const defaultPathCandidates = () => {
     ];
   }
 
-  return [...base, "/usr/local/bin", "/usr/bin", "/bin", path.join(home, ".local", "bin"), path.join(home, "bin")];
+  return [
+    ...base,
+    "/home/linuxbrew/.linuxbrew/bin",
+    "/home/linuxbrew/.linuxbrew/sbin",
+    path.join(home, ".linuxbrew", "bin"),
+    path.join(home, ".linuxbrew", "sbin"),
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    path.join(home, ".local", "bin"),
+    path.join(home, "bin")
+  ];
 };
 
 export const withRuntimePath = (inputEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {

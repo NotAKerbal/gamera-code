@@ -38,6 +38,10 @@ const sessionsReviewThreadChannel =
   (IPC_CHANNELS as Record<string, string>).sessionsReviewThread ?? "sessions:reviewThread";
 const sessionsReviewCommitChannel =
   (IPC_CHANNELS as Record<string, string>).sessionsReviewCommit ?? "sessions:reviewCommit";
+const installerGetCodexAuthStatusChannel =
+  (IPC_CHANNELS as Record<string, string>).installerGetCodexAuthStatus ?? "installer:getCodexAuthStatus";
+const installerLoginCodexChannel =
+  (IPC_CHANNELS as Record<string, string>).installerLoginCodex ?? "installer:loginCodex";
 const skillsListChannel =
   (IPC_CHANNELS as Record<string, string>).skillsList ?? "skills:list";
 const skillsSetEnabledChannel =
@@ -194,6 +198,8 @@ const api: DesktopApiWithGitExtras = {
     doctor: () => ipcRenderer.invoke(IPC_CHANNELS.installerDoctor),
     installCli: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallCli, input),
     installDependencies: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallDependencies, input),
+    getCodexAuthStatus: () => ipcRenderer.invoke(installerGetCodexAuthStatusChannel),
+    loginCodex: () => ipcRenderer.invoke(installerLoginCodexChannel),
     verify: () => ipcRenderer.invoke(IPC_CHANNELS.installerVerify),
     onInstallLog: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, line: string) => listener(line);

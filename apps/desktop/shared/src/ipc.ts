@@ -57,6 +57,8 @@ export const IPC_CHANNELS = {
   installerInstallCli: "installer:installCli",
   installerInstallDependencies: "installer:installDependencies",
   installerInstallLog: "installer:installLog",
+  installerGetCodexAuthStatus: "installer:getCodexAuthStatus",
+  installerLoginCodex: "installer:loginCodex",
   installerVerify: "installer:verify",
   permissionsEvaluate: "permissions:evaluate",
   permissionsSetMode: "permissions:setMode",
