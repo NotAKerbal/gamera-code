@@ -5,11 +5,22 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactElement
 } from "react";
 import * as monaco from "monaco-editor";
-import { FaChevronRight, FaCode, FaWindowMaximize, FaWindowMinimize, FaWindowRestore, FaTimes } from "react-icons/fa";
-import type { ProjectDirectoryEntry } from "@code-app/shared";
+import {
+  FaChevronRight,
+  FaCode,
+  FaFileMedical,
+  FaFolderPlus,
+  FaWindowMaximize,
+  FaWindowMinimize,
+  FaWindowRestore,
+  FaTimes
+} from "react-icons/fa";
+import type { AppTheme, ProjectDirectoryEntry } from "@code-app/shared";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import JsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
@@ -21,6 +32,7 @@ type MonacoCodePanelProps = {
   activeProjectPath?: string;
   projectName?: string;
   appIconSrc: string;
+  appTheme?: AppTheme;
   isMacOS: boolean;
   isWindows: boolean;
   isWindowMaximized: boolean;
@@ -63,6 +75,24 @@ type DragState = {
   sourceGroupId: string;
 } | null;
 
+type PendingCreateState = {
+  parentPath: string;
+  kind: "file" | "folder";
+  name: string;
+} | null;
+
+type RenameState = {
+  path: string;
+  name: string;
+} | null;
+
+type ContextMenuState = {
+  x: number;
+  y: number;
+  path: string;
+  kind: "file" | "folder";
+} | null;
+
 const monacoGlobal = globalThis as typeof globalThis & {
   MonacoEnvironment?: { getWorker: (_moduleId: string, label: string) => Worker };
 };
@@ -80,6 +110,11 @@ if (!monacoGlobal.MonacoEnvironment) {
 }
 
 const basename = (path: string) => path.split("/").pop() ?? path;
+const dirname = (path: string) => {
+  const normalized = path.replace(/\/+$/g, "");
+  const index = normalized.lastIndexOf("/");
+  return index >= 0 ? normalized.slice(0, index) : "";
+};
 
 const languageFromPath = (path: string) => {
   const lower = path.toLowerCase();
@@ -163,6 +198,7 @@ export const MonacoCodePanel = ({
   activeProjectPath,
   projectName,
   appIconSrc,
+  appTheme,
   isMacOS,
   isWindows,
   isWindowMaximized,
@@ -186,12 +222,16 @@ export const MonacoCodePanel = ({
   const hostByGroupRef = useRef(new Map<string, HTMLDivElement>());
   const editorByGroupRef = useRef(new Map<string, monaco.editor.IStandaloneCodeEditor>());
   const workbenchRef = useRef(workbench);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   workbenchRef.current = workbench;
 
   const [entriesByDirectory, setEntriesByDirectory] = useState<Record<string, ProjectDirectoryEntry[]>>({});
   const [loadingDirectories, setLoadingDirectories] = useState<Record<string, boolean>>({});
   const [loadedDirectories, setLoadedDirectories] = useState<Record<string, boolean>>({});
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [pendingCreate, setPendingCreate] = useState<PendingCreateState>(null);
+  const [renameState, setRenameState] = useState<RenameState>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
 
   const openFileSet = useMemo(() => {
     const openPaths = Object.values(workbench.groups).flatMap((group) => group.tabs);
@@ -223,6 +263,27 @@ export const MonacoCodePanel = ({
   );
 
   const modelKey = useCallback((path: string) => `${activeProjectId ?? "none"}:${path}`, [activeProjectId]);
+
+  const monacoThemeName = useMemo(() => `codeapp-${appTheme ?? "midnight"}`, [appTheme]);
+
+  const cssRgbToHex = useCallback((value: string): string | null => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (trimmed.startsWith("#")) {
+      return trimmed;
+    }
+    const match = trimmed.match(/(\d{1,3})[,\s]+(\d{1,3})[,\s]+(\d{1,3})/);
+    if (!match) {
+      return null;
+    }
+    const toHex = (segment: string) => {
+      const n = Math.max(0, Math.min(255, Number.parseInt(segment, 10) || 0));
+      return n.toString(16).padStart(2, "0");
+    };
+    return `#${toHex(match[1] ?? "0")}${toHex(match[2] ?? "0")}${toHex(match[3] ?? "0")}`;
+  }, []);
 
   const updateDirtyState = useCallback(
     (path: string, content: string) => {
@@ -501,6 +562,9 @@ export const MonacoCodePanel = ({
     setSearchQuery("");
     setDragState(null);
     setDropPreview(null);
+    setPendingCreate(null);
+    setRenameState(null);
+    setContextMenu(null);
     setWorkbench(createInitialWorkbenchState());
     setEntriesByDirectory({});
     setExpandedFolders({});
@@ -510,6 +574,61 @@ export const MonacoCodePanel = ({
       void loadDirectory("");
     }
   }, [activeProjectId, loadDirectory]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && contextMenuRef.current?.contains(target)) {
+        return;
+      }
+      setContextMenu(null);
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    const styles = getComputedStyle(document.documentElement);
+    const themeColor = (name: string, fallbackHex: string) => {
+      const value = styles.getPropertyValue(name);
+      return cssRgbToHex(value) ?? fallbackHex;
+    };
+    const isLight = (appTheme ?? "midnight") === "dawn" || (appTheme ?? "midnight") === "linen";
+    try {
+      monaco.editor.defineTheme(monacoThemeName, {
+        base: isLight ? "vs" : "vs-dark",
+        inherit: true,
+        rules: [],
+        colors: {
+          "editor.background": themeColor("--theme-surface", isLight ? "#f7f8fa" : "#111317"),
+          "editor.foreground": themeColor("--theme-accent", isLight ? "#1f2937" : "#e2e8f0"),
+          "editorLineNumber.foreground": themeColor("--theme-muted", isLight ? "#6b7280" : "#7c8aa3"),
+          "editorLineNumber.activeForeground": themeColor("--theme-accent", isLight ? "#111827" : "#f8fafc"),
+          "editorCursor.foreground": themeColor("--theme-accent", isLight ? "#0f172a" : "#f1f5f9"),
+          "editor.selectionBackground": themeColor("--theme-panel", isLight ? "#dbe2ea" : "#223042"),
+          "editor.inactiveSelectionBackground": themeColor("--theme-panel", isLight ? "#e8edf3" : "#1a2533"),
+          "editorGutter.background": themeColor("--theme-surface", isLight ? "#f7f8fa" : "#111317"),
+          "editorIndentGuide.background1": themeColor("--theme-border", isLight ? "#c9d2df" : "#2c3442"),
+          "editorIndentGuide.activeBackground1": themeColor("--theme-muted", isLight ? "#9aa8bb" : "#5f7088")
+        }
+      });
+      monaco.editor.setTheme(monacoThemeName);
+    } catch {
+      monaco.editor.setTheme(isLight ? "vs" : "vs-dark");
+    }
+  }, [appTheme, cssRgbToHex, monacoThemeName]);
 
   useEffect(() => {
     const groupIds = Object.keys(workbench.groups);
@@ -541,7 +660,7 @@ export const MonacoCodePanel = ({
         editorByGroupRef.current.delete(groupId);
       }
     });
-  }, [saveFile, workbench.groups]);
+  }, [monacoThemeName, saveFile, workbench.groups]);
 
   useEffect(() => {
     Object.values(workbench.groups).forEach((group) => {
@@ -731,10 +850,145 @@ export const MonacoCodePanel = ({
   const hasProject = Boolean(activeProjectId);
   const query = searchQuery.trim().toLowerCase();
 
+  const beginCreate = useCallback((kind: "file" | "folder", parentPath: string) => {
+    setContextMenu(null);
+    setRenameState(null);
+    setPendingCreate({ kind, parentPath, name: "" });
+    if (parentPath) {
+      setExpandedFolders((prev) => ({ ...prev, [parentPath]: true }));
+    }
+  }, []);
+
+  const submitPendingCreate = useCallback(async () => {
+    if (!activeProjectId || !pendingCreate) {
+      return;
+    }
+    const name = pendingCreate.name.trim();
+    if (!name) {
+      return;
+    }
+    if (name.includes("/") || name.includes("\\")) {
+      appendLog("Name cannot include slash characters.");
+      return;
+    }
+    const relativePath = pendingCreate.parentPath ? `${pendingCreate.parentPath}/${name}` : name;
+    try {
+      if (pendingCreate.kind === "folder") {
+        await window.desktopAPI.projects.createFolder({ projectId: activeProjectId, relativePath });
+      } else {
+        await window.desktopAPI.projects.writeFile({ projectId: activeProjectId, relativePath, content: "" });
+      }
+      await loadDirectory(pendingCreate.parentPath);
+      if (pendingCreate.kind === "file") {
+        openPathInGroup(relativePath);
+      } else {
+        setExpandedFolders((prev) => ({ ...prev, [relativePath]: true }));
+      }
+      setPendingCreate(null);
+    } catch (error) {
+      appendLog(`Create ${pendingCreate.kind} failed for ${relativePath}: ${String(error)}`);
+    }
+  }, [activeProjectId, appendLog, loadDirectory, openPathInGroup, pendingCreate]);
+
+  const submitRename = useCallback(async () => {
+    if (!activeProjectId || !renameState) {
+      return;
+    }
+    const nextName = renameState.name.trim();
+    if (!nextName) {
+      return;
+    }
+    if (nextName.includes("/") || nextName.includes("\\")) {
+      appendLog("Name cannot include slash characters.");
+      return;
+    }
+    const parent = dirname(renameState.path);
+    const nextPath = parent ? `${parent}/${nextName}` : nextName;
+    if (nextPath === renameState.path) {
+      setRenameState(null);
+      return;
+    }
+    try {
+      await window.desktopAPI.projects.renamePath({
+        projectId: activeProjectId,
+        fromRelativePath: renameState.path,
+        toRelativePath: nextPath
+      });
+      await loadDirectory(parent);
+      setWorkbench((prev) => ({
+        ...prev,
+        groups: Object.fromEntries(
+          Object.entries(prev.groups).map(([groupId, group]) => {
+            const nextTabs = group.tabs.map((tab) => (tab === renameState.path ? nextPath : tab));
+            const nextActiveTab = group.activeTab === renameState.path ? nextPath : group.activeTab;
+            return [groupId, { ...group, tabs: nextTabs, activeTab: nextActiveTab }];
+          })
+        )
+      }));
+      setRenameState(null);
+    } catch (error) {
+      appendLog(`Rename failed for ${renameState.path}: ${String(error)}`);
+    }
+  }, [activeProjectId, appendLog, loadDirectory, renameState]);
+
+  const handleDeleteFile = useCallback(
+    async (path: string) => {
+      if (!activeProjectId) {
+        return;
+      }
+      const confirmed = window.confirm(`Delete ${path}?`);
+      if (!confirmed) {
+        return;
+      }
+      const parent = dirname(path);
+      try {
+        await window.desktopAPI.projects.deletePath({ projectId: activeProjectId, relativePath: path });
+        await loadDirectory(parent);
+        setWorkbench((prev) => ({
+          ...prev,
+          groups: Object.fromEntries(
+            Object.entries(prev.groups).map(([groupId, group]) => {
+              const nextTabs = group.tabs.filter((tab) => tab !== path);
+              const nextActiveTab =
+                group.activeTab === path
+                  ? nextTabs[nextTabs.length - 1] ?? null
+                  : group.activeTab;
+              return [groupId, { ...group, tabs: nextTabs, activeTab: nextActiveTab }];
+            })
+          )
+        }));
+      } catch (error) {
+        appendLog(`Delete failed for ${path}: ${String(error)}`);
+      }
+    },
+    [activeProjectId, appendLog, loadDirectory]
+  );
+
+  const handleInlineInputKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>, action: "create" | "rename") => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (action === "create") {
+          void submitPendingCreate();
+        } else {
+          void submitRename();
+        }
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        if (action === "create") {
+          setPendingCreate(null);
+        } else {
+          setRenameState(null);
+        }
+      }
+    },
+    [submitPendingCreate, submitRename]
+  );
+
   const renderDirectory = useCallback(
     (directoryPath: string, depth: number): ReactElement[] => {
       const entries = entriesByDirectory[directoryPath] ?? [];
-      return entries.flatMap((entry) => {
+      const rows = entries.flatMap((entry) => {
         const matchesQuery =
           !query || entry.name.toLowerCase().includes(query) || entry.path.toLowerCase().includes(query);
         if (entry.kind === "folder") {
@@ -764,9 +1018,37 @@ export const MonacoCodePanel = ({
                 }}
                 title={entry.path}
               >
-                <FaChevronRight className={`accordion-chevron ${expanded ? "open" : ""} workbench-tree-chevron`} />
                 <span className="truncate">{entry.name}</span>
-                {isLoading && <span className="ml-auto text-[10px] text-slate-500">...</span>}
+                <span className="workbench-tree-folder-right">
+                  <span className="workbench-tree-folder-actions">
+                    <button
+                      type="button"
+                      className="workbench-tree-action-btn"
+                      title="New file"
+                      aria-label={`New file in ${entry.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        beginCreate("file", entry.path);
+                      }}
+                    >
+                      <FaFileMedical />
+                    </button>
+                    <button
+                      type="button"
+                      className="workbench-tree-action-btn"
+                      title="New folder"
+                      aria-label={`New folder in ${entry.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        beginCreate("folder", entry.path);
+                      }}
+                    >
+                      <FaFolderPlus />
+                    </button>
+                  </span>
+                  {isLoading && <span className="text-[10px] text-slate-500">...</span>}
+                  <FaChevronRight className={`accordion-chevron ${expanded ? "open" : ""} workbench-tree-chevron`} />
+                </span>
               </button>
               <div className={`workbench-tree-children ${shouldExpand ? "open" : ""}`}>
                 <div>{childRows}</div>
@@ -777,6 +1059,24 @@ export const MonacoCodePanel = ({
         if (!matchesQuery) {
           return [];
         }
+        if (renameState?.path === entry.path) {
+          return [
+            <div key={`rename-${entry.path}`} className="workbench-tree-row workbench-tree-file" style={{ paddingLeft: `${depth * 10 + 18}px` }}>
+              <span className="workbench-tree-file-icon" aria-hidden="true" />
+              <input
+                className="input h-7 flex-1 text-xs"
+                value={renameState.name}
+                autoFocus
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => setRenameState((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+                onBlur={() => {
+                  void submitRename();
+                }}
+                onKeyDown={(event) => handleInlineInputKeyDown(event, "rename")}
+              />
+            </div>
+          ];
+        }
         const isOpen = openFileSet.has(entry.path);
         return [
           <button
@@ -785,6 +1085,10 @@ export const MonacoCodePanel = ({
             className={`workbench-tree-row workbench-tree-file ${isOpen ? "is-open" : ""}`}
             style={{ paddingLeft: `${depth * 10 + 18}px` }}
             onClick={() => openPathInGroup(entry.path)}
+            onContextMenu={(event: ReactMouseEvent<HTMLButtonElement>) => {
+              event.preventDefault();
+              setContextMenu({ x: event.clientX, y: event.clientY, path: entry.path, kind: "file" });
+            }}
             title={entry.path}
           >
             <span className="workbench-tree-file-icon" aria-hidden="true" />
@@ -792,8 +1096,41 @@ export const MonacoCodePanel = ({
           </button>
         ];
       });
+      if (pendingCreate?.parentPath === directoryPath) {
+        rows.push(
+          <div key={`create-${directoryPath}`} className="workbench-tree-row workbench-tree-file" style={{ paddingLeft: `${depth * 10 + 18}px` }}>
+            <span className="workbench-tree-file-icon" aria-hidden="true" />
+            <input
+              className="input h-7 flex-1 text-xs"
+              value={pendingCreate.name}
+              autoFocus
+              onChange={(event) => setPendingCreate((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+              onBlur={() => {
+                setPendingCreate(null);
+              }}
+              onKeyDown={(event) => handleInlineInputKeyDown(event, "create")}
+              placeholder={pendingCreate.kind === "folder" ? "Folder name" : "File name"}
+            />
+          </div>
+        );
+      }
+      return rows;
     },
-    [entriesByDirectory, expandedFolders, loadedDirectories, loadDirectory, loadingDirectories, openFileSet, openPathInGroup, query]
+    [
+      beginCreate,
+      entriesByDirectory,
+      expandedFolders,
+      handleInlineInputKeyDown,
+      loadedDirectories,
+      loadDirectory,
+      loadingDirectories,
+      openFileSet,
+      openPathInGroup,
+      pendingCreate,
+      query,
+      renameState,
+      submitRename
+    ]
   );
 
   const fileTreeRows = useMemo(() => renderDirectory("", 0), [renderDirectory]);
@@ -834,14 +1171,34 @@ export const MonacoCodePanel = ({
           Select a project to browse files.
         </div>
       ) : (
-        <div className="editor-workbench m-2 min-h-0 flex-1">
+        <div className="editor-workbench min-h-0 flex-1">
           <aside className="workbench-files">
-            <input
-              className="input h-8 text-xs"
-              placeholder="Filter loaded files"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
+            <div className="workbench-files-toolbar">
+              <input
+                className="input h-8 flex-1 text-xs"
+                placeholder="Filter loaded files"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
+              <button
+                type="button"
+                className="workbench-tree-action-btn"
+                title="New file at root"
+                aria-label="New file at root"
+                onClick={() => beginCreate("file", "")}
+              >
+                <FaFileMedical />
+              </button>
+              <button
+                type="button"
+                className="workbench-tree-action-btn"
+                title="New folder at root"
+                aria-label="New folder at root"
+                onClick={() => beginCreate("folder", "")}
+              >
+                <FaFolderPlus />
+              </button>
+            </div>
             <div className="workbench-file-list">
               {loadingDirectories[""] && fileTreeRows.length === 0 ? (
                 <div className="workbench-tree-empty">Loading...</div>
@@ -853,6 +1210,38 @@ export const MonacoCodePanel = ({
             </div>
           </aside>
           <main className="workbench-groups">{renderLayout(workbench.layout)}</main>
+        </div>
+      )}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="thread-context-menu is-open"
+          style={{ left: contextMenu.x, top: contextMenu.y, display: "block", position: "fixed", zIndex: 90 }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {contextMenu.kind === "file" && (
+            <>
+              <button
+                className="thread-context-menu-item"
+                onClick={() => {
+                  setRenameState({ path: contextMenu.path, name: basename(contextMenu.path) });
+                  setContextMenu(null);
+                }}
+              >
+                Rename File
+              </button>
+              <button
+                className="thread-context-menu-item text-rose-200 hover:text-rose-100"
+                onClick={() => {
+                  const targetPath = contextMenu.path;
+                  setContextMenu(null);
+                  void handleDeleteFile(targetPath);
+                }}
+              >
+                Delete File
+              </button>
+            </>
+          )}
         </div>
       )}
     </section>

@@ -15,6 +15,12 @@ const projectsListFilesChannel =
   (IPC_CHANNELS as Record<string, string>).projectsListFiles ?? "projects:listFiles";
 const projectsListDirectoryChannel =
   (IPC_CHANNELS as Record<string, string>).projectsListDirectory ?? "projects:listDirectory";
+const projectsCreateFolderChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsCreateFolder ?? "projects:createFolder";
+const projectsRenamePathChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsRenamePath ?? "projects:renamePath";
+const projectsDeletePathChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsDeletePath ?? "projects:deletePath";
 const projectsReadFileChannel =
   (IPC_CHANNELS as Record<string, string>).projectsReadFile ?? "projects:readFile";
 const projectsWriteFileChannel =
@@ -100,6 +106,9 @@ type DesktopApiWithGitExtras = DesktopApi & {
       path: string;
       kind: "file" | "folder";
     }>>;
+    createFolder: (input: { projectId: string; relativePath: string }) => Promise<{ ok: boolean }>;
+    renamePath: (input: { projectId: string; fromRelativePath: string; toRelativePath: string }) => Promise<{ ok: boolean }>;
+    deletePath: (input: { projectId: string; relativePath: string }) => Promise<{ ok: boolean }>;
     readFile: (input: { projectId: string; relativePath: string }) => Promise<{ path: string; content: string; mtimeMs: number }>;
     writeFile: (input: {
       projectId: string;
@@ -149,6 +158,12 @@ const api: DesktopApiWithGitExtras = {
     listFiles: (input: { projectId: string; limit?: number }) => ipcRenderer.invoke(projectsListFilesChannel, input),
     listDirectory: (input: { projectId: string; relativePath?: string }) =>
       ipcRenderer.invoke(projectsListDirectoryChannel, input),
+    createFolder: (input: { projectId: string; relativePath: string }) =>
+      ipcRenderer.invoke(projectsCreateFolderChannel, input),
+    renamePath: (input: { projectId: string; fromRelativePath: string; toRelativePath: string }) =>
+      ipcRenderer.invoke(projectsRenamePathChannel, input),
+    deletePath: (input: { projectId: string; relativePath: string }) =>
+      ipcRenderer.invoke(projectsDeletePathChannel, input),
     readFile: (input: { projectId: string; relativePath: string }) =>
       ipcRenderer.invoke(projectsReadFileChannel, input),
     writeFile: (input: { projectId: string; relativePath: string; content: string }) =>

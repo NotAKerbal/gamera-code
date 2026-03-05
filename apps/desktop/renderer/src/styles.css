@@ -955,7 +955,7 @@ webview {
 }
 
 .workspace-segment-count {
-  @apply rounded px-1.5 py-0.5 text-[10px] leading-none;
+  @apply inline-flex h-5 w-5 items-center justify-center rounded text-[10px] leading-none;
 }
 
 .workspace-segment-count.count-running {
@@ -1977,12 +1977,9 @@ webview {
   display: grid;
   grid-template-columns: 21rem 1fr;
   min-height: 24rem;
-  border: 1px solid rgb(var(--theme-border) / 0.85);
-  border-radius: 0.9rem;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 0% 0%, rgb(var(--theme-panel) / 0.85), transparent 45%),
-    rgb(var(--theme-bg));
+  background: transparent;
+  gap: 0.5rem;
 }
 
 .workbench-files {
@@ -1994,6 +1991,12 @@ webview {
   flex-direction: column;
   gap: 0.45rem;
   min-width: 0;
+}
+
+.workbench-files-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .workbench-file-list {
@@ -2016,10 +2019,10 @@ webview {
   color: rgb(var(--theme-accent));
   text-align: left;
   padding: 0.4rem 0.45rem;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.05rem;
+  gap: 0.4rem;
   transition: background-color 140ms ease, border-color 140ms ease;
   white-space: nowrap;
 }
@@ -2052,21 +2055,26 @@ webview {
   font-weight: 600;
 }
 
+.workbench-tree-folder > .truncate {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .workbench-tree-file {
   font-size: 12px;
   font-weight: 400;
+  justify-content: flex-start;
+}
+
+.workbench-tree-file > .truncate {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .workbench-tree-chevron {
   width: 10px;
+  flex: 0 0 10px;
   color: rgb(var(--theme-muted));
-  font-size: 10px;
-}
-
-.workbench-tree-dot {
-  width: 10px;
-  color: rgb(var(--theme-muted));
-  font-size: 11px;
 }
 
 .workbench-tree-empty {
@@ -2078,7 +2086,7 @@ webview {
 .workbench-groups {
   min-width: 0;
   min-height: 0;
-  padding: 0.6rem;
+  padding: 0.5rem;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2113,7 +2121,8 @@ webview {
 }
 
 .workbench-group {
-  border: 1px solid rgb(var(--theme-border) / 0.65);
+  border: 1px solid transparent;
+  box-shadow: inset 0 0 0 1px rgb(var(--theme-border) / 0.2);
   border-radius: 0.7rem;
   height: 100%;
   min-height: 0;
@@ -2124,7 +2133,7 @@ webview {
 }
 
 .workbench-group.is-active {
-  border-color: rgb(var(--theme-accent) / 0.42);
+  box-shadow: inset 0 0 0 1px rgb(var(--theme-accent) / 0.26);
 }
 
 .workbench-tabbar {
@@ -2264,8 +2273,7 @@ webview {
 }
 
 .workbench-tree-chevron {
-  width: 10px;
-  flex: 0 0 10px;
+  transition: transform 0.16s ease;
 }
 
 .workbench-tree-chevron.open {
@@ -2278,6 +2286,46 @@ webview {
   border-radius: 999px;
   background: rgb(var(--theme-muted));
   opacity: 0.8;
+}
+
+.workbench-tree-folder-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.workbench-tree-folder-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+}
+
+.workbench-tree-folder:hover .workbench-tree-folder-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.workbench-tree-action-btn {
+  border: 0;
+  background: transparent;
+  color: rgb(var(--theme-muted));
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 0.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.workbench-tree-action-btn:hover {
+  background: rgb(var(--theme-panel) / 0.7);
+  color: rgb(var(--theme-accent));
 }
 
 .workbench-tree-children {

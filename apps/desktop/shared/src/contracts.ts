@@ -65,6 +65,9 @@ export interface DesktopApi {
     openFiles: (input: { projectId: string }) => Promise<{ ok: boolean }>;
     listFiles: (input: { projectId: string; limit?: number }) => Promise<ProjectFileEntry[]>;
     listDirectory: (input: { projectId: string; relativePath?: string }) => Promise<ProjectDirectoryEntry[]>;
+    createFolder: (input: { projectId: string; relativePath: string }) => Promise<{ ok: boolean }>;
+    renamePath: (input: { projectId: string; fromRelativePath: string; toRelativePath: string }) => Promise<{ ok: boolean }>;
+    deletePath: (input: { projectId: string; relativePath: string }) => Promise<{ ok: boolean }>;
     readFile: (input: { projectId: string; relativePath: string }) => Promise<ProjectFileContent>;
     writeFile: (input: { projectId: string; relativePath: string; content: string }) => Promise<{ ok: boolean; mtimeMs: number }>;
     openWebLink: (input: { url: string; name?: string; projectName?: string; focus?: boolean }) => Promise<{ ok: boolean }>;

@@ -9577,6 +9577,7 @@ TODO: Describe what this skill does.
                 activeProjectPath={activeProject?.path}
                 projectName={activeProject?.name}
                 appIconSrc={appIconSrc}
+                appTheme={settings.theme}
                 isMacOS={isMacOS}
                 isWindows={isWindows}
                 isWindowMaximized={isWindowMaximized}
