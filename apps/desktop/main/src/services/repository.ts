@@ -42,7 +42,7 @@ const DEFAULT_SETTINGS = {
   useTurtleSpinners: false,
   preferredSystemTerminalId: "",
   projectTerminalSwitchBehaviorDefault: "start_stop",
-  subthreadPolicyDefault: "ask",
+  subthreadPolicyDefault: "auto",
   codexDefaults: {
     collaborationMode: "plan",
     sandboxMode: "workspace-write",

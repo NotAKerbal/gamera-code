@@ -226,7 +226,9 @@ const mapPersonality = (mode: CodexAppServerThreadOptions["collaborationMode"]) 
   mode === "plan" ? "pragmatic" : null;
 
 const SUBTHREAD_PROPOSAL_INSTRUCTIONS = [
-  "When a task is large and can be split into parallel workstreams, emit one machine-readable proposal block.",
+  "When a task is large and can be split into independent parallel workstreams, proactively emit one machine-readable proposal block.",
+  "Prefer this for tasks expected to touch multiple files, multiple concerns, implementation + tests/docs, or any work that can be done concurrently.",
+  "Do not emit this for clearly single-threaded or tiny tasks.",
   "Format exactly as XML-like tags with JSON content:",
   "<subthread_proposal_v1>{\"reason\":\"...\",\"parentGoal\":\"...\",\"tasks\":[{\"key\":\"...\",\"title\":\"...\",\"prompt\":\"...\",\"expectedOutput\":\"...\"}]}</subthread_proposal_v1>",
   "Use at most 8 tasks. Keep keys unique and lowercase. Do not emit this block for small tasks."
