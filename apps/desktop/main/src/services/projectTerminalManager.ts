@@ -151,8 +151,7 @@ const pickCommand = (settings: ProjectSettings, commandId?: string): ProjectDevC
 
 const pickAutoStartCommands = (settings: ProjectSettings): ProjectDevCommand[] => {
   const devCommands = normalizeDevCommands(settings);
-  const autoStart = devCommands.filter((command) => command.autoStart);
-  return autoStart.length > 0 ? autoStart : [pickCommand(settings)];
+  return devCommands.filter((command) => command.autoStart);
 };
 
 const buildTerminal = (
@@ -200,7 +199,11 @@ export class ProjectTerminalManager {
 
     const settings = this.deps.repository.getProjectSettings(projectId);
     const behavior = this.resolveSwitchBehavior(settings);
-    const shouldAutoStart = behavior === "start_stop" || behavior === "start_only";
+    const hasAutoStartCommands = pickAutoStartCommands(settings).length > 0;
+    const shouldAutoStart =
+      (behavior === "start_stop" || behavior === "start_only") &&
+      settings.autoStartDevTerminal &&
+      hasAutoStartCommands;
     if (shouldAutoStart) {
       this.start(projectId, undefined, true);
     }

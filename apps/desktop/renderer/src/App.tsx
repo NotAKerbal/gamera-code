@@ -101,7 +101,6 @@ import {
   MAX_ATTACHMENTS,
   MODEL_SUGGESTIONS,
   PROJECT_SWITCH_BEHAVIOR_OPTIONS,
-  QUICK_PROMPTS,
   REASONING_OPTIONS,
   REQUIRED_SETUP_KEYS,
   SETUP_BLOCKING_KEYS,
@@ -197,6 +196,33 @@ import {
   RenameThreadModal,
   WorkspaceModal
 } from "./appOverlays";
+
+const STARTER_PROMPT_CARDS = [
+  {
+    title: "Repository Risk Scan",
+    description: "Get fast orientation on architecture and high-risk areas.",
+    prompt: "Summarize this repository and list the top 3 risky areas.",
+    Icon: FaTerminal
+  },
+  {
+    title: "Test Failure Triage",
+    description: "Run tests, isolate root causes, and produce a fix plan.",
+    prompt: "Run tests, explain failures, and propose a minimal fix plan.",
+    Icon: FaNetworkWired
+  },
+  {
+    title: "Dead Code Sweep",
+    description: "Identify safe removals and propose focused cleanup diffs.",
+    prompt: "Find dead code and suggest safe removals with file-by-file diffs.",
+    Icon: FaArchive
+  },
+  {
+    title: "Regression Review",
+    description: "Audit recent changes and find likely behavior regressions.",
+    prompt: "Audit recent changes and call out regressions or missing tests.",
+    Icon: FaCodeBranch
+  }
+] as const;
 
 const normalizeSkillFrontmatterYaml = (content: string) => {
   const lines = content.split(/\r?\n/);
@@ -3577,6 +3603,7 @@ export const App = () => {
       devCommands: sanitizedCommands,
       webLinks: sanitizedWebLinks,
       browserEnabled: draft.projectSettingsBrowserEnabled,
+      autoStartDevTerminal: sanitizedCommands.some((command) => command.autoStart),
       switchBehaviorOverride: draft.projectSwitchBehaviorOverride || undefined,
       subthreadPolicyOverride: draft.projectSubthreadPolicyOverride || undefined
     });
@@ -8292,21 +8319,45 @@ TODO: Describe what this skill does.
                 )}
 
                 {hasProjects && activeThread && !hasUserPromptInThread && (
-                  <div className="mb-5 space-y-2">
-                    <p className="text-sm text-slate-300">Pick a starter prompt or write your own.</p>
-                    <div className="grid gap-2">
-                {QUICK_PROMPTS.map((prompt) => (
-                        <button
-                          key={prompt}
-                          className="rounded-md bg-black/25 px-3 py-2 text-left text-sm text-slate-300 transition hover:bg-black/35"
-                          onClick={() => {
-                            applyComposerText(prompt, true, prompt.length);
-                            scheduleComposerResize();
-                          }}
-                        >
-                          {prompt}
-                        </button>
-                      ))}
+                  <div className="mb-6 overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-surface/90 via-panel/75 to-surface/60 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+                    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">New Thread</p>
+                        <h2 className="text-lg font-semibold text-slate-100">Start with momentum</h2>
+                        <p className="mt-1 text-sm text-slate-300">Pick a starter and refine it for your codebase.</p>
+                      </div>
+                      <div className="rounded-full border border-border bg-black/20 px-3 py-1 text-xs text-slate-300">
+                        {activeProject ? activeProject.name : "Project selected"}
+                      </div>
+                    </div>
+                    <div className="mb-4 flex flex-wrap gap-2 text-xs text-slate-300">
+                      <span className="rounded-full border border-border bg-black/20 px-2.5 py-1">Mention files with `@`</span>
+                      <span className="rounded-full border border-border bg-black/20 px-2.5 py-1">Attach screenshots for UI bugs</span>
+                      <span className="rounded-full border border-border bg-black/20 px-2.5 py-1">Shift+Enter adds a new line</span>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {STARTER_PROMPT_CARDS.map((card) => {
+                        const Icon = card.Icon;
+                        return (
+                          <button
+                            key={card.title}
+                            className="group rounded-xl border border-border/80 bg-black/20 p-3 text-left transition hover:border-zinc-500 hover:bg-black/35"
+                            onClick={() => {
+                              applyComposerText(card.prompt, true, card.prompt.length);
+                              scheduleComposerResize();
+                            }}
+                          >
+                            <div className="mb-2 flex items-center gap-2">
+                              <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-black/25 text-slate-200">
+                                <Icon className="text-xs" />
+                              </span>
+                              <span className="text-sm font-semibold text-slate-100">{card.title}</span>
+                            </div>
+                            <p className="text-sm text-slate-300">{card.description}</p>
+                            <div className="mt-2 text-xs text-slate-400 transition group-hover:text-slate-200">Insert starter prompt</div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

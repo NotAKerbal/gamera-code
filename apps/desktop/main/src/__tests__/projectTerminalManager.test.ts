@@ -67,7 +67,7 @@ describe("projectTerminalManager switching", () => {
     expect(startSpy).toHaveBeenCalledWith("p2", undefined, true);
   });
 
-  it("starts on project enter for start_only even when project auto-start flag is false", () => {
+  it("does not auto-start on project enter when project auto-start flag is false", () => {
     const repository = {
       getProjectSettings: vi.fn((projectId: string) => ({
         ...baseSettings,
@@ -94,7 +94,7 @@ describe("projectTerminalManager switching", () => {
 
     manager.setActiveProject("p1");
 
-    expect(startSpy).toHaveBeenCalledWith("p1", undefined, true);
+    expect(startSpy).not.toHaveBeenCalled();
   });
 
   it("skips stopping previous project when an agent session is active there", () => {
@@ -157,5 +157,59 @@ describe("projectTerminalManager switching", () => {
     manager.start("p1", undefined, true);
 
     expect(stopSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not start any command when no command is marked auto-start", () => {
+    const repository = {
+      getProject: vi.fn((projectId: string) => ({ id: projectId, name: projectId, path: process.cwd() })),
+      getProjectSettings: vi.fn((projectId: string) => ({
+        ...baseSettings,
+        projectId,
+        devCommands: [{ id: "default", name: "Dev Server", command: "npm run dev", autoStart: false, useForPreview: true }]
+      })),
+      getSettings: vi.fn(() => ({
+        projectTerminalSwitchBehaviorDefault: "start_only"
+      }))
+    } as unknown as ConstructorParameters<typeof ProjectTerminalManager>[0]["repository"];
+
+    const manager = new ProjectTerminalManager({
+      repository,
+      emit: vi.fn()
+    });
+
+    const stopSpy = vi.spyOn(manager, "stop");
+    manager.start("p1", undefined, true);
+
+    expect(stopSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not call start on project enter when no commands are auto-start", () => {
+    const repository = {
+      getProjectSettings: vi.fn((projectId: string) => ({
+        ...baseSettings,
+        projectId,
+        devCommands: [{ id: "default", name: "Dev Server", command: "npm run dev", autoStart: false, useForPreview: true }]
+      })),
+      getSettings: vi.fn(() => ({
+        projectTerminalSwitchBehaviorDefault: "start_only"
+      }))
+    } as unknown as ConstructorParameters<typeof ProjectTerminalManager>[0]["repository"];
+
+    const manager = new ProjectTerminalManager({
+      repository,
+      emit: vi.fn()
+    });
+
+    const startSpy = vi.spyOn(manager, "start").mockImplementation((projectId: string) => ({
+      projectId,
+      running: true,
+      terminals: [],
+      outputTail: "",
+      updatedAt: new Date().toISOString()
+    }));
+
+    manager.setActiveProject("p1");
+
+    expect(startSpy).not.toHaveBeenCalled();
   });
 });
