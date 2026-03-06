@@ -126,6 +126,7 @@ export interface DesktopApi {
       pinned?: boolean;
     }) => Promise<Thread>;
     archive: (input: { id: string; archived: boolean }) => Promise<Thread>;
+    delete: (input: { id: string }) => Promise<{ ok: boolean }>;
     fork: (input: { id: string; upToStreamSeq?: number }) => Promise<Thread>;
     events: (input: {
       threadId: string;

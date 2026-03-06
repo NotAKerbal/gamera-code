@@ -4019,6 +4019,33 @@ export const App = () => {
       commandId: key.slice(splitIndex + 1)
     };
   };
+  const terminalPopupTheme = isLightTheme
+    ? {
+        colorScheme: "light",
+        bodyBg: "#f8fafc",
+        shellBg: "#f1f5f9",
+        shellBorder: "#cbd5e1",
+        cardBg: "#ffffff",
+        outputBg: "#f8fafc",
+        text: "#0f172a",
+        muted: "#475569",
+        buttonText: "#334155",
+        buttonHoverBg: "#e2e8f0",
+        buttonHoverText: "#0f172a"
+      }
+    : {
+        colorScheme: "dark",
+        bodyBg: "#0b0d10",
+        shellBg: "#0f1013",
+        shellBorder: "#2f2f2f",
+        cardBg: "#121212",
+        outputBg: "#0a0a0a",
+        text: "#e2e8f0",
+        muted: "#94a3b8",
+        buttonText: "#cbd5e1",
+        buttonHoverBg: "#1f2937",
+        buttonHoverText: "#ffffff"
+      };
 
   const ensureTerminalPopoutFrame = (popout: Window) => {
     const doc = popout.document;
@@ -4033,26 +4060,26 @@ export const App = () => {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Terminal Output</title>
     <style>
-      :root { color-scheme: dark; font-family: "Space Grotesk", "Avenir Next", sans-serif; }
+      :root { color-scheme: ${terminalPopupTheme.colorScheme}; font-family: "Space Grotesk", "Avenir Next", sans-serif; }
       * { box-sizing: border-box; }
-      body { margin: 0; background: #0b0d10; color: #e5e7eb; height: 100vh; }
+      body { margin: 0; background: ${terminalPopupTheme.bodyBg}; color: ${terminalPopupTheme.text}; height: 100vh; }
       .shell { height: 100vh; display: flex; flex-direction: column; }
-      .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 10px; border-bottom: 1px solid #2f2f2f; background: #0f1013; -webkit-app-region: drag; }
+      .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 10px; border-bottom: 1px solid ${terminalPopupTheme.shellBorder}; background: ${terminalPopupTheme.shellBg}; -webkit-app-region: drag; }
       .head.macos { padding-left: 5rem; }
       .meta { min-width: 0; }
       .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
       .icon { width: 26px; height: 26px; border-radius: 8px; }
-      .title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #e2e8f0; }
-      .command { font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: ${terminalPopupTheme.text}; }
+      .command { font-size: 11px; color: ${terminalPopupTheme.muted}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .controls { display: flex; align-items: center; gap: 6px; -webkit-app-region: no-drag; }
-      .btn { height: 30px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #cbd5e1; padding: 0 10px; font-size: 12px; cursor: pointer; }
-      .btn:hover { background: #1f2937; color: #fff; }
+      .btn { height: 30px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: ${terminalPopupTheme.buttonText}; padding: 0 10px; font-size: 12px; cursor: pointer; }
+      .btn:hover { background: ${terminalPopupTheme.buttonHoverBg}; color: ${terminalPopupTheme.buttonHoverText}; }
       .btn:disabled { opacity: 0.45; cursor: default; }
-      .window-btn { width: 34px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: #cbd5e1; font-size: 13px; cursor: pointer; }
-      .window-btn:hover { background: #1f2937; color: #fff; }
+      .window-btn { width: 34px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: ${terminalPopupTheme.buttonText}; font-size: 13px; cursor: pointer; }
+      .window-btn:hover { background: ${terminalPopupTheme.buttonHoverBg}; color: ${terminalPopupTheme.buttonHoverText}; }
       .window-btn.close:hover { background: rgba(239, 68, 68, 0.2); color: #fee2e2; }
-      .status { font-size: 11px; color: #94a3b8; min-width: 50px; text-align: right; }
-      .output { margin: 0; padding: 12px; flex: 1; min-height: 0; overflow: auto; font-family: "IBM Plex Mono", "Fira Code", monospace; font-size: 11px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; background: #0b0d10; }
+      .status { font-size: 11px; color: ${terminalPopupTheme.muted}; min-width: 50px; text-align: right; }
+      .output { margin: 0; padding: 12px; flex: 1; min-height: 0; overflow: auto; font-family: "IBM Plex Mono", "Fira Code", monospace; font-size: 11px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; background: ${terminalPopupTheme.outputBg}; }
       .line { display: block; min-height: 1.35em; }
       .dim { opacity: 0.72; }
       .bold { font-weight: 700; }
@@ -4064,7 +4091,7 @@ export const App = () => {
     <div id="codeapp-terminal-popout" class="shell">
       <div class="head${isMacOS ? " macos" : ""}">
         <div class="brand">
-          <img src="${appIconDark}" class="icon" alt="" />
+          <img src="${appIconSrc}" class="icon" alt="" />
           <div class="meta">
             <div id="terminal-title" class="title">GameraCode - Terminal</div>
             <div id="terminal-command" class="command"></div>
@@ -4905,6 +4932,43 @@ export const App = () => {
     await loadThreads();
   };
 
+  const deleteThread = async (thread: Thread) => {
+    const confirmed = window.confirm(
+      `Delete thread "${thread.title}"?\n\nThis permanently deletes the thread and any sub-threads from GameraCode. Files on disk stay intact.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const currentThreads = threadsRef.current;
+    const descendants = new Set<string>();
+    const stack = [thread.id];
+    while (stack.length > 0) {
+      const currentId = stack.pop();
+      if (!currentId || descendants.has(currentId)) {
+        continue;
+      }
+      descendants.add(currentId);
+      currentThreads.forEach((item) => {
+        if (item.parentThreadId === currentId) {
+          stack.push(item.id);
+        }
+      });
+    }
+
+    await api.threads.delete({ id: thread.id });
+
+    if (activeThreadId && descendants.has(activeThreadId)) {
+      const remaining = currentThreads.filter((item) => !descendants.has(item.id));
+      const fallback =
+        remaining.find((item) => item.projectId === thread.projectId && !item.archivedAt) ??
+        remaining.find((item) => item.projectId === thread.projectId);
+      setActiveThreadId(fallback?.id ?? null);
+    }
+
+    await loadThreads();
+  };
+
   const setThreadPinned = async (thread: Thread, pinned: boolean) => {
     const updated = await api.threads.update({ id: thread.id, pinned });
     setThreads((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
@@ -4997,7 +5061,7 @@ export const App = () => {
     }
     menu.classList.remove("is-closing");
     const menuWidth = 190;
-    const menuHeight = 210;
+    const menuHeight = 244;
     const x = Math.min(event.clientX, Math.max(8, window.innerWidth - menuWidth - 8));
     const y = Math.min(event.clientY, Math.max(8, window.innerHeight - menuHeight - 8));
     menu.style.left = `${x}px`;
@@ -5042,6 +5106,18 @@ export const App = () => {
     closeThreadContextMenu();
     setThreadArchived(thread, archived).catch((error) => {
       setLogs((prev) => [...prev, `${archived ? "Archive" : "Restore"} thread failed: ${String(error)}`]);
+    });
+  };
+
+  const handleThreadContextMenuDelete = () => {
+    const thread = getThreadFromContextMenu();
+    if (!thread) {
+      closeThreadContextMenu();
+      return;
+    }
+    closeThreadContextMenu();
+    deleteThread(thread).catch((error) => {
+      setLogs((prev) => [...prev, `Delete thread failed: ${String(error)}`]);
     });
   };
 
@@ -5978,33 +6054,33 @@ export const App = () => {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Terminal Dashboard</title>
     <style>
-      :root { color-scheme: dark; font-family: "Space Grotesk", "Avenir Next", sans-serif; }
+      :root { color-scheme: ${terminalPopupTheme.colorScheme}; font-family: "Space Grotesk", "Avenir Next", sans-serif; }
       * { box-sizing: border-box; }
-      body { margin: 0; background: #0b0d10; color: #e5e7eb; height: 100vh; }
+      body { margin: 0; background: ${terminalPopupTheme.bodyBg}; color: ${terminalPopupTheme.text}; height: 100vh; }
       .shell { height: 100vh; display: flex; flex-direction: column; }
-      .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 10px; border-bottom: 1px solid #2f2f2f; background: #0f1013; -webkit-app-region: drag; }
+      .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 10px; border-bottom: 1px solid ${terminalPopupTheme.shellBorder}; background: ${terminalPopupTheme.shellBg}; -webkit-app-region: drag; }
       .head.macos { padding-left: 5rem; }
       .meta { min-width: 0; }
       .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
       .icon { width: 26px; height: 26px; border-radius: 8px; }
-      .title { font-size: 13px; font-weight: 700; color: #e2e8f0; }
-      .subtitle { font-size: 11px; color: #94a3b8; }
+      .title { font-size: 13px; font-weight: 700; color: ${terminalPopupTheme.text}; }
+      .subtitle { font-size: 11px; color: ${terminalPopupTheme.muted}; }
       .actions { display: flex; gap: 6px; -webkit-app-region: no-drag; align-items: center; }
-      .btn { height: 30px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #cbd5e1; padding: 0 10px; font-size: 12px; cursor: pointer; }
-      .btn:hover { background: #1f2937; color: #fff; }
-      .window-btn { width: 34px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: #cbd5e1; font-size: 13px; cursor: pointer; }
-      .window-btn:hover { background: #1f2937; color: #fff; }
+      .btn { height: 30px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: ${terminalPopupTheme.buttonText}; padding: 0 10px; font-size: 12px; cursor: pointer; }
+      .btn:hover { background: ${terminalPopupTheme.buttonHoverBg}; color: ${terminalPopupTheme.buttonHoverText}; }
+      .window-btn { width: 34px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: ${terminalPopupTheme.buttonText}; font-size: 13px; cursor: pointer; }
+      .window-btn:hover { background: ${terminalPopupTheme.buttonHoverBg}; color: ${terminalPopupTheme.buttonHoverText}; }
       .window-btn.close:hover { background: rgba(239, 68, 68, 0.2); color: #fee2e2; }
       .content { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
       .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 10px; }
-      .card { display: flex; flex-direction: column; min-height: 250px; border: 1px solid #2f2f2f; border-radius: 10px; background: #121212; padding: 10px; }
+      .card { display: flex; flex-direction: column; min-height: 250px; border: 1px solid ${terminalPopupTheme.shellBorder}; border-radius: 10px; background: ${terminalPopupTheme.cardBg}; padding: 10px; }
       .card-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
       .card-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .card-command { font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .card-command { font-size: 10px; color: ${terminalPopupTheme.muted}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .badge-running { font-size: 11px; color: #4ade80; }
-      .badge-stopped { font-size: 11px; color: #94a3b8; }
+      .badge-stopped { font-size: 11px; color: ${terminalPopupTheme.muted}; }
       .card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-      .output { margin: 0; padding: 8px; flex: 1; min-height: 0; overflow: auto; border-radius: 8px; border: 1px solid #2f2f2f; background: #0a0a0a; font-family: "IBM Plex Mono", "Fira Code", monospace; font-size: 11px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
+      .output { margin: 0; padding: 8px; flex: 1; min-height: 0; overflow: auto; border-radius: 8px; border: 1px solid ${terminalPopupTheme.shellBorder}; background: ${terminalPopupTheme.outputBg}; font-family: "IBM Plex Mono", "Fira Code", monospace; font-size: 11px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
       .line { display: block; min-height: 1.35em; }
       .dim { opacity: 0.72; }
       .bold { font-weight: 700; }
@@ -6016,7 +6092,7 @@ export const App = () => {
     <div id="codeapp-terminal-dashboard-popout" class="shell">
       <div class="head${isMacOS ? " macos" : ""}">
         <div class="brand">
-          <img src="${appIconDark}" class="icon" alt="" />
+          <img src="${appIconSrc}" class="icon" alt="" />
           <div class="meta">
             <div id="dashboard-title" class="title">Terminal Dashboard</div>
             <div id="dashboard-subtitle" class="subtitle"></div>
@@ -8136,6 +8212,29 @@ TODO: Describe what this skill does.
                                   >
                                     <FaBoxOpen className="text-[10px]" />
                                   </span>
+                                  <span
+                                    className="thread-row-action-btn"
+                                    title="Delete thread"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      deleteThread(thread).catch((error) => {
+                                        setLogs((prev) => [...prev, `Delete thread failed: ${String(error)}`]);
+                                      });
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        deleteThread(thread).catch((error) => {
+                                          setLogs((prev) => [...prev, `Delete thread failed: ${String(error)}`]);
+                                        });
+                                      }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                  >
+                                    <FaTrashAlt className="text-[10px]" />
+                                  </span>
                                   {threadAwaitingInputById[thread.id] ? (
                                     <div className="thread-awaiting-badge" title="Model is waiting for your input">
                                       Needs input
@@ -8181,6 +8280,9 @@ TODO: Describe what this skill does.
                 </button>
                 <button ref={threadContextMenuButtonRef} className="thread-context-menu-item" onClick={handleThreadContextMenuPin}>
                   Pin thread
+                </button>
+                <button className="thread-context-menu-item" onClick={handleThreadContextMenuDelete}>
+                  Delete thread
                 </button>
                 <div className="thread-context-menu-divider" />
                 <div className="thread-context-menu-colors" role="group" aria-label="Thread color">
@@ -8830,7 +8932,7 @@ TODO: Describe what this skill does.
                       )}
                       <textarea
                         ref={composerTextareaRef}
-                        className="min-h-[56px] w-full resize-none bg-transparent font-sans text-sm leading-relaxed outline-none"
+                        className="composer-textarea min-h-[56px] w-full resize-none bg-transparent font-sans text-sm leading-relaxed outline-none"
                         onChange={(event) => onComposerChange(event.target.value, event.target.selectionStart)}
                         onKeyDown={onComposerKeyDown}
                         onSelect={(event) => syncComposerMentionFromTextarea(event.currentTarget)}

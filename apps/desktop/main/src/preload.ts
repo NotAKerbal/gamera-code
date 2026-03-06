@@ -49,6 +49,8 @@ const gitResolveConflictsAiChannel =
   (IPC_CHANNELS as Record<string, string>).gitResolveConflictsAi ?? "git:resolveConflictsAi";
 const threadsForkChannel =
   (IPC_CHANNELS as Record<string, string>).threadsFork ?? "threads:fork";
+const threadsDeleteChannel =
+  (IPC_CHANNELS as Record<string, string>).threadsDelete ?? "threads:delete";
 const sessionsSteerChannel =
   (IPC_CHANNELS as Record<string, string>).sessionsSteer ?? "sessions:steer";
 const sessionsSubmitUserInputChannel =
@@ -116,6 +118,9 @@ type DesktopApiWithGitExtras = DesktopApi & {
       content: string;
     }) => Promise<{ ok: boolean; mtimeMs: number }>;
     onSetupEvent: (listener: (event: ProjectSetupProgressEvent) => void) => () => void;
+  };
+  threads: DesktopApi["threads"] & {
+    delete: (input: { id: string }) => Promise<{ ok: boolean }>;
   };
   sessions: DesktopApi["sessions"] & {
     reviewThread: (input: { threadId: string; instructions?: string }) => Promise<{ ok: boolean }>;
@@ -224,6 +229,7 @@ const api: DesktopApiWithGitExtras = {
     create: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsCreate, input),
     update: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsUpdate, input),
     archive: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsArchive, input),
+    delete: (input: { id: string }) => ipcRenderer.invoke(threadsDeleteChannel, input),
     fork: (input) => ipcRenderer.invoke(threadsForkChannel, input),
     events: (input) => ipcRenderer.invoke(IPC_CHANNELS.threadsEvents, input)
   },

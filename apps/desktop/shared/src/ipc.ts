@@ -44,6 +44,7 @@ export const IPC_CHANNELS = {
   threadsCreate: "threads:create",
   threadsUpdate: "threads:update",
   threadsArchive: "threads:archive",
+  threadsDelete: "threads:delete",
   threadsFork: "threads:fork",
   threadsEvents: "threads:events",
   orchestrationListRuns: "orchestration:listRuns",

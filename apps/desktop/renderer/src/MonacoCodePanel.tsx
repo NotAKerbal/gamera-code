@@ -600,34 +600,37 @@ export const MonacoCodePanel = ({
   }, [contextMenu]);
 
   useEffect(() => {
-    const styles = getComputedStyle(document.documentElement);
-    const themeColor = (name: string, fallbackHex: string) => {
-      const value = styles.getPropertyValue(name);
-      return cssRgbToHex(value) ?? fallbackHex;
-    };
     const isLight = (appTheme ?? "midnight") === "dawn" || (appTheme ?? "midnight") === "linen";
-    try {
-      monaco.editor.defineTheme(monacoThemeName, {
-        base: isLight ? "vs" : "vs-dark",
-        inherit: true,
-        rules: [],
-        colors: {
-          "editor.background": themeColor("--theme-surface", isLight ? "#f7f8fa" : "#111317"),
-          "editor.foreground": themeColor("--theme-accent", isLight ? "#1f2937" : "#e2e8f0"),
-          "editorLineNumber.foreground": themeColor("--theme-muted", isLight ? "#6b7280" : "#7c8aa3"),
-          "editorLineNumber.activeForeground": themeColor("--theme-accent", isLight ? "#111827" : "#f8fafc"),
-          "editorCursor.foreground": themeColor("--theme-accent", isLight ? "#0f172a" : "#f1f5f9"),
-          "editor.selectionBackground": themeColor("--theme-panel", isLight ? "#dbe2ea" : "#223042"),
-          "editor.inactiveSelectionBackground": themeColor("--theme-panel", isLight ? "#e8edf3" : "#1a2533"),
-          "editorGutter.background": themeColor("--theme-surface", isLight ? "#f7f8fa" : "#111317"),
-          "editorIndentGuide.background1": themeColor("--theme-border", isLight ? "#c9d2df" : "#2c3442"),
-          "editorIndentGuide.activeBackground1": themeColor("--theme-muted", isLight ? "#9aa8bb" : "#5f7088")
-        }
-      });
-      monaco.editor.setTheme(monacoThemeName);
-    } catch {
-      monaco.editor.setTheme(isLight ? "vs" : "vs-dark");
-    }
+    const frame = window.requestAnimationFrame(() => {
+      const styles = getComputedStyle(document.documentElement);
+      const themeColor = (name: string, fallbackHex: string) => {
+        const value = styles.getPropertyValue(name);
+        return cssRgbToHex(value) ?? fallbackHex;
+      };
+      try {
+        monaco.editor.defineTheme(monacoThemeName, {
+          base: isLight ? "vs" : "vs-dark",
+          inherit: true,
+          rules: [],
+          colors: {
+            "editor.background": themeColor("--theme-surface", isLight ? "#f7f8fa" : "#111317"),
+            "editor.foreground": themeColor("--theme-accent", isLight ? "#1f2937" : "#e2e8f0"),
+            "editorLineNumber.foreground": themeColor("--theme-muted", isLight ? "#6b7280" : "#7c8aa3"),
+            "editorLineNumber.activeForeground": themeColor("--theme-accent", isLight ? "#111827" : "#f8fafc"),
+            "editorCursor.foreground": themeColor("--theme-accent", isLight ? "#0f172a" : "#f1f5f9"),
+            "editor.selectionBackground": themeColor("--theme-panel", isLight ? "#dbe2ea" : "#223042"),
+            "editor.inactiveSelectionBackground": themeColor("--theme-panel", isLight ? "#e8edf3" : "#1a2533"),
+            "editorGutter.background": themeColor("--theme-surface", isLight ? "#f7f8fa" : "#111317"),
+            "editorIndentGuide.background1": themeColor("--theme-border", isLight ? "#c9d2df" : "#2c3442"),
+            "editorIndentGuide.activeBackground1": themeColor("--theme-muted", isLight ? "#9aa8bb" : "#5f7088")
+          }
+        });
+        monaco.editor.setTheme(monacoThemeName);
+      } catch {
+        monaco.editor.setTheme(isLight ? "vs" : "vs-dark");
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [appTheme, cssRgbToHex, monacoThemeName]);
 
   useEffect(() => {

@@ -289,4 +289,32 @@ describeRepository("Repository", () => {
 
     expect(() => repo.archiveThread(thread.id, true)).toThrow(/Pinned threads must be unpinned before archiving/);
   });
+
+  it("deletes thread descendants with parent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-thread-delete-cascade-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-delete-cascade" });
+    const parent = repo.createThread({ projectId: project.id, title: "parent", provider: "codex" });
+    const child = repo.createThread({
+      projectId: project.id,
+      title: "child",
+      provider: "codex",
+      parentThreadId: parent.id
+    });
+    const grandchild = repo.createThread({
+      projectId: project.id,
+      title: "grandchild",
+      provider: "codex",
+      parentThreadId: child.id
+    });
+
+    repo.deleteThread(parent.id);
+
+    expect(repo.getThread(parent.id)).toBeNull();
+    expect(repo.getThread(child.id)).toBeNull();
+    expect(repo.getThread(grandchild.id)).toBeNull();
+  });
 });

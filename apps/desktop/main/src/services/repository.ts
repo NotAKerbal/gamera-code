@@ -895,6 +895,49 @@ export class Repository {
     return this.getThread(id)!;
   }
 
+  deleteThread(id: string): void {
+    const existing = this.getThread(id);
+    if (!existing) {
+      throw new Error("Thread not found");
+    }
+
+    const descendantRows = this.db
+      .prepare(
+        `WITH RECURSIVE descendants(id) AS (
+           SELECT id FROM threads WHERE id = ?
+           UNION ALL
+           SELECT t.id
+           FROM threads t
+           INNER JOIN descendants d ON t.parent_thread_id = d.id
+         )
+         SELECT id FROM descendants`
+      )
+      .all(id) as Array<{ id: string }>;
+    const descendantIds = descendantRows.map((row) => row.id);
+
+    const transaction = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `WITH RECURSIVE descendants(id) AS (
+             SELECT id FROM threads WHERE id = ?
+             UNION ALL
+             SELECT t.id
+             FROM threads t
+             INNER JOIN descendants d ON t.parent_thread_id = d.id
+           )
+           DELETE FROM threads
+           WHERE id IN (SELECT id FROM descendants)`
+        )
+        .run(id);
+    });
+
+    transaction();
+
+    descendantIds.forEach((threadId) => {
+      this.streamSequenceCache.delete(threadId);
+    });
+  }
+
   startSession(input: { threadId: string; ptyPid: number; cwd: string; envHash: string }): Session {
     const now = new Date().toISOString();
 
