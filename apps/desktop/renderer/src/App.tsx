@@ -281,6 +281,9 @@ const useWindowsStyleHeader = !isMacOS;
 type TooltipPlacement = "above" | "below";
 const TOOLTIP_HOVER_DELAY_MS = 500;
 const SHOW_VOICE_INPUT_BUTTON = false;
+const RIGHT_PANEL_DEFAULT_WIDTH_PX = 520;
+const RIGHT_PANEL_MIN_WIDTH_PX = 360;
+const RIGHT_PANEL_MAX_WIDTH_PX = 920;
 
 type ActivityBundleRowProps = {
   rowId: string;
@@ -643,6 +646,7 @@ export const App = () => {
   const [projectPreviewUrlById, setProjectPreviewUrlById] = useState<Record<string, string>>({});
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isGitPanelOpen, setIsGitPanelOpen] = useState(false);
+  const [rightPanelWidthPx, setRightPanelWidthPx] = useState(RIGHT_PANEL_DEFAULT_WIDTH_PX);
   const [isPreviewPoppedOut, setIsPreviewPoppedOut] = useState(false);
   const [terminalPopoutByKey, setTerminalPopoutByKey] = useState<Record<string, boolean>>({});
   const [gitStateByProjectId, setGitStateByProjectId] = useState<Record<string, GitState>>({});
@@ -713,6 +717,10 @@ export const App = () => {
   const threadContextMenuUnarchiveRef = useRef<HTMLButtonElement | null>(null);
   const threadContextMenuThreadIdRef = useRef<string | null>(null);
   const threadContextMenuCloseTimerRef = useRef<number | null>(null);
+  const mainLayoutGridRef = useRef<HTMLDivElement | null>(null);
+  const rightPanelResizeSessionRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const rightPanelResizeRafRef = useRef<number | null>(null);
+  const rightPanelPendingWidthRef = useRef(RIGHT_PANEL_DEFAULT_WIDTH_PX);
   const threadsRef = useRef<Thread[]>([]);
   const timelineViewportRef = useRef<HTMLElement | null>(null);
   const pendingHistoryScrollRestoreRef = useRef<{
@@ -737,6 +745,85 @@ export const App = () => {
   const appendLog = useCallback((line: string) => {
     setLogs((prev) => [...prev, line]);
   }, []);
+  const buildMainLayoutGridTemplate = useCallback(
+    (rightWidthPx: number) => ((isPreviewOpen || isGitPanelOpen) ? `300px minmax(0, 1fr) ${rightWidthPx}px` : "300px 1fr"),
+    [isPreviewOpen, isGitPanelOpen]
+  );
+  const applyMainLayoutGridTemplate = useCallback(
+    (rightWidthPx: number) => {
+      const layout = mainLayoutGridRef.current;
+      if (!layout || isSettingsWindow || isCodeWindow) {
+        return;
+      }
+      layout.style.gridTemplateColumns = buildMainLayoutGridTemplate(rightWidthPx);
+    },
+    [buildMainLayoutGridTemplate, isCodeWindow, isSettingsWindow]
+  );
+  const flushRightPanelResize = useCallback(() => {
+    rightPanelResizeRafRef.current = null;
+    applyMainLayoutGridTemplate(rightPanelPendingWidthRef.current);
+  }, [applyMainLayoutGridTemplate]);
+  const handleRightPanelResizeMove = useCallback((event: MouseEvent) => {
+    const session = rightPanelResizeSessionRef.current;
+    if (!session) {
+      return;
+    }
+    const deltaX = session.startX - event.clientX;
+    const viewportConstrainedMax = Math.max(
+      RIGHT_PANEL_MIN_WIDTH_PX,
+      Math.min(RIGHT_PANEL_MAX_WIDTH_PX, Math.floor(window.innerWidth * 0.72))
+    );
+    const nextWidth = Math.max(
+      RIGHT_PANEL_MIN_WIDTH_PX,
+      Math.min(viewportConstrainedMax, session.startWidth + deltaX)
+    );
+    if (nextWidth === rightPanelPendingWidthRef.current) {
+      return;
+    }
+    rightPanelPendingWidthRef.current = nextWidth;
+    if (rightPanelResizeRafRef.current !== null) {
+      return;
+    }
+    rightPanelResizeRafRef.current = window.requestAnimationFrame(flushRightPanelResize);
+  }, [flushRightPanelResize]);
+  const stopRightPanelResize = useCallback(() => {
+    rightPanelResizeSessionRef.current = null;
+    if (rightPanelResizeRafRef.current !== null) {
+      window.cancelAnimationFrame(rightPanelResizeRafRef.current);
+      rightPanelResizeRafRef.current = null;
+    }
+    window.removeEventListener("mousemove", handleRightPanelResizeMove);
+    window.removeEventListener("mouseup", stopRightPanelResize);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    applyMainLayoutGridTemplate(rightPanelPendingWidthRef.current);
+    setRightPanelWidthPx((prev) => (prev === rightPanelPendingWidthRef.current ? prev : rightPanelPendingWidthRef.current));
+  }, [applyMainLayoutGridTemplate, handleRightPanelResizeMove]);
+  const startRightPanelResize = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    rightPanelPendingWidthRef.current = rightPanelWidthPx;
+    rightPanelResizeSessionRef.current = {
+      startX: event.clientX,
+      startWidth: rightPanelPendingWidthRef.current
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleRightPanelResizeMove);
+    window.addEventListener("mouseup", stopRightPanelResize);
+  }, [handleRightPanelResizeMove, rightPanelWidthPx, stopRightPanelResize]);
+  useEffect(() => {
+    rightPanelPendingWidthRef.current = rightPanelWidthPx;
+  }, [rightPanelWidthPx]);
+  useEffect(() => {
+    const rightColumnWidthPx = isGitPanelOpen ? rightPanelWidthPx : RIGHT_PANEL_DEFAULT_WIDTH_PX;
+    applyMainLayoutGridTemplate(rightColumnWidthPx);
+  }, [applyMainLayoutGridTemplate, isGitPanelOpen, rightPanelWidthPx]);
+  useEffect(() => () => stopRightPanelResize(), [stopRightPanelResize]);
+  useEffect(() => {
+    if (!isGitPanelOpen) {
+      stopRightPanelResize();
+    }
+  }, [isGitPanelOpen, stopRightPanelResize]);
   const terminalErrorKey = useCallback((projectId: string, commandId: string) => `${projectId}:${commandId}`, []);
   const applyDismissedTerminalErrors = useCallback(
     (projectId: string, state: ProjectTerminalState): ProjectTerminalState => {
@@ -7694,6 +7781,10 @@ TODO: Describe what this skill does.
   );
   const updateMessage = updateAvailableVersion ? `Update ${updateAvailableVersion} available.` : "";
   const showUpdatePrompt = Boolean(updateAvailableVersion) && !updateDismissed;
+  const rightColumnWidthPx = isGitPanelOpen ? rightPanelWidthPx : RIGHT_PANEL_DEFAULT_WIDTH_PX;
+  const mainLayoutGridTemplateColumns = (isPreviewVisible || isGitPanelOpen)
+    ? `300px minmax(0, 1fr) ${rightColumnWidthPx}px`
+    : "300px 1fr";
 
   return (
     <div className="h-screen overflow-hidden bg-bg text-white theme-text">
@@ -7770,15 +7861,13 @@ TODO: Describe what this skill does.
           )}
 
           <div
+            ref={mainLayoutGridRef}
             className={
               isSettingsWindow || isCodeWindow
                 ? "hidden"
-                : `grid flex-1 min-h-0 overflow-hidden ${
-                    isPreviewVisible || isGitPanelOpen
-                      ? "grid-cols-[300px_minmax(0,1fr)_520px]"
-                      : "grid-cols-[300px_1fr]"
-                  }`
+                : "grid flex-1 min-h-0 overflow-hidden"
             }
+            style={isSettingsWindow || isCodeWindow ? undefined : { gridTemplateColumns: mainLayoutGridTemplateColumns }}
           >
             <aside className="main-layout-sidebar relative flex h-full min-h-0 flex-col border-r border-border/90 px-3 py-3">
 	              <div className="projects-header">
@@ -9316,7 +9405,16 @@ TODO: Describe what this skill does.
             </main>
 
             {(isPreviewVisible || isGitPanelOpen) && (
-              <aside className="flex min-h-0 flex-col border-l border-border/90 bg-black/55">
+              <aside className="relative flex min-h-0 flex-col border-l border-border/90 bg-black/55">
+                {isGitPanelOpen && (
+                  <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize Git side pane"
+                    className="absolute inset-y-0 left-0 z-30 w-2 -translate-x-1/2 cursor-col-resize bg-transparent hover:bg-cyan-400/20"
+                    onMouseDown={startRightPanelResize}
+                  />
+                )}
                 {isPreviewVisible && (
                   <>
                     <div className="flex items-center justify-between border-b border-border/80 px-3 py-2">
