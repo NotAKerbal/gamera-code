@@ -582,12 +582,12 @@ export const SettingsModal = memo(({
                   <input
                     list="model-suggestions"
                     className="input text-xs"
-                    value={composerOptions.model ?? ""}
-                    placeholder="Model (default)"
+                    value={composerOptions.model ?? "gpt-5.4"}
+                    placeholder="gpt-5.4"
                     onChange={(event) =>
                       setComposerOptions((prev) => ({
                         ...prev,
-                        model: event.target.value.trim() || undefined
+                        model: event.target.value.trim() || "gpt-5.4"
                       }))
                     }
                   />

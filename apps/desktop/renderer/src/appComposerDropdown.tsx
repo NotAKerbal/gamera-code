@@ -4,6 +4,7 @@ import type { CodexSandboxMode, CodexThreadOptions } from "@code-app/shared";
 import {
   APPROVAL_OPTIONS,
   COLLABORATION_OPTIONS,
+  formatModelDisplayName,
   acknowledgeDangerFullAccessWarning,
   hasDangerFullAccessWarningAcknowledged,
   MODEL_SUGGESTIONS,
@@ -66,18 +67,6 @@ const ComposerDropdownPortalComponent = ({
           <div className="branch-dropdown-list">
             {composerDropdown.kind === "model" && (
               <>
-                <button
-                  className={(composerOptions.model ?? "").trim() === "" ? "branch-dropdown-row branch-dropdown-row-current" : "branch-dropdown-row"}
-                  onClick={() => {
-                    setComposerOptions((prev) => ({
-                      ...prev,
-                      model: undefined
-                    }));
-                    setComposerDropdown(null);
-                  }}
-                >
-                  <span className="truncate">auto</span>
-                </button>
                 {MODEL_SUGGESTIONS.map((model) => (
                   <button
                     key={model}
@@ -90,7 +79,7 @@ const ComposerDropdownPortalComponent = ({
                       setComposerDropdown(null);
                     }}
                   >
-                    <span className="truncate">{model.toLowerCase()}</span>
+                    <span className="truncate">{formatModelDisplayName(model)}</span>
                   </button>
                 ))}
               </>

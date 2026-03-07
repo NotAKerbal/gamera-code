@@ -114,6 +114,9 @@ const normalizeCodexModel = (value: string | null): string | undefined => {
   }
 
   const normalized = value.toLowerCase();
+  if (normalized === "auto") {
+    return "gpt-5.4";
+  }
   if (normalized === "codex-5.4") {
     return "gpt-5.4";
   }
@@ -135,7 +138,7 @@ const normalizeCodexThreadOptions = (
     workingDirectory: string;
     skipGitRepoCheck: true;
   } => {
-  const model = normalizeCodexModel(asString(options?.model));
+  const model = normalizeCodexModel(asString(options?.model)) ?? "gpt-5.4";
   const collaborationMode = isCodexCollaborationMode(options?.collaborationMode) ? options.collaborationMode : "plan";
   const sandboxMode = isCodexSandboxMode(options?.sandboxMode) ? options.sandboxMode : "workspace-write";
   const modelReasoningEffort = isCodexModelReasoningEffort(options?.modelReasoningEffort)

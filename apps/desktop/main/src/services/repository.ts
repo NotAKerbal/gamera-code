@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
   projectTerminalSwitchBehaviorDefault: "start_stop",
   subthreadPolicyDefault: "auto",
   codexDefaults: {
+    model: "gpt-5.4",
     collaborationMode: "plan",
     sandboxMode: "workspace-write",
     modelReasoningEffort: "medium",

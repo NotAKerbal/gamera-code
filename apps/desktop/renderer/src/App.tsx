@@ -128,6 +128,7 @@ import {
   fileToDataUrl,
   findDuplicateBasenames,
   flattenThreadRows,
+  formatModelDisplayName,
   formatMentionFileLabel,
   formatRelative,
   getProjectNameFromPath,
@@ -1021,7 +1022,7 @@ export const App = () => {
   const activeThreadHistoryLoading = activeThreadId ? threadHistoryLoadingById[activeThreadId] ?? false : false;
   const activeThreadHasMoreHistory = activeThreadId ? threadHistoryHasMoreById[activeThreadId] ?? false : false;
   const activeThreadHistoryCursor = activeThreadId ? threadHistoryCursorById[activeThreadId] : undefined;
-  const modelLabel = composerOptions.model?.trim() ? composerOptions.model.trim() : "Auto";
+  const modelLabel = composerOptions.model?.trim() ? composerOptions.model.trim() : "gpt-5.4";
   const effortLabel =
     REASONING_OPTIONS.find((option) => option.value === (composerOptions.modelReasoningEffort ?? "medium"))?.label ?? "Medium";
   const modeLabel =
@@ -9019,7 +9020,7 @@ TODO: Describe what this skill does.
                         onClick={() => openComposerDropdown("model", composerModelTriggerRef.current)}
                         disabled={!activeThreadId || activeThreadSendPending}
                       >
-                        <span>{modelLabel.toLowerCase()}</span>
+                        <span>{formatModelDisplayName(modelLabel)}</span>
                         <FaChevronDown className="text-[10px] text-slate-500" />
                       </button>
                       <button
