@@ -303,7 +303,8 @@ const parseDevCommands = (value: unknown): ProjectDevCommand[] => {
     }
     const autoStart = typeof row.autoStart === "boolean" ? row.autoStart : index === 0;
     const stayRunning = typeof row.stayRunning === "boolean" ? row.stayRunning : false;
-    parsed.push({ id, name, command, autoStart, stayRunning });
+    const hotkey = typeof row.hotkey === "string" ? row.hotkey.trim() : "";
+    parsed.push({ id, name, command, autoStart, stayRunning, hotkey: hotkey || undefined });
   }
 
   if (parsed.length === 0) {

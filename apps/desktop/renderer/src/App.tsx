@@ -327,6 +327,106 @@ const NEW_PROJECT_TEMPLATE_OPTIONS: NewProjectTemplateOption[] = [
   }
 ];
 
+const normalizeHotkeyKey = (key: string): string => {
+  const trimmed = key.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower === " ") return "Space";
+  if (lower === "esc") return "Escape";
+  if (lower === "arrowup") return "ArrowUp";
+  if (lower === "arrowdown") return "ArrowDown";
+  if (lower === "arrowleft") return "ArrowLeft";
+  if (lower === "arrowright") return "ArrowRight";
+  if (lower === "enter") return "Enter";
+  if (lower === "tab") return "Tab";
+  if (lower === "home") return "Home";
+  if (lower === "end") return "End";
+  if (lower === "pageup") return "PageUp";
+  if (lower === "pagedown") return "PageDown";
+  if (lower === "insert") return "Insert";
+  if (lower === "delete") return "Delete";
+  if (lower === "backspace") return "Backspace";
+  if (lower === "+") return "Plus";
+  if (lower === "-") return "Minus";
+  if (lower === "=") return "Equal";
+  if (lower === ",") return "Comma";
+  if (lower === ".") return "Period";
+  if (lower === "/") return "Slash";
+  if (lower === "\\") return "Backslash";
+  if (lower === ";") return "Semicolon";
+  if (lower === "'") return "Quote";
+  if (lower === "`") return "Backquote";
+  if (lower === "[") return "BracketLeft";
+  if (lower === "]") return "BracketRight";
+  if (/^f([1-9]|1\d|2[0-4])$/.test(lower)) {
+    return lower.toUpperCase();
+  }
+  if (trimmed.length === 1) {
+    return trimmed.toUpperCase();
+  }
+  return trimmed[0]!.toUpperCase() + trimmed.slice(1);
+};
+
+const normalizeActionHotkey = (value: string): string => {
+  const tokens = value
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return "";
+  }
+  let hasMod = false;
+  let hasAlt = false;
+  let hasShift = false;
+  let key = "";
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    if (lower === "mod" || lower === "cmd" || lower === "command" || lower === "ctrl" || lower === "control" || lower === "meta") {
+      hasMod = true;
+      continue;
+    }
+    if (lower === "alt" || lower === "option") {
+      hasAlt = true;
+      continue;
+    }
+    if (lower === "shift") {
+      hasShift = true;
+      continue;
+    }
+    key = normalizeHotkeyKey(token);
+  }
+  if (!key || key === "Meta" || key === "Control" || key === "Shift" || key === "Alt") {
+    return "";
+  }
+  const parts: string[] = [];
+  if (hasMod) parts.push("Mod");
+  if (hasAlt) parts.push("Alt");
+  if (hasShift) parts.push("Shift");
+  if (!hasMod) {
+    return "";
+  }
+  parts.push(key);
+  return parts.join("+");
+};
+
+const actionHotkeyFromKeyboardEvent = (event: KeyboardEvent): string => {
+  const key = normalizeHotkeyKey(event.key);
+  if (!key || key === "Meta" || key === "Control" || key === "Shift" || key === "Alt") {
+    return "";
+  }
+  const parts: string[] = [];
+  if (event.metaKey || event.ctrlKey) parts.push("Mod");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  if (parts.length === 0 && key.length === 1) {
+    return "";
+  }
+  parts.push(key);
+  return parts.join("+");
+};
+
 const ActivityBundleRow = ({
   rowId,
   chips,
@@ -466,7 +566,7 @@ export const App = () => {
   } | null>(null);
   const [projectActionsSettingsInitialDraft, setProjectActionsSettingsInitialDraft] = useState<{
     focusCommandId?: string;
-    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; stayRunning: boolean }>;
+    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; stayRunning: boolean; hotkey?: string }>;
   } | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
@@ -505,6 +605,7 @@ export const App = () => {
   const tooltipHoverTimeoutRef = useRef<number | null>(null);
   const tooltipTextRef = useRef("");
   const tooltipPlacementRef = useRef<TooltipPlacement>("below");
+  const suppressedNativeTitleRef = useRef<{ target: HTMLElement; title: string } | null>(null);
   const [threadHistoryCursorById, setThreadHistoryCursorById] = useState<Record<string, number | undefined>>({});
   const [threadHistoryHasMoreById, setThreadHistoryHasMoreById] = useState<Record<string, boolean>>({});
   const [threadHistoryLoadingById, setThreadHistoryLoadingById] = useState<Record<string, boolean>>({});
@@ -941,8 +1042,19 @@ export const App = () => {
       tooltipHoverTimeoutRef.current = null;
     }
   }, []);
+  const restoreSuppressedNativeTitle = useCallback(() => {
+    const suppressed = suppressedNativeTitleRef.current;
+    if (!suppressed) {
+      return;
+    }
+    if (suppressed.target.isConnected && !suppressed.target.hasAttribute("title")) {
+      suppressed.target.setAttribute("title", suppressed.title);
+    }
+    suppressedNativeTitleRef.current = null;
+  }, []);
   const clearGlobalTooltip = useCallback(() => {
     clearPendingTooltipHover();
+    restoreSuppressedNativeTitle();
     tooltipTargetRef.current = null;
     tooltipVisibleRef.current = false;
     const tooltip = tooltipElementRef.current;
@@ -951,7 +1063,7 @@ export const App = () => {
     }
     tooltip.classList.remove("is-visible", "is-above", "is-below");
     tooltip.setAttribute("aria-hidden", "true");
-  }, [clearPendingTooltipHover]);
+  }, [clearPendingTooltipHover, restoreSuppressedNativeTitle]);
   const updateGlobalTooltip = useCallback(() => {
     const target = tooltipTargetRef.current;
     if (!target || !target.isConnected) {
@@ -1015,6 +1127,17 @@ export const App = () => {
       if (tooltipTargetRef.current === target && tooltipTextRef.current === text && tooltipVisibleRef.current) {
         return;
       }
+      const suppressed = suppressedNativeTitleRef.current;
+      if (suppressed && suppressed.target !== target) {
+        restoreSuppressedNativeTitle();
+      }
+      if (!suppressedNativeTitleRef.current) {
+        const nativeTitle = target.getAttribute("title");
+        if (nativeTitle) {
+          suppressedNativeTitleRef.current = { target, title: nativeTitle };
+          target.removeAttribute("title");
+        }
+      }
       clearPendingTooltipHover();
       tooltipTargetRef.current = target;
       tooltipTextRef.current = text;
@@ -1028,7 +1151,7 @@ export const App = () => {
       }
       scheduleTooltipPositionUpdate();
     },
-    [clearGlobalTooltip, clearPendingTooltipHover, scheduleTooltipPositionUpdate]
+    [clearGlobalTooltip, clearPendingTooltipHover, restoreSuppressedNativeTitle, scheduleTooltipPositionUpdate]
   );
   const importQuery = importProjectQuery.trim();
   const shouldShowCloneAction = isLikelyGitRepositoryUrl(importQuery);
@@ -3610,7 +3733,8 @@ export const App = () => {
       name: command.name ?? "",
       command: command.command ?? "",
       autoStart: command.autoStart ?? index === 0,
-      stayRunning: command.stayRunning ?? false
+      stayRunning: command.stayRunning ?? false,
+      hotkey: command.hotkey?.trim() ?? ""
     }));
     setProjectActionsSettingsInitialDraft({
       focusCommandId: commandId,
@@ -3703,7 +3827,7 @@ export const App = () => {
   };
 
   const saveProjectActionsSettings = async (draft: {
-    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; stayRunning: boolean }>;
+    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; stayRunning: boolean; hotkey?: string }>;
   }) => {
     if (!activeProjectId) {
       return;
@@ -3714,7 +3838,8 @@ export const App = () => {
         name: command.name.trim(),
         command: command.command.trim(),
         autoStart: Boolean(command.autoStart),
-        stayRunning: Boolean(command.stayRunning)
+        stayRunning: Boolean(command.stayRunning),
+        hotkey: normalizeActionHotkey(command.hotkey ?? "") || undefined
       }))
       .filter((command) => command.id && command.name && command.command);
 
@@ -4864,13 +4989,34 @@ export const App = () => {
   useEffect(() => {
     const onGlobalShortcut = (event: KeyboardEvent) => {
       const usesPlatformModifier = isMacOS ? event.metaKey : event.ctrlKey;
-      if (!usesPlatformModifier || event.shiftKey || event.altKey || event.isComposing || event.repeat) {
+      if (!usesPlatformModifier || event.isComposing || event.repeat) {
         return;
       }
-      if (isEditableKeyboardTarget(event.target)) {
+      const actionHotkey = actionHotkeyFromKeyboardEvent(event);
+      if (actionHotkey && activeProjectId) {
+        const matchingCommand = activeProjectSettings?.devCommands.find(
+          (command) => normalizeActionHotkey(command.hotkey ?? "") === actionHotkey
+        );
+        const commandId = matchingCommand?.id?.trim();
+        if (commandId) {
+          const terminal = activeProjectTerminals.find((item) => item.commandId === commandId);
+          const task = terminal?.running
+            ? stopActiveProjectTerminal(commandId)
+            : startActiveProjectTerminal(commandId);
+          task.catch((error) => {
+            setLogs((prev) => [...prev, `Action hotkey failed: ${String(error)}`]);
+          });
+          event.preventDefault();
+          return;
+        }
+      }
+      if (event.shiftKey || event.altKey) {
         return;
       }
       const key = event.key.toLowerCase();
+      if (isEditableKeyboardTarget(event.target)) {
+        return;
+      }
       if (key !== "n" && key !== "t" && key !== "i") {
         return;
       }
@@ -4883,7 +5029,14 @@ export const App = () => {
     return () => {
       window.removeEventListener("keydown", onGlobalShortcut);
     };
-  }, [runShortcutByKey]);
+  }, [
+    activeProjectId,
+    activeProjectSettings?.devCommands,
+    activeProjectTerminals,
+    runShortcutByKey,
+    startActiveProjectTerminal,
+    stopActiveProjectTerminal
+  ]);
 
   useEffect(() => {
     if (isMacOS) {
@@ -4986,19 +5139,60 @@ export const App = () => {
     setShowWorkspaceModal(true);
   };
 
-  const openWorkspaceSettingsModal = (workspaceId: string) => {
+  const renameWorkspaceFromHeaderMenu = async (workspaceId: string) => {
     const workspace = workspaceById[workspaceId];
     if (!workspace) {
       return;
     }
-    setWorkspaceModalMode("edit");
-    setWorkspaceEditingId(workspace.id);
-    setWorkspaceModalInitialDraft({
-      name: workspace.name,
-      color: workspace.color,
-      moveProjectIds: []
+    const nextNameRaw = window.prompt("Rename workspace", workspace.name) ?? "";
+    const nextName = nextNameRaw.trim();
+    if (!nextName) {
+      return;
+    }
+    if (nextName === workspace.name.trim()) {
+      return;
+    }
+    await api.workspaces.update({
+      id: workspace.id,
+      name: nextName
     });
-    setShowWorkspaceModal(true);
+    await loadWorkspaces();
+  };
+
+  const setWorkspaceColorFromHeaderMenu = async (workspaceId: string, color: string) => {
+    const workspace = workspaceById[workspaceId];
+    const nextColor = color.trim();
+    if (!workspace || !nextColor) {
+      return;
+    }
+    if (workspace.color.toLowerCase() === nextColor.toLowerCase()) {
+      return;
+    }
+    await api.workspaces.update({
+      id: workspace.id,
+      color: nextColor
+    });
+    await loadWorkspaces();
+  };
+
+  const deleteWorkspaceFromHeaderMenu = async (workspaceId: string) => {
+    const workspace = workspaceById[workspaceId];
+    if (!workspace) {
+      return;
+    }
+    if (workspaces.length <= 1) {
+      setLogs((prev) => [...prev, "Cannot delete the last workspace."]);
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete workspace "${workspace.name}"?\n\nProjects in this workspace will be removed from GameraCode. Files on disk stay intact.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    await api.workspaces.delete({ id: workspace.id });
+    setShowWorkspaceModal(false);
+    await Promise.all([loadWorkspaces(), loadProjects(), loadThreads()]);
   };
 
   const saveWorkspaceFromModal = async (draft: { name: string; color: string; moveProjectIds: string[] }) => {
@@ -7505,7 +7699,9 @@ TODO: Describe what this skill does.
               workspaces={workspaceHeaderItems}
               activeWorkspaceId={activeWorkspaceId}
               onSelectWorkspace={handleSelectWorkspace}
-              onOpenWorkspaceSettings={openWorkspaceSettingsModal}
+              onRenameWorkspace={renameWorkspaceFromHeaderMenu}
+              onSetWorkspaceColor={setWorkspaceColorFromHeaderMenu}
+              onDeleteWorkspace={deleteWorkspaceFromHeaderMenu}
               onOpenNewWorkspaceModal={openCreateWorkspaceModal}
               changelogItems={CHANGELOG_ITEMS}
               changelogRef={changelogRef}

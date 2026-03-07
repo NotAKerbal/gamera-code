@@ -1,6 +1,6 @@
 import { memo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { FaTimes, FaTrashAlt } from "react-icons/fa";
+import { FaGripVertical, FaTimes, FaTrashAlt } from "react-icons/fa";
 import type {
   GitRepositoryCandidate,
   Project,
@@ -17,7 +17,7 @@ import {
 
 type ProjectTemplateId = "nextjs" | "electron";
 
-type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean };
+type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; hotkey?: string };
 type ProjectSettingsTab = "general" | "env" | "links" | "skills";
 type ProjectSettingsDraft = {
   projectName: string;
@@ -30,6 +30,74 @@ type ProjectSettingsDraft = {
 type ProjectActionsSettingsDraft = {
   focusCommandId?: string;
   projectSettingsCommands: Array<ProjectCommand & { stayRunning: boolean }>;
+};
+
+const normalizeHotkeyKey = (key: string): string => {
+  const trimmed = key.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower === " ") return "Space";
+  if (lower === "esc") return "Escape";
+  if (lower === "arrowup") return "ArrowUp";
+  if (lower === "arrowdown") return "ArrowDown";
+  if (lower === "arrowleft") return "ArrowLeft";
+  if (lower === "arrowright") return "ArrowRight";
+  if (lower === "enter") return "Enter";
+  if (lower === "tab") return "Tab";
+  if (lower === "home") return "Home";
+  if (lower === "end") return "End";
+  if (lower === "pageup") return "PageUp";
+  if (lower === "pagedown") return "PageDown";
+  if (lower === "insert") return "Insert";
+  if (lower === "delete") return "Delete";
+  if (lower === "backspace") return "Backspace";
+  if (lower === "+") return "Plus";
+  if (lower === "-") return "Minus";
+  if (lower === "=") return "Equal";
+  if (lower === ",") return "Comma";
+  if (lower === ".") return "Period";
+  if (lower === "/") return "Slash";
+  if (lower === "\\") return "Backslash";
+  if (lower === ";") return "Semicolon";
+  if (lower === "'") return "Quote";
+  if (lower === "`") return "Backquote";
+  if (lower === "[") return "BracketLeft";
+  if (lower === "]") return "BracketRight";
+  if (/^f([1-9]|1\d|2[0-4])$/.test(lower)) {
+    return lower.toUpperCase();
+  }
+  if (trimmed.length === 1) {
+    return trimmed.toUpperCase();
+  }
+  return trimmed[0]!.toUpperCase() + trimmed.slice(1);
+};
+
+const formatActionHotkeyFromEvent = (event: KeyboardEvent): string | null => {
+  const key = normalizeHotkeyKey(event.key);
+  if (!key || key === "Meta" || key === "Control" || key === "Shift" || key === "Alt") {
+    return null;
+  }
+  if (!event.metaKey && !event.ctrlKey) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (event.metaKey || event.ctrlKey) {
+    parts.push("Mod");
+  }
+  if (event.altKey) {
+    parts.push("Alt");
+  }
+  if (event.shiftKey) {
+    parts.push("Shift");
+  }
+  // Prevent bare printable keys from becoming global shortcuts.
+  if (parts.length === 0 && key.length === 1) {
+    return null;
+  }
+  parts.push(key);
+  return parts.join("+");
 };
 
 type ToggleButtonProps = {
@@ -483,6 +551,9 @@ export const ProjectActionsSettingsModal = memo(({
   const [projectSettingsCommands, setProjectSettingsCommands] = useState<Array<ProjectCommand & { stayRunning: boolean }>>(
     initialDraft.projectSettingsCommands
   );
+  const [capturingHotkeyCommandId, setCapturingHotkeyCommandId] = useState<string | null>(null);
+  const [draggedCommandIndex, setDraggedCommandIndex] = useState<number | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
   const focusedCommandIndex = initialDraft.focusCommandId
     ? projectSettingsCommands.findIndex((command) => command.id === initialDraft.focusCommandId)
     : -1;
@@ -491,6 +562,32 @@ export const ProjectActionsSettingsModal = memo(({
     ? projectSettingsCommands.filter((command) => command.id === initialDraft.focusCommandId)
     : projectSettingsCommands;
   const filteredCommands = filteredByFocus.length > 0 ? filteredByFocus : projectSettingsCommands;
+  const updateCommandHotkey = (commandId: string, hotkey: string) => {
+    setProjectSettingsCommands((prev) =>
+      prev.map((item) => (item.id === commandId ? { ...item, hotkey } : item))
+    );
+  };
+  const clearDragState = () => {
+    setDraggedCommandIndex(null);
+    setDropTargetIndex(null);
+  };
+  const reorderCommands = (sourceIndex: number, targetIndex: number) => {
+    if (sourceIndex === targetIndex) {
+      return;
+    }
+    setProjectSettingsCommands((prev) => {
+      if (sourceIndex < 0 || sourceIndex >= prev.length || targetIndex < 0 || targetIndex >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(sourceIndex, 1);
+      if (!moved) {
+        return prev;
+      }
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
@@ -530,17 +627,47 @@ export const ProjectActionsSettingsModal = memo(({
                     }
                   />
                 </div>
+                <div>
+                  <div className="mb-1 text-xs uppercase tracking-wide text-muted">Hotkey</div>
+                  <button
+                    type="button"
+                    className={`input text-left text-xs ${capturingHotkeyCommandId === focusedCommand.id ? "border-accent/80" : ""}`}
+                    onClick={() => setCapturingHotkeyCommandId(focusedCommand.id)}
+                    onBlur={() => {
+                      if (capturingHotkeyCommandId === focusedCommand.id) {
+                        setCapturingHotkeyCommandId(null);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (event.key === "Backspace" || event.key === "Delete") {
+                        updateCommandHotkey(focusedCommand.id, "");
+                        setCapturingHotkeyCommandId(null);
+                        return;
+                      }
+                      if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+                        setCapturingHotkeyCommandId(null);
+                        return;
+                      }
+                      const nextHotkey = formatActionHotkeyFromEvent(event.nativeEvent);
+                      if (!nextHotkey) {
+                        return;
+                      }
+                      updateCommandHotkey(focusedCommand.id, nextHotkey);
+                      setCapturingHotkeyCommandId(null);
+                    }}
+                  >
+                    {capturingHotkeyCommandId === focusedCommand.id
+                      ? "Press Ctrl/Cmd + key..."
+                      : focusedCommand.hotkey?.trim() || "Set hotkey"}
+                  </button>
+                </div>
                 <div className="grid gap-2 md:grid-cols-2">
                   <button
                     type="button"
                     className={`action-auto-btn app-tooltip-target ${focusedCommand.autoStart ? "is-enabled" : ""}`}
                     aria-pressed={focusedCommand.autoStart}
-                    data-app-tooltip={
-                      focusedCommand.autoStart
-                        ? "Auto: On\nThis action starts asynchronously when you enter/select this project.\nIt will not restart if already running."
-                        : "Auto: Off\nThis action will not auto-start when entering a project.\nStart it manually from the header action chip."
-                    }
-                    title={focusedCommand.autoStart ? "Action auto-starts when the project becomes active." : "Action requires manual start."}
                     onClick={() =>
                       setProjectSettingsCommands((prev) =>
                         prev.map((item, idx) => (idx === focusedCommandIndex ? { ...item, autoStart: !item.autoStart } : item))
@@ -553,12 +680,6 @@ export const ProjectActionsSettingsModal = memo(({
                     type="button"
                     className={`action-stay-btn app-tooltip-target ${focusedCommand.stayRunning ? "is-enabled" : ""}`}
                     aria-pressed={focusedCommand.stayRunning}
-                    data-app-tooltip={
-                      focusedCommand.stayRunning
-                        ? "Stay running: On\nThis action keeps running when you leave/switch projects or workspaces."
-                        : "Stop on idle: On\nThis action is stopped when you leave the project and there are no active threads in it."
-                    }
-                    title={focusedCommand.stayRunning ? "Action will stay running when you switch away." : "Action will stop when idle and you switch away."}
                     onClick={() =>
                       setProjectSettingsCommands((prev) =>
                         prev.map((item, idx) => (idx === focusedCommandIndex ? { ...item, stayRunning: !item.stayRunning } : item))
@@ -574,8 +695,53 @@ export const ProjectActionsSettingsModal = memo(({
             <>
             {filteredCommands.map((command) => {
               const index = projectSettingsCommands.findIndex((item) => item.id === command.id);
+              const isDropTarget = draggedCommandIndex !== null && dropTargetIndex === index && draggedCommandIndex !== index;
               return (
-              <div key={command.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_96px_92px_40px]">
+              <div
+                key={command.id || index}
+                className={`grid gap-2 md:grid-cols-[28px_120px_1fr_64px_96px_92px_40px] ${isDropTarget ? "rounded-lg border border-border/80 bg-black/20 p-1" : ""}`}
+                onDragOver={(event) => {
+                  if (initialDraft.focusCommandId || draggedCommandIndex === null) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setDropTargetIndex(index);
+                }}
+                onDrop={(event) => {
+                  if (initialDraft.focusCommandId) {
+                    return;
+                  }
+                  event.preventDefault();
+                  const sourceIndexFromState = draggedCommandIndex;
+                  const sourceIndexFromTransfer = Number.parseInt(event.dataTransfer.getData("text/plain"), 10);
+                  const sourceIndex = Number.isFinite(sourceIndexFromTransfer) ? sourceIndexFromTransfer : sourceIndexFromState;
+                  if (typeof sourceIndex === "number") {
+                    reorderCommands(sourceIndex, index);
+                  }
+                  clearDragState();
+                }}
+              >
+                <button
+                  type="button"
+                  className={`inline-flex h-9 w-7 items-center justify-center rounded-md border border-border/70 bg-black/20 text-slate-400 transition hover:bg-black/35 hover:text-slate-200 ${initialDraft.focusCommandId ? "cursor-default opacity-60" : "cursor-grab active:cursor-grabbing"}`}
+                  title="Drag to reorder"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  draggable={!initialDraft.focusCommandId}
+                  onDragStart={(event) => {
+                    if (initialDraft.focusCommandId) {
+                      return;
+                    }
+                    setDraggedCommandIndex(index);
+                    setDropTargetIndex(index);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", String(index));
+                  }}
+                  onDragEnd={clearDragState}
+                >
+                  <FaGripVertical className="text-[11px]" />
+                </button>
                 <input
                   className="input text-xs"
                   value={command.name}
@@ -596,21 +762,44 @@ export const ProjectActionsSettingsModal = memo(({
                     )
                   }
                 />
+                <button
+                  type="button"
+                  className={`input h-9 px-2 py-0 text-left text-[10px] font-mono ${capturingHotkeyCommandId === command.id ? "border-accent/80" : ""}`}
+                  onClick={() => setCapturingHotkeyCommandId(command.id)}
+                  onBlur={() => {
+                    if (capturingHotkeyCommandId === command.id) {
+                      setCapturingHotkeyCommandId(null);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.key === "Backspace" || event.key === "Delete") {
+                      updateCommandHotkey(command.id, "");
+                      setCapturingHotkeyCommandId(null);
+                      return;
+                    }
+                    if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+                      setCapturingHotkeyCommandId(null);
+                      return;
+                    }
+                    const nextHotkey = formatActionHotkeyFromEvent(event.nativeEvent);
+                    if (!nextHotkey) {
+                      return;
+                    }
+                    updateCommandHotkey(command.id, nextHotkey);
+                    setCapturingHotkeyCommandId(null);
+                  }}
+                >
+                  {capturingHotkeyCommandId === command.id
+                    ? "Press..."
+                    : command.hotkey?.trim() || "Set"}
+                </button>
                 <div className="project-settings-toggle-inline">
                   <button
                     type="button"
-                    className={`action-auto-btn app-tooltip-target ${command.autoStart ? "is-enabled" : ""}`}
+                    className={`action-auto-btn ${command.autoStart ? "is-enabled" : ""}`}
                     aria-pressed={command.autoStart}
-                    data-app-tooltip={
-                      command.autoStart
-                        ? "Auto: On\nThis action starts asynchronously when you enter/select this project.\nIt will not restart if already running."
-                        : "Auto: Off\nThis action will not auto-start when entering a project.\nStart it manually from the header action chip."
-                    }
-                    title={
-                      command.autoStart
-                        ? "Action auto-starts when the project becomes active."
-                        : "Action requires manual start."
-                    }
                     onClick={() =>
                       setProjectSettingsCommands((prev) =>
                         prev.map((item, idx) => (idx === index ? { ...item, autoStart: !item.autoStart } : item))
@@ -623,14 +812,8 @@ export const ProjectActionsSettingsModal = memo(({
                 <div className="project-settings-toggle-inline">
                   <button
                     type="button"
-                    className={`action-stay-btn app-tooltip-target ${command.stayRunning ? "is-enabled" : ""}`}
+                    className={`action-stay-btn ${command.stayRunning ? "is-enabled" : ""}`}
                     aria-pressed={command.stayRunning}
-                    data-app-tooltip={
-                      command.stayRunning
-                        ? "Stay running: On\nThis action keeps running when you leave/switch projects or workspaces."
-                        : "Stop on idle: On\nThis action is stopped when you leave the project and there are no active threads in it."
-                    }
-                    title={command.stayRunning ? "Action will stay running when you switch away." : "Action will stop when idle and you switch away."}
                     onClick={() =>
                       setProjectSettingsCommands((prev) =>
                         prev.map((item, idx) => (idx === index ? { ...item, stayRunning: !item.stayRunning } : item))
@@ -666,7 +849,8 @@ export const ProjectActionsSettingsModal = memo(({
                       name: `Command ${prev.length + 1}`,
                       command: "",
                       autoStart: false,
-                      stayRunning: false
+                      stayRunning: false,
+                      hotkey: ""
                     }
                   ])
                 }
@@ -675,6 +859,9 @@ export const ProjectActionsSettingsModal = memo(({
               </button>
               <p className="text-xs text-slate-400">
                 `Auto` starts when entering a project. `Stay` prevents stop on workspace/project switch.
+              </p>
+              <p className="text-xs text-slate-400">
+                Click the hotkey field and press `Ctrl/Cmd + key`. Backspace/Delete clears it.
               </p>
             </div>
             ) : null}

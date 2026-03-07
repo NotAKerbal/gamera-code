@@ -1102,6 +1102,12 @@ webview {
   @apply w-8 justify-center px-0;
 }
 
+.workspace-segment-add:hover,
+.workspace-segment-add:focus-visible,
+.workspace-segment-add:focus-within {
+  padding-right: 0;
+}
+
 [data-theme="dawn"] .workspace-segmented-control,
 [data-theme="linen"] .workspace-segmented-control {
   background: rgb(var(--theme-surface) / 0.82);

@@ -77,6 +77,7 @@ export interface ProjectDevCommand {
   command: string;
   autoStart?: boolean;
   stayRunning?: boolean;
+  hotkey?: string;
 }
 
 export interface ProjectWebLink {

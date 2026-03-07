@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type RefObject, type SetStateAction } from "react";
 import {
   FaApple,
   FaChevronDown,
@@ -37,7 +37,9 @@ type MainHeaderProps = {
   }>;
   activeWorkspaceId: string | null;
   onSelectWorkspace: (workspaceId: string) => void;
-  onOpenWorkspaceSettings: (workspaceId: string) => void;
+  onRenameWorkspace: (workspaceId: string) => Promise<void>;
+  onSetWorkspaceColor: (workspaceId: string, color: string) => Promise<void>;
+  onDeleteWorkspace: (workspaceId: string) => Promise<void>;
   onOpenNewWorkspaceModal: () => void;
   changelogItems: string[];
   changelogRef: RefObject<HTMLDivElement | null>;
@@ -77,6 +79,15 @@ type MainHeaderProps = {
   onCloseWindow: () => void | Promise<void>;
   appendLog: (line: string) => void;
 };
+
+const WORKSPACE_COLOR_PRESETS = [
+  "#64748b",
+  "#2563eb",
+  "#059669",
+  "#d97706",
+  "#dc2626",
+  "#7c3aed"
+];
 
 const hexToRgba = (hex: string, alpha: number) => {
   const normalized = hex.trim().replace(/^#/, "");
@@ -136,7 +147,9 @@ const MainHeaderComponent = ({
   workspaces,
   activeWorkspaceId,
   onSelectWorkspace,
-  onOpenWorkspaceSettings,
+  onRenameWorkspace,
+  onSetWorkspaceColor,
+  onDeleteWorkspace,
   onOpenNewWorkspaceModal,
   changelogItems,
   changelogRef,
@@ -178,7 +191,9 @@ const MainHeaderComponent = ({
 }: MainHeaderProps) => {
   const useWindowsStyleHeader = isWindows || !isMacOS;
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
   const [openTerminalActionMenuId, setOpenTerminalActionMenuId] = useState<string | null>(null);
+  const [workspaceContextMenu, setWorkspaceContextMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   const [runningTerminalActionId, setRunningTerminalActionId] = useState<string | null>(null);
   const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
@@ -191,6 +206,10 @@ const MainHeaderComponent = ({
   const defaultSystemTerminal = useMemo(
     () => systemTerminals.find((terminal) => terminal.isDefault),
     [systemTerminals]
+  );
+  const contextWorkspace = useMemo(
+    () => (workspaceContextMenu ? workspaces.find((workspace) => workspace.id === workspaceContextMenu.workspaceId) ?? null : null),
+    [workspaces, workspaceContextMenu]
   );
   const launchSystemTerminal = (terminalId?: string) => {
     const launchId = terminalId ?? defaultSystemTerminal?.id ?? "default-terminal";
@@ -267,6 +286,51 @@ const MainHeaderComponent = ({
     setOpenTerminalActionMenuId(null);
   }, [activeProjectId]);
 
+  useEffect(() => {
+    if (!workspaceContextMenu) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!workspaceMenuRef.current?.contains(target)) {
+        setWorkspaceContextMenu(null);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setWorkspaceContextMenu(null);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [workspaceContextMenu]);
+
+  useEffect(() => {
+    if (!workspaceContextMenu) {
+      return;
+    }
+    if (!workspaces.some((workspace) => workspace.id === workspaceContextMenu.workspaceId)) {
+      setWorkspaceContextMenu(null);
+    }
+  }, [workspaces, workspaceContextMenu]);
+
+  const openWorkspaceContextMenuAt = (workspaceId: string, xInput: number, yInput: number) => {
+    const menuWidth = 196;
+    const menuHeight = 178;
+    const x = Math.min(xInput, Math.max(8, window.innerWidth - menuWidth - 8));
+    const y = Math.min(yInput, Math.max(8, window.innerHeight - menuHeight - 8));
+    setWorkspaceContextMenu({ workspaceId, x, y });
+  };
+  const openWorkspaceContextMenu = (event: ReactMouseEvent<HTMLButtonElement>, workspaceId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openWorkspaceContextMenuAt(workspaceId, event.clientX, event.clientY);
+  };
+
   const openTerminalOutput = (terminal: HeaderTerminal) => {
     try {
       onOpenTerminalPopout(terminal);
@@ -313,7 +377,11 @@ const MainHeaderComponent = ({
             <button
               key={workspace.id}
               className={`workspace-segment ${isActive ? "active" : ""}`}
-              onClick={() => onSelectWorkspace(workspace.id)}
+              onClick={() => {
+                setWorkspaceContextMenu(null);
+                onSelectWorkspace(workspace.id);
+              }}
+              onContextMenu={(event) => openWorkspaceContextMenu(event, workspace.id)}
               title={workspaceLabel}
               type="button"
               style={{
@@ -337,8 +405,10 @@ const MainHeaderComponent = ({
               <span
                 className="workspace-segment-settings"
                 onClick={(event) => {
+                  event.preventDefault();
                   event.stopPropagation();
-                  onOpenWorkspaceSettings(workspace.id);
+                  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                  openWorkspaceContextMenuAt(workspace.id, rect.right + 4, rect.bottom + 4);
                 }}
                 role="button"
                 tabIndex={0}
@@ -348,7 +418,8 @@ const MainHeaderComponent = ({
                   }
                   event.preventDefault();
                   event.stopPropagation();
-                  onOpenWorkspaceSettings(workspace.id);
+                  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                  openWorkspaceContextMenuAt(workspace.id, rect.right + 4, rect.bottom + 4);
                 }}
               >
                 <FaCog className="text-[10px]" />
@@ -366,6 +437,61 @@ const MainHeaderComponent = ({
           <FaPlus className="text-[10px]" />
         </button>
       </div>
+      {workspaceContextMenu ? (
+        <div
+          ref={workspaceMenuRef}
+          className="thread-context-menu is-open"
+          style={{ left: `${workspaceContextMenu.x}px`, top: `${workspaceContextMenu.y}px` }}
+        >
+          <button
+            type="button"
+            className="thread-context-menu-item"
+            onClick={() => {
+              onRenameWorkspace(workspaceContextMenu.workspaceId).catch((error) => {
+                appendLog(`Workspace rename failed: ${String(error)}`);
+              });
+              setWorkspaceContextMenu(null);
+            }}
+          >
+            Rename workspace
+          </button>
+          <button
+            type="button"
+            className="thread-context-menu-item"
+            onClick={() => {
+              onDeleteWorkspace(workspaceContextMenu.workspaceId).catch((error) => {
+                appendLog(`Workspace delete failed: ${String(error)}`);
+              });
+              setWorkspaceContextMenu(null);
+            }}
+            disabled={workspaces.length <= 1}
+          >
+            Delete workspace
+          </button>
+          <div className="thread-context-menu-divider" />
+          <div className="thread-context-menu-colors" role="group" aria-label="Workspace color">
+            {WORKSPACE_COLOR_PRESETS.map((color) => {
+              const selected = (contextWorkspace?.color ?? "").toLowerCase() === color.toLowerCase();
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  className={`thread-context-color-btn ${selected ? "is-selected" : ""}`}
+                  style={{ backgroundColor: color }}
+                  onClick={() => {
+                    onSetWorkspaceColor(workspaceContextMenu.workspaceId, color).catch((error) => {
+                      appendLog(`Workspace color update failed: ${String(error)}`);
+                    });
+                    setWorkspaceContextMenu(null);
+                  }}
+                  aria-label={`Set workspace color ${color}`}
+                  title={color}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
     <div className="no-drag flex items-center gap-2">
       {updateMessage && <span className="hidden text-xs text-slate-400 md:inline">{updateMessage}</span>}

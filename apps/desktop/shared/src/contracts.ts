@@ -86,7 +86,7 @@ export interface DesktopApi {
     set: (input: {
       projectId: string;
       envVars?: Record<string, string>;
-      devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; stayRunning?: boolean }>;
+      devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; stayRunning?: boolean; hotkey?: string }>;
       webLinks?: Array<{ id: string; name: string; url: string }>;
       browserEnabled?: boolean;
       defaultDevCommandId?: string;
