@@ -3813,6 +3813,32 @@ export const App = () => {
     }));
   };
 
+  const acknowledgeActiveProjectTerminalError = (commandId: string) => {
+    if (!activeProjectId || !commandId) {
+      return;
+    }
+    const now = new Date().toISOString();
+    setProjectTerminalById((prev) => {
+      const current = prev[activeProjectId];
+      if (!current) {
+        return prev;
+      }
+      const nextTerminals = current.terminals.map((terminal) =>
+        terminal.commandId === commandId
+          ? { ...terminal, lastExitCode: undefined, updatedAt: now }
+          : terminal
+      );
+      return {
+        ...prev,
+        [activeProjectId]: {
+          ...current,
+          terminals: nextTerminals,
+          updatedAt: now
+        }
+      };
+    });
+  };
+
   const runGitAction = async (
     label: string,
     action: (projectId: string) => Promise<{ ok: boolean; stdout: string; stderr: string }>
@@ -7436,6 +7462,7 @@ TODO: Describe what this skill does.
               systemTerminals={systemTerminals}
               onOpenProjectTerminal={openProjectTerminal}
               onOpenTerminalPopout={openTerminalPopout}
+              onAcknowledgeTerminalError={acknowledgeActiveProjectTerminalError}
               onOpenProjectSettings={openActiveProjectActionsSettings}
               onStartTerminal={startActiveProjectTerminal}
               onStopTerminal={stopActiveProjectTerminal}

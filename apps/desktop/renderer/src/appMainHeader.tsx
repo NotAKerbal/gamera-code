@@ -55,6 +55,7 @@ type MainHeaderProps = {
   systemTerminals: SystemTerminalOption[];
   onOpenProjectTerminal: (terminalId?: string) => Promise<void>;
   onOpenTerminalPopout: (terminal: HeaderTerminal) => void;
+  onAcknowledgeTerminalError: (commandId: string) => void;
   onOpenProjectSettings: (commandId?: string) => Promise<void>;
   onStartTerminal: (commandId: string) => Promise<void>;
   onStopTerminal: (commandId: string) => Promise<void>;
@@ -153,6 +154,7 @@ const MainHeaderComponent = ({
   systemTerminals,
   onOpenProjectTerminal,
   onOpenTerminalPopout,
+  onAcknowledgeTerminalError,
   onOpenProjectSettings,
   onStartTerminal,
   onStopTerminal,
@@ -425,6 +427,9 @@ const MainHeaderComponent = ({
                         return;
                       }
                       if (hasCompleted) {
+                        if (isError) {
+                          onAcknowledgeTerminalError(terminal.commandId);
+                        }
                         openTerminalOutput(terminal);
                         return;
                       }

@@ -483,6 +483,10 @@ export const ProjectActionsSettingsModal = memo(({
   const [projectSettingsCommands, setProjectSettingsCommands] = useState<Array<ProjectCommand & { stayRunning: boolean }>>(
     initialDraft.projectSettingsCommands
   );
+  const focusedCommandIndex = initialDraft.focusCommandId
+    ? projectSettingsCommands.findIndex((command) => command.id === initialDraft.focusCommandId)
+    : -1;
+  const focusedCommand = focusedCommandIndex >= 0 ? projectSettingsCommands[focusedCommandIndex] : null;
   const filteredByFocus = initialDraft.focusCommandId
     ? projectSettingsCommands.filter((command) => command.id === initialDraft.focusCommandId)
     : projectSettingsCommands;
@@ -497,9 +501,77 @@ export const ProjectActionsSettingsModal = memo(({
             <span className="inline-flex items-center gap-1"><FaTimes className="text-[11px]" />Close</span>
           </button>
         </div>
-        <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-          <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Dev Actions</div>
-          <div className="mx-2 space-y-2 px-2 py-3">
+        <div className="space-y-2">
+            {focusedCommand ? (
+              <div className="space-y-3">
+                <div>
+                  <div className="mb-1 text-xs uppercase tracking-wide text-muted">Title</div>
+                  <input
+                    className="input text-xs"
+                    value={focusedCommand.name}
+                    placeholder="Action title"
+                    onChange={(event) =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item, idx) => (idx === focusedCommandIndex ? { ...item, name: event.target.value } : item))
+                      )
+                    }
+                  />
+                </div>
+                <div>
+                  <div className="mb-1 text-xs uppercase tracking-wide text-muted">Description / Command</div>
+                  <textarea
+                    className="input h-36 font-mono text-xs"
+                    value={focusedCommand.command}
+                    placeholder="npm run dev -- --host"
+                    onChange={(event) =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item, idx) => (idx === focusedCommandIndex ? { ...item, command: event.target.value } : item))
+                      )
+                    }
+                  />
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <button
+                    type="button"
+                    className={`action-auto-btn app-tooltip-target ${focusedCommand.autoStart ? "is-enabled" : ""}`}
+                    aria-pressed={focusedCommand.autoStart}
+                    data-app-tooltip={
+                      focusedCommand.autoStart
+                        ? "Auto: On\nThis action starts asynchronously when you enter/select this project.\nIt will not restart if already running."
+                        : "Auto: Off\nThis action will not auto-start when entering a project.\nStart it manually from the header action chip."
+                    }
+                    title={focusedCommand.autoStart ? "Action auto-starts when the project becomes active." : "Action requires manual start."}
+                    onClick={() =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item, idx) => (idx === focusedCommandIndex ? { ...item, autoStart: !item.autoStart } : item))
+                      )
+                    }
+                  >
+                    {focusedCommand.autoStart ? "Auto on" : "Auto off"}
+                  </button>
+                  <button
+                    type="button"
+                    className={`action-stay-btn app-tooltip-target ${focusedCommand.stayRunning ? "is-enabled" : ""}`}
+                    aria-pressed={focusedCommand.stayRunning}
+                    data-app-tooltip={
+                      focusedCommand.stayRunning
+                        ? "Stay running: On\nThis action keeps running when you leave/switch projects or workspaces."
+                        : "Stop on idle: On\nThis action is stopped when you leave the project and there are no active threads in it."
+                    }
+                    title={focusedCommand.stayRunning ? "Action will stay running when you switch away." : "Action will stop when idle and you switch away."}
+                    onClick={() =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item, idx) => (idx === focusedCommandIndex ? { ...item, stayRunning: !item.stayRunning } : item))
+                      )
+                    }
+                  >
+                    {focusedCommand.stayRunning ? "Stay running" : "Stop on idle"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {!focusedCommand ? (
+            <>
             {filteredCommands.map((command) => {
               const index = projectSettingsCommands.findIndex((item) => item.id === command.id);
               return (
@@ -579,6 +651,8 @@ export const ProjectActionsSettingsModal = memo(({
               </div>
             );
             })}
+            </>
+            ) : null}
 
             {!initialDraft.focusCommandId ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -604,8 +678,7 @@ export const ProjectActionsSettingsModal = memo(({
               </p>
             </div>
             ) : null}
-          </div>
-        </section>
+        </div>
         <div className="mt-4 flex items-center justify-end gap-2">
           <button className="btn-secondary" onClick={onClose}>Cancel</button>
           <button
