@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type MouseEv
 import {
   FaApple,
   FaChevronDown,
+  FaChevronLeft,
   FaCodeBranch,
   FaCog,
   FaCode,
@@ -67,9 +68,11 @@ type MainHeaderProps = {
   isCodePanelOpen: boolean;
   isPreviewOpen: boolean;
   isGitPanelOpen: boolean;
+  isGitPushBusy: boolean;
   onToggleCodePanel: () => void;
   onTogglePreviewPanel: () => void;
-  onToggleGitPanel: () => void;
+  onOpenGitPanel: () => void;
+  onPushGitChanges: () => void;
   showHeaderGitDiffStats: boolean;
   activeGitAddedLines: number;
   activeGitRemovedLines: number;
@@ -177,9 +180,11 @@ const MainHeaderComponent = ({
   isCodePanelOpen,
   isPreviewOpen,
   isGitPanelOpen,
+  isGitPushBusy,
   onToggleCodePanel,
   onTogglePreviewPanel,
-  onToggleGitPanel,
+  onOpenGitPanel,
+  onPushGitChanges,
   showHeaderGitDiffStats,
   activeGitAddedLines,
   activeGitRemovedLines,
@@ -738,26 +743,45 @@ const MainHeaderComponent = ({
       >
         <span className="inline-flex items-center gap-1"><FaCode className="text-[10px]" />Code</span>
       </button>
-      <button
-        className="btn-ghost app-tooltip-target"
-        data-app-tooltip={
-          isGitPanelOpen ? tooltipText("Git Panel", "Hide the git panel.") : tooltipText("Git Panel", "Show the git panel.")
-        }
-        aria-label={isGitPanelOpen ? "Hide git panel" : "Show git panel"}
-        onClick={onToggleGitPanel}
-      >
-        <span className="inline-flex items-center gap-1">
-          <FaCodeBranch className="text-[10px]" />
-          {isGitPanelOpen ? "Hide Git" : "Git"}
-          {showHeaderGitDiffStats ? (
-            <span className="git-header-diff-badge header-pill px-1.5 py-0.5 text-[10px]">
-              <span className="text-emerald-300">+{activeGitAddedLines}</span>
-              <span className="px-1 text-slate-500">/</span>
-              <span className="text-rose-300">-{activeGitRemovedLines}</span>
-            </span>
-          ) : null}
-        </span>
-      </button>
+      <div className="git-header-segmented-control no-drag">
+        <button
+          className="git-header-main-btn app-tooltip-target"
+          data-app-tooltip={tooltipText("Push", "Stage all changes, create an AI commit message, commit, and push.")}
+          aria-label="Stage, commit, and push changes"
+          onClick={onPushGitChanges}
+          disabled={!activeProjectId || isGitPushBusy}
+        >
+          <span className="inline-flex items-center gap-1">
+            <FaCodeBranch className="text-[10px]" />
+            Push
+            {isGitPushBusy ? <span className="loading-ring" aria-hidden="true" /> : null}
+            {showHeaderGitDiffStats ? (
+              <span className="git-header-diff-badge header-pill px-1.5 py-0.5 text-[10px]">
+                <span className="text-emerald-300">+{activeGitAddedLines}</span>
+                <span className="px-1 text-slate-500">/</span>
+                <span className="text-rose-300">-{activeGitRemovedLines}</span>
+              </span>
+            ) : null}
+          </span>
+        </button>
+        <button
+          className="git-header-panel-btn app-tooltip-target"
+          data-app-tooltip={
+            isGitPanelOpen
+              ? tooltipText("Git Panel", "Close the git panel on the right sidebar.")
+              : tooltipText("Git Panel", "Open the git panel on the right sidebar.")
+          }
+          aria-label={isGitPanelOpen ? "Close git panel" : "Open git panel"}
+          onClick={onOpenGitPanel}
+          disabled={!activeProjectId}
+        >
+          <FaChevronLeft
+            className={`text-[10px] transition-transform duration-200 ease-out ${
+              isGitPanelOpen ? "rotate-180" : "rotate-0"
+            }`}
+          />
+        </button>
+      </div>
       <button
         className="sidebar-settings-btn app-tooltip-target"
         data-app-tooltip={tooltipText("Settings", "Open application settings.", `${platformShortcutModifier}+I`)}

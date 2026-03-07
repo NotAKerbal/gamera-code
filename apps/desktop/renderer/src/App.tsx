@@ -280,6 +280,7 @@ const isWindows = platformHints.includes("win");
 const useWindowsStyleHeader = !isMacOS;
 type TooltipPlacement = "above" | "below";
 const TOOLTIP_HOVER_DELAY_MS = 500;
+const SHOW_VOICE_INPUT_BUTTON = false;
 
 type ActivityBundleRowProps = {
   rowId: string;
@@ -4183,11 +4184,13 @@ export const App = () => {
     }, 520);
   };
 
-  const commitGitChanges = async () => {
+  const commitGitChanges = async (options?: { message?: string; clearInput?: boolean }) => {
     if (!activeProjectId) {
-      return;
+      return null;
     }
-    const trimmedMessage = gitCommitInputRef.current?.value.trim() ?? "";
+    const rawMessage = options?.message ?? gitCommitInputRef.current?.value ?? "";
+    const trimmedMessage = rawMessage.trim();
+    const clearInput = options?.clearInput ?? true;
     setGitCommitIsGeneratingMessage(trimmedMessage.length === 0);
     setGitBusyAction("commit");
     try {
@@ -4229,7 +4232,7 @@ export const App = () => {
       if (!result.ok) {
         setLogs((prev) => [...prev, `Git commit failed.${result.stderr ? ` ${result.stderr}` : ""}`]);
       } else {
-        if (gitCommitInputRef.current) {
+        if (clearInput && gitCommitInputRef.current) {
           gitCommitInputRef.current.value = "";
         }
       }
@@ -4241,10 +4244,33 @@ export const App = () => {
           ? activeSelectedGitPath
           : nextState.files[0]?.path;
       selectGitPath(activeProjectId, selectedPath);
+      return result;
     } finally {
       setGitBusyAction(null);
       setGitCommitIsGeneratingMessage(false);
     }
+  };
+
+  const pushGitChanges = async () => {
+    if (!activeProjectId || !activeGitState?.insideRepo || gitBusyAction) {
+      return;
+    }
+
+    const stageResult = await runGitAction("stage-all", (projectId) => api.git.stage({ projectId }));
+    if (!stageResult?.ok) {
+      return;
+    }
+
+    const commitResult = await commitGitChanges({ message: "", clearInput: false });
+    if (!commitResult) {
+      return;
+    }
+
+    if (!commitResult.ok && !commitResult.stderr.includes("No staged changes to commit.")) {
+      return;
+    }
+
+    await runGitAction("push", (projectId) => api.git.push({ projectId }));
   };
 
   const switchOrCreateBranch = async (value?: string) => {
@@ -7729,9 +7755,12 @@ TODO: Describe what this skill does.
               isCodePanelOpen={isCodePanelOpen}
               isPreviewOpen={isPreviewOpen}
               isGitPanelOpen={isGitPanelOpen}
+              isGitPushBusy={Boolean(gitBusyAction)}
               onToggleCodePanel={toggleCodePanel}
               onTogglePreviewPanel={togglePreviewPanel}
               onToggleGitPanel={toggleGitPanel}
+              onOpenGitPanel={toggleGitPanel}
+              onPushGitChanges={pushGitChanges}
               showHeaderGitDiffStats={Boolean(showHeaderGitDiffStats)}
               activeGitAddedLines={activeGitAddedLines}
               activeGitRemovedLines={activeGitRemovedLines}
@@ -9049,25 +9078,27 @@ TODO: Describe what this skill does.
                       >
                         <FaPlus className="mx-auto text-[11px]" />
                       </button>
-                      <button
-                        className={`composer-plus-btn composer-tooltip-target ${isVoiceRecording ? "composer-plus-btn-recording" : ""}`}
-                        data-composer-tooltip={
-                          isVoiceTranscribing
-                            ? composerTooltipText("Transcribing Voice", "Converting your recording to text with Whisper.")
-                            : isVoiceRecording
-                              ? composerTooltipText("Stop Recording", "Finish recording and transcribe into the composer.")
-                              : composerTooltipText("Voice Input", "Record speech and insert transcript into the composer.")
-                        }
-                        aria-label={isVoiceRecording ? "Stop recording voice input" : "Start recording voice input"}
-                        disabled={!activeThreadId || activeThreadSendPending || isVoiceTranscribing}
-                        onClick={() => {
-                          toggleVoiceRecording().catch((error) => {
-                            setLogs((prev) => [...prev, `Voice input failed: ${String(error)}`]);
-                          });
-                        }}
-                      >
-                        {isVoiceRecording ? <FaStop className="mx-auto text-[11px]" /> : <FaMicrophone className="mx-auto text-[11px]" />}
-                      </button>
+                      {SHOW_VOICE_INPUT_BUTTON ? (
+                        <button
+                          className={`composer-plus-btn composer-tooltip-target ${isVoiceRecording ? "composer-plus-btn-recording" : ""}`}
+                          data-composer-tooltip={
+                            isVoiceTranscribing
+                              ? composerTooltipText("Transcribing Voice", "Converting your recording to text with Whisper.")
+                              : isVoiceRecording
+                                ? composerTooltipText("Stop Recording", "Finish recording and transcribe into the composer.")
+                                : composerTooltipText("Voice Input", "Record speech and insert transcript into the composer.")
+                          }
+                          aria-label={isVoiceRecording ? "Stop recording voice input" : "Start recording voice input"}
+                          disabled={!activeThreadId || activeThreadSendPending || isVoiceTranscribing}
+                          onClick={() => {
+                            toggleVoiceRecording().catch((error) => {
+                              setLogs((prev) => [...prev, `Voice input failed: ${String(error)}`]);
+                            });
+                          }}
+                        >
+                          {isVoiceRecording ? <FaStop className="mx-auto text-[11px]" /> : <FaMicrophone className="mx-auto text-[11px]" />}
+                        </button>
+                      ) : null}
                       <button
                         ref={composerModelTriggerRef}
                         className="composer-dropdown-trigger composer-tooltip-target"

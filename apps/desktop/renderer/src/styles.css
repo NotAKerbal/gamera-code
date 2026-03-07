@@ -1018,6 +1018,33 @@ webview {
   @apply rounded border border-border/80 bg-panel/70 text-muted transition hover:bg-panel hover:text-accent;
 }
 
+.git-header-segmented-control {
+  @apply inline-flex items-center overflow-hidden rounded-lg border border-border/80 bg-black/25;
+}
+
+.git-header-main-btn {
+  @apply inline-flex h-8 items-center gap-1 border-r border-border/80 px-2.5 text-xs text-slate-200 transition hover:bg-panel/80 disabled:opacity-50;
+}
+
+.git-header-panel-btn {
+  @apply inline-flex h-8 w-8 items-center justify-center text-slate-300 transition hover:bg-panel/80 hover:text-white disabled:opacity-50;
+}
+
+[data-theme="dawn"] .git-header-segmented-control,
+[data-theme="linen"] .git-header-segmented-control {
+  background: rgb(var(--theme-surface) / 0.82);
+}
+
+[data-theme="dawn"] .git-header-main-btn,
+[data-theme="linen"] .git-header-main-btn {
+  color: rgb(var(--theme-accent));
+}
+
+[data-theme="dawn"] .git-header-panel-btn,
+[data-theme="linen"] .git-header-panel-btn {
+  color: rgb(var(--theme-muted));
+}
+
 .workspace-segmented-control {
   @apply ml-2 inline-flex items-center gap-1 rounded-xl border border-border/80 bg-black/25 p-1;
 }
