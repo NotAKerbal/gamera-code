@@ -13,6 +13,7 @@ import * as monaco from "monaco-editor";
 import {
   FaChevronRight,
   FaCode,
+  FaFolder,
   FaFileMedical,
   FaFolderPlus,
   FaWindowMaximize,
@@ -992,14 +993,35 @@ export const MonacoCodePanel = ({
     (directoryPath: string, depth: number): ReactElement[] => {
       const entries = entriesByDirectory[directoryPath] ?? [];
       const rows = entries.flatMap((entry) => {
-        const matchesQuery =
-          !query || entry.name.toLowerCase().includes(query) || entry.path.toLowerCase().includes(query);
         if (entry.kind === "folder") {
-          const expanded = Boolean(expandedFolders[entry.path]);
+          let compactPath = entry.path;
+          const compactSegments = [entry.name];
+          const visited = new Set<string>([entry.path]);
+          while (true) {
+            const nextEntries = entriesByDirectory[compactPath];
+            if (!nextEntries || nextEntries.length !== 1 || nextEntries[0]?.kind !== "folder") {
+              break;
+            }
+            const onlyChild = nextEntries[0];
+            if (!onlyChild || visited.has(onlyChild.path)) {
+              break;
+            }
+            compactSegments.push(onlyChild.name);
+            compactPath = onlyChild.path;
+            visited.add(compactPath);
+          }
+
+          const compactLabel = compactSegments.join(" / ");
+          const matchesQuery =
+            !query || compactLabel.toLowerCase().includes(query) || compactPath.toLowerCase().includes(query);
+
+          const expanded = Boolean(expandedFolders[compactPath]);
           const shouldExpand = query.length > 0 || expanded;
-          const isLoading = Boolean(loadingDirectories[entry.path]);
-          const isLoaded = Boolean(loadedDirectories[entry.path]);
-          const childRows = shouldExpand ? renderDirectory(entry.path, depth + 1) : [];
+          const isLoading = Boolean(loadingDirectories[compactPath]);
+          const isLoaded = Boolean(loadedDirectories[compactPath]);
+          const hasLoadedChildren = Boolean(entriesByDirectory[compactPath]);
+          const shouldRenderChildren = shouldExpand || isLoaded || hasLoadedChildren;
+          const childRows = shouldRenderChildren ? renderDirectory(compactPath, depth + 1) : [];
           if (!matchesQuery && childRows.length === 0) {
             return [];
           }
@@ -1008,30 +1030,31 @@ export const MonacoCodePanel = ({
               <button
                 type="button"
                 className="workbench-tree-row workbench-tree-folder"
-                style={{ paddingLeft: `${depth * 10 + 6}px` }}
+                style={{ paddingLeft: `${depth * 10 + 18}px` }}
                 onClick={() => {
                   if (expanded) {
-                    setExpandedFolders((prev) => ({ ...prev, [entry.path]: false }));
+                    setExpandedFolders((prev) => ({ ...prev, [compactPath]: false }));
                     return;
                   }
-                  setExpandedFolders((prev) => ({ ...prev, [entry.path]: true }));
+                  setExpandedFolders((prev) => ({ ...prev, [compactPath]: true }));
                   if (!isLoaded) {
-                    void loadDirectory(entry.path);
+                    void loadDirectory(compactPath);
                   }
                 }}
-                title={entry.path}
+                title={compactPath}
               >
-                <span className="truncate">{entry.name}</span>
+                <FaFolder className="workbench-tree-folder-icon" aria-hidden="true" />
+                <span className="truncate">{compactLabel}</span>
                 <span className="workbench-tree-folder-right">
                   <span className="workbench-tree-folder-actions">
                     <button
                       type="button"
                       className="workbench-tree-action-btn"
                       title="New file"
-                      aria-label={`New file in ${entry.name}`}
+                      aria-label={`New file in ${compactLabel}`}
                       onClick={(event) => {
                         event.stopPropagation();
-                        beginCreate("file", entry.path);
+                        beginCreate("file", compactPath);
                       }}
                     >
                       <FaFileMedical />
@@ -1040,10 +1063,10 @@ export const MonacoCodePanel = ({
                       type="button"
                       className="workbench-tree-action-btn"
                       title="New folder"
-                      aria-label={`New folder in ${entry.name}`}
+                      aria-label={`New folder in ${compactLabel}`}
                       onClick={(event) => {
                         event.stopPropagation();
-                        beginCreate("folder", entry.path);
+                        beginCreate("folder", compactPath);
                       }}
                     >
                       <FaFolderPlus />
@@ -1059,13 +1082,15 @@ export const MonacoCodePanel = ({
             </div>
           ];
         }
+        const matchesQuery =
+          !query || entry.name.toLowerCase().includes(query) || entry.path.toLowerCase().includes(query);
         if (!matchesQuery) {
           return [];
         }
         if (renameState?.path === entry.path) {
           return [
             <div key={`rename-${entry.path}`} className="workbench-tree-row workbench-tree-file" style={{ paddingLeft: `${depth * 10 + 18}px` }}>
-              <span className="workbench-tree-file-icon" aria-hidden="true" />
+              <FaCode className="workbench-tree-file-icon" aria-hidden="true" />
               <input
                 className="input h-7 flex-1 text-xs"
                 value={renameState.name}
@@ -1094,7 +1119,7 @@ export const MonacoCodePanel = ({
             }}
             title={entry.path}
           >
-            <span className="workbench-tree-file-icon" aria-hidden="true" />
+            <FaCode className="workbench-tree-file-icon" aria-hidden="true" />
             <span className="truncate">{entry.name}</span>
           </button>
         ];
@@ -1102,7 +1127,7 @@ export const MonacoCodePanel = ({
       if (pendingCreate?.parentPath === directoryPath) {
         rows.push(
           <div key={`create-${directoryPath}`} className="workbench-tree-row workbench-tree-file" style={{ paddingLeft: `${depth * 10 + 18}px` }}>
-            <span className="workbench-tree-file-icon" aria-hidden="true" />
+            <FaCode className="workbench-tree-file-icon" aria-hidden="true" />
             <input
               className="input h-7 flex-1 text-xs"
               value={pendingCreate.name}

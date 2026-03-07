@@ -2292,6 +2292,7 @@ webview {
   overflow-x: hidden;
   scrollbar-gutter: stable;
   display: grid;
+  align-content: start;
   gap: 0.2rem;
   overscroll-behavior: contain;
 }
@@ -2567,11 +2568,19 @@ webview {
 }
 
 .workbench-tree-file-icon {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: rgb(var(--theme-muted));
-  opacity: 0.8;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  color: rgb(var(--theme-muted));
+  opacity: 0.85;
+}
+
+.workbench-tree-folder-icon {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  color: rgb(var(--theme-muted));
+  opacity: 0.9;
 }
 
 .workbench-tree-folder-right {

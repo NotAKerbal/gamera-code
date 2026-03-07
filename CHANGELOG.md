@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+- One click git push button
+- Compact settings
+- Improved file browser
+
 ## 0.5.2
 - Replaced Terminal Dropdown
 - Improved Actions Controls
