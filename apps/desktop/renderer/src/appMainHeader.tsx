@@ -1,8 +1,7 @@
-import { memo, useMemo, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type RefObject, type SetStateAction } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import {
   FaApple,
   FaChevronDown,
-  FaChevronRight,
   FaCodeBranch,
   FaCog,
   FaCode,
@@ -51,20 +50,12 @@ type MainHeaderProps = {
   onDismissUpdate: () => void;
   activeProjectWebLinks: ProjectWebLink[];
   onOpenProjectWebLink: (link: ProjectWebLink) => Promise<void>;
-  terminalMenuRef: RefObject<HTMLDivElement | null>;
-  terminalMenuTriggerRef: RefObject<HTMLButtonElement | null>;
-  terminalMenuContentRef: RefObject<HTMLDivElement | null>;
-  isTerminalMenuOpen: boolean;
-  setIsTerminalMenuOpen: Dispatch<SetStateAction<boolean>>;
-  moveTerminalMenuFocus: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   activeProjectId: string | null;
   activeProjectTerminals: HeaderTerminal[];
-  activeRunningTerminalsCount: number;
   systemTerminals: SystemTerminalOption[];
-  isTerminalDashboardPoppedOut: boolean;
   onOpenProjectTerminal: (terminalId?: string) => Promise<void>;
-  onOpenTerminalDashboardPopout: () => void;
   onOpenTerminalPopout: (terminal: HeaderTerminal) => void;
+  onOpenProjectSettings: (commandId?: string) => Promise<void>;
   onStartTerminal: (commandId: string) => Promise<void>;
   onStopTerminal: (commandId: string) => Promise<void>;
   onCopyTerminalOutput: (name: string, output: string) => void;
@@ -157,20 +148,12 @@ const MainHeaderComponent = ({
   onDismissUpdate,
   activeProjectWebLinks,
   onOpenProjectWebLink,
-  terminalMenuRef,
-  terminalMenuTriggerRef,
-  terminalMenuContentRef,
-  isTerminalMenuOpen,
-  setIsTerminalMenuOpen,
-  moveTerminalMenuFocus,
   activeProjectId,
   activeProjectTerminals,
-  activeRunningTerminalsCount,
   systemTerminals,
-  isTerminalDashboardPoppedOut,
   onOpenProjectTerminal,
-  onOpenTerminalDashboardPopout,
   onOpenTerminalPopout,
+  onOpenProjectSettings,
   onStartTerminal,
   onStopTerminal,
   onCopyTerminalOutput,
@@ -192,7 +175,9 @@ const MainHeaderComponent = ({
   appendLog
 }: MainHeaderProps) => {
   const useWindowsStyleHeader = isWindows || !isMacOS;
-  const [showTerminalAlternatives, setShowTerminalAlternatives] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
+  const [openTerminalActionMenuId, setOpenTerminalActionMenuId] = useState<string | null>(null);
+  const [runningTerminalActionId, setRunningTerminalActionId] = useState<string | null>(null);
   const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
   const tooltipText = (label: string, detail: string, shortcut?: string) =>
@@ -205,10 +190,6 @@ const MainHeaderComponent = ({
     () => systemTerminals.find((terminal) => terminal.isDefault),
     [systemTerminals]
   );
-  const alternativeSystemTerminals = useMemo(() => {
-    const defaultId = defaultSystemTerminal?.id;
-    return availableSystemTerminals.filter((terminal) => terminal.id !== defaultId);
-  }, [availableSystemTerminals, defaultSystemTerminal]);
   const launchSystemTerminal = (terminalId?: string) => {
     const launchId = terminalId ?? defaultSystemTerminal?.id ?? "default-terminal";
     setLaunchingSystemTerminalId(launchId);
@@ -220,6 +201,66 @@ const MainHeaderComponent = ({
           setLaunchingSystemTerminalId((current) => (current === launchId ? null : current));
         }, 520);
       });
+  };
+  const toggleProjectTerminal = (terminal: HeaderTerminal) => {
+    const actionId = `${terminal.commandId}:${terminal.running ? "stop" : "start"}`;
+    setRunningTerminalActionId(actionId);
+    const task = terminal.running ? onStopTerminal(terminal.commandId) : onStartTerminal(terminal.commandId);
+    task
+      .catch((error) => appendLog(`Terminal ${terminal.running ? "stop" : "start"} failed: ${String(error)}`))
+      .finally(() => {
+        setRunningTerminalActionId((current) => (current === actionId ? null : current));
+      });
+  };
+  const runNamedTerminalAction = (terminal: HeaderTerminal, action: "restart" | "view" | "copy") => {
+    const actionId = `${terminal.commandId}:${action}`;
+    setRunningTerminalActionId(actionId);
+    const task =
+      action === "restart"
+        ? onStartTerminal(terminal.commandId)
+        : action === "view"
+          ? Promise.resolve(onOpenTerminalPopout(terminal))
+          : Promise.resolve(onCopyTerminalOutput(terminal.name, terminal.outputTail || ""));
+    task
+      .catch((error) => appendLog(`Terminal ${action} failed: ${String(error)}`))
+      .finally(() => {
+        setRunningTerminalActionId((current) => (current === actionId ? null : current));
+      });
+  };
+
+  useEffect(() => {
+    if (!openTerminalActionMenuId) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!actionMenuRef.current?.contains(target)) {
+        setOpenTerminalActionMenuId(null);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenTerminalActionMenuId(null);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [openTerminalActionMenuId]);
+
+  useEffect(() => {
+    setOpenTerminalActionMenuId(null);
+  }, [activeProjectId]);
+
+  const openTerminalOutput = (terminal: HeaderTerminal) => {
+    try {
+      onOpenTerminalPopout(terminal);
+    } catch (error) {
+      appendLog(`Open terminal output failed: ${String(error)}`);
+    }
   };
 
   return (
@@ -354,173 +395,142 @@ const MainHeaderComponent = ({
           </span>
         </button>
       ))}
-      <div className="relative" ref={terminalMenuRef}>
-        <button
-          ref={terminalMenuTriggerRef}
-          className="btn-ghost app-tooltip-target inline-flex items-center gap-1"
-          data-app-tooltip={tooltipText("Terminal Menu", "Open, switch, and manage project terminals.", `${platformShortcutModifier}+T`)}
-          aria-label="Open terminal menu"
-          onClick={() => setIsTerminalMenuOpen((prev) => !prev)}
-          disabled={!activeProjectId}
-        >
-          <span className="inline-flex items-center gap-1">
-            <FaTerminal className="text-[10px]" />
-            Terminal
-            {activeProjectId ? (
-              <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-slate-300">
-                {activeRunningTerminalsCount}/{activeProjectTerminals.length}
-              </span>
-            ) : null}
-          </span>
-          <FaChevronDown className="text-[10px] text-slate-500" />
-        </button>
-        {isTerminalMenuOpen && (
-          <div ref={terminalMenuContentRef} className="terminal-menu-pop" onKeyDown={moveTerminalMenuFocus}>
-            <div className="terminal-menu-row flex items-center gap-2">
-              <button
-                type="button"
-                className={`min-w-0 flex-1 text-left ${launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? "terminal-launching" : ""}`}
-                onClick={() => {
-                  launchSystemTerminal();
-                  setIsTerminalMenuOpen(false);
-                  setShowTerminalAlternatives(false);
-                }}
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <TerminalGlyph terminalId={defaultSystemTerminal?.id ?? "auto"} />
-                  Open {defaultSystemTerminal?.label ?? "Terminal"}
-                  {launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? (
-                    <span className="loading-ring" aria-hidden="true" />
-                  ) : null}
-                </span>
-              </button>
-              {alternativeSystemTerminals.length > 0 ? (
-                <button
-                  type="button"
-                  className="btn-ghost app-tooltip-target h-6 px-1.5 py-0 text-[10px]"
-                  data-app-tooltip={
-                    showTerminalAlternatives
-                      ? tooltipText("Terminal Options", "Hide alternative terminal launchers.")
-                      : tooltipText("Terminal Options", "Show alternative terminal launchers.")
-                  }
-                  aria-label={showTerminalAlternatives ? "Hide terminal options" : "Show terminal options"}
-                  onClick={() => {
-                    setShowTerminalAlternatives((prev) => !prev);
-                  }}
+      <div className="terminal-header-controls">
+        <div className="workspace-segmented-control terminal-actions-group no-drag">
+            {activeProjectTerminals.map((terminal) => {
+              const isMenuOpen = openTerminalActionMenuId === terminal.commandId;
+              const busyToggleId = `${terminal.commandId}:${terminal.running ? "stop" : "start"}`;
+              const hasCompleted = !terminal.running && typeof terminal.lastExitCode === "number";
+              const isSuccess = hasCompleted && terminal.lastExitCode === 0;
+              const isError = hasCompleted && terminal.lastExitCode !== 0;
+              const statusClass = isSuccess
+                ? "terminal-action-segment-success"
+                : isError
+                  ? "terminal-action-segment-error"
+                  : terminal.running
+                    ? "terminal-action-segment-running"
+                    : "";
+              return (
+                <div
+                  key={`terminal-action-${terminal.commandId}`}
+                  className={`workspace-segment ${statusClass ? `active ${statusClass}` : ""} terminal-action-segment`}
+                  ref={isMenuOpen ? actionMenuRef : null}
                 >
-                  <FaChevronRight
-                    className={`terminal-options-toggle-icon text-[10px] text-slate-400 ${showTerminalAlternatives ? "is-open" : ""}`}
-                  />
-                </button>
-              ) : null}
-            </div>
-            <div className={`terminal-system-options ${showTerminalAlternatives ? "is-open" : ""}`}>
-              {alternativeSystemTerminals.map((terminal, index) => (
-                <button
-                  key={terminal.id}
-                  className={`terminal-menu-row pl-6 ${showTerminalAlternatives ? "terminal-system-option-row" : ""} ${launchingSystemTerminalId === terminal.id ? "terminal-launching" : ""}`}
-                  style={showTerminalAlternatives ? { animationDelay: `${index * 28}ms` } : undefined}
-                  onClick={() => {
-                    launchSystemTerminal(terminal.id);
-                    setIsTerminalMenuOpen(false);
-                    setShowTerminalAlternatives(false);
-                  }}
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <TerminalGlyph terminalId={terminal.id} />
-                    Open {terminal.label}
-                    {launchingSystemTerminalId === terminal.id ? (
-                      <span className="loading-ring" aria-hidden="true" />
-                    ) : null}
-                  </span>
-                </button>
-              ))}
-            </div>
-            {availableSystemTerminals.length === 0 ? <div className="terminal-menu-empty">No system terminals detected.</div> : null}
-            <button
-              className="terminal-menu-row"
-              onClick={() => {
-                onOpenTerminalDashboardPopout();
-                setIsTerminalMenuOpen(false);
-              }}
-            >
-              {isTerminalDashboardPoppedOut ? "Focus Terminal Dashboard" : "Open Terminal Dashboard"}
-            </button>
-            <div className="terminal-menu-divider" />
-            {activeProjectTerminals.length === 0 ? (
-              <div className="terminal-menu-empty">No dev terminals configured.</div>
-            ) : (
-              <>
-                <div className="terminal-menu-meta">Running {activeRunningTerminalsCount}/{activeProjectTerminals.length}</div>
-                {activeProjectTerminals.map((terminal) => (
-                  <div
-                    key={`menu-${terminal.commandId}`}
-                    className="terminal-menu-item app-tooltip-target"
-                    data-app-tooltip={tooltipText("Pop Out Terminal", "Open this terminal in a dedicated window.")}
-                    role="button"
-                    tabIndex={0}
+                  <button
+                    type="button"
+                    className="terminal-action-main"
                     onClick={() => {
-                      onOpenTerminalPopout(terminal);
-                      setIsTerminalMenuOpen(false);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") {
+                      if (terminal.running) {
+                        toggleProjectTerminal(terminal);
                         return;
                       }
-                      event.preventDefault();
-                      onOpenTerminalPopout(terminal);
-                      setIsTerminalMenuOpen(false);
+                      if (hasCompleted) {
+                        openTerminalOutput(terminal);
+                        return;
+                      }
+                      toggleProjectTerminal(terminal);
                     }}
+                    disabled={runningTerminalActionId === busyToggleId}
+                    title={terminal.name}
                   >
-                    <div className="terminal-menu-row">
-                      <span className="truncate">
-                        {terminal.name}
-                        {terminal.useForPreview ? " (Browser)" : ""}
-                      </span>
-                      <span className="terminal-menu-status">{terminal.running ? "Running" : "Stopped"}</span>
-                    </div>
-                    <div className="terminal-menu-actions">
-                      <button
-                        className="btn-ghost px-2 py-1 text-[10px]"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onStartTerminal(terminal.commandId).catch((error) =>
-                            appendLog(`Terminal start failed: ${String(error)}`)
-                          );
-                        }}
-                      >
-                        {terminal.running ? "Restart" : "Start"}
-                      </button>
-                      <button
-                        className="btn-ghost px-2 py-1 text-[10px]"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onCopyTerminalOutput(terminal.name, terminal.outputTail || "");
-                        }}
-                        disabled={!terminal.outputTail?.trim()}
-                      >
-                        Copy
-                      </button>
-                      {terminal.running ? (
-                        <button
-                          className="btn-ghost px-2 py-1 text-[10px]"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onStopTerminal(terminal.commandId).catch((error) =>
-                              appendLog(`Terminal stop failed: ${String(error)}`)
-                            );
-                          }}
-                        >
-                          Stop
-                        </button>
-                      ) : null}
-                    </div>
+                  <span className="workspace-segment-name truncate">
+                    {terminal.name}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`terminal-action-more ${isMenuOpen ? "is-open" : ""}`}
+                  aria-label={`Open actions for ${terminal.name}`}
+                  onClick={() => setOpenTerminalActionMenuId((current) => (current === terminal.commandId ? null : terminal.commandId))}
+                >
+                  <FaChevronDown className="text-[10px] text-slate-400" />
+                </button>
+                {isMenuOpen ? (
+                  <div className="project-action-pop terminal-action-pop">
+                    <button
+                      className="project-action-item"
+                      onClick={() => {
+                        runNamedTerminalAction(terminal, "view");
+                        setOpenTerminalActionMenuId(null);
+                      }}
+                    >
+                      View output
+                    </button>
+                    <button
+                      className="project-action-item"
+                      onClick={() => {
+                        runNamedTerminalAction(terminal, "restart");
+                        setOpenTerminalActionMenuId(null);
+                      }}
+                      disabled={runningTerminalActionId === `${terminal.commandId}:restart`}
+                    >
+                      Restart
+                    </button>
+                    <button
+                      className="project-action-item"
+                      onClick={() => {
+                        runNamedTerminalAction(terminal, "copy");
+                        setOpenTerminalActionMenuId(null);
+                      }}
+                      disabled={!terminal.outputTail?.trim()}
+                    >
+                      Copy output
+                    </button>
+                    <button
+                      className="project-action-item"
+                      onClick={() => {
+                        onOpenProjectSettings(terminal.commandId).catch((error) =>
+                          appendLog(`Open action settings failed: ${String(error)}`)
+                        );
+                        setOpenTerminalActionMenuId(null);
+                      }}
+                    >
+                      Settings
+                    </button>
                   </div>
-                ))}
-              </>
+                ) : null}
+              </div>
+            );
+          })}
+          <button
+            className="workspace-segment workspace-segment-add app-tooltip-target"
+            type="button"
+            data-app-tooltip={
+              activeProjectTerminals.length > 0
+                ? tooltipText("Action Settings", "Open settings for this project's actions.")
+                : tooltipText("Add Action", "Open action settings to add your first action.")
+            }
+            onClick={() => {
+              onOpenProjectSettings().catch((error) => appendLog(`Open action settings failed: ${String(error)}`));
+            }}
+            aria-label={activeProjectTerminals.length > 0 ? "Open action settings" : "Add action"}
+            disabled={!activeProjectId}
+          >
+            {activeProjectTerminals.length > 0 ? (
+              <FaCog className="text-[10px]" />
+            ) : (
+              <span className="inline-flex items-center gap-1">
+                <FaPlus className="text-[10px]" />
+                Add Action
+              </span>
             )}
-          </div>
-        )}
+          </button>
+        </div>
+        <button
+          className={`btn-ghost app-tooltip-target inline-flex items-center gap-1 ${launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? "terminal-launching" : ""}`}
+          data-app-tooltip={tooltipText("Open Terminal", "Open your default system terminal for this project.", `${platformShortcutModifier}+T`)}
+          aria-label="Open default terminal"
+          onClick={() => launchSystemTerminal()}
+          disabled={!activeProjectId || availableSystemTerminals.length === 0}
+        >
+          <span className="inline-flex items-center gap-1">
+            <TerminalGlyph terminalId={defaultSystemTerminal?.id ?? "auto"} />
+            Terminal
+            {launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? (
+              <span className="loading-ring" aria-hidden="true" />
+            ) : null}
+          </span>
+        </button>
       </div>
       <button
         className="btn-ghost app-tooltip-target"

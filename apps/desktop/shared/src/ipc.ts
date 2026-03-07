@@ -63,6 +63,7 @@ export const IPC_CHANNELS = {
   sessionsGenerateThreadMetadata: "sessions:generateThreadMetadata",
   sessionsResize: "sessions:resize",
   sessionsEvent: "sessions:event",
+  audioTranscribe: "audio:transcribe",
   installerDoctor: "installer:doctor",
   installerInstallCli: "installer:installCli",
   installerInstallDependencies: "installer:installDependencies",

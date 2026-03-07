@@ -2,13 +2,11 @@ import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants } from "node:fs";
 import * as pty from "node-pty";
 import type {
-  AppSettings,
   Project,
   ProjectDevCommand,
   ProjectSettings,
   ProjectTerminalEvent,
-  ProjectTerminalState,
-  ProjectTerminalSwitchBehavior
+  ProjectTerminalState
 } from "@code-app/shared";
 import { Repository } from "./repository";
 import { sanitizePtyOutput } from "../utils/stripAnsi";
@@ -21,7 +19,6 @@ interface RunningProjectTerminal {
   commandId: string;
   command: string;
   name: string;
-  useForPreview: boolean;
 }
 
 interface ProjectTerminalManagerDeps {
@@ -110,21 +107,14 @@ export const detectPreviewUrlFromOutput = (output: string): string | undefined =
 
 const normalizeDevCommands = (settings: ProjectSettings): ProjectDevCommand[] => {
   if (settings.devCommands.length === 0) {
-    return [{ id: "default", name: "Dev Server", command: "npm run dev", autoStart: true, useForPreview: true }];
+    return [{ id: "default", name: "Dev Server", command: "npm run dev", autoStart: true }];
   }
 
   const normalized = settings.devCommands.map((command, index) => ({
     ...command,
     autoStart: command.autoStart ?? index === 0,
-    useForPreview: command.useForPreview ?? index === 0
+    stayRunning: command.stayRunning ?? false
   }));
-
-  if (!normalized.some((command) => command.useForPreview)) {
-    const first = normalized[0];
-    if (first) {
-      normalized[0] = { ...first, useForPreview: true };
-    }
-  }
 
   return normalized;
 };
@@ -146,7 +136,7 @@ const pickCommand = (settings: ProjectSettings, commandId?: string): ProjectDevC
     }
   }
 
-  return devCommands[0] ?? { id: "default", name: "Dev Server", command: "npm run dev", autoStart: true, useForPreview: true };
+  return devCommands[0] ?? { id: "default", name: "Dev Server", command: "npm run dev", autoStart: true };
 };
 
 const pickAutoStartCommands = (settings: ProjectSettings): ProjectDevCommand[] => {
@@ -165,7 +155,7 @@ const buildTerminal = (
   outputTail: "",
   updatedAt: nowIso(),
   autoStart: Boolean(command.autoStart),
-  useForPreview: Boolean(command.useForPreview),
+  stayRunning: Boolean(command.stayRunning),
   ...patch
 });
 
@@ -186,10 +176,12 @@ export class ProjectTerminalManager {
 
     if (previous) {
       const previousSettings = this.deps.repository.getProjectSettings(previous);
-      const previousBehavior = this.resolveSwitchBehavior(previousSettings);
       const hasActiveAgentSession = this.deps.hasActiveAgentSessionInProject?.(previous) ?? false;
-      if (previousBehavior === "start_stop" && !hasActiveAgentSession) {
-        this.stop(previous);
+      if (!hasActiveAgentSession) {
+        const commandsToStop = normalizeDevCommands(previousSettings).filter((command) => !command.stayRunning);
+        for (const command of commandsToStop) {
+          this.stop(previous, command.id);
+        }
       }
     }
 
@@ -198,14 +190,16 @@ export class ProjectTerminalManager {
     }
 
     const settings = this.deps.repository.getProjectSettings(projectId);
-    const behavior = this.resolveSwitchBehavior(settings);
     const hasAutoStartCommands = pickAutoStartCommands(settings).length > 0;
-    const shouldAutoStart =
-      (behavior === "start_stop" || behavior === "start_only") &&
-      settings.autoStartDevTerminal &&
-      hasAutoStartCommands;
+    const shouldAutoStart = settings.autoStartDevTerminal && hasAutoStartCommands;
     if (shouldAutoStart) {
-      this.start(projectId, undefined, true);
+      // Start auto commands off the critical path when switching/opening projects.
+      setTimeout(() => {
+        if (this.activeProjectId !== projectId) {
+          return;
+        }
+        this.start(projectId, undefined, true);
+      }, 0);
     }
 
     return { ok: true };
@@ -317,7 +311,7 @@ export class ProjectTerminalManager {
         lastExitCode: 127,
         updatedAt: nowIso(),
         autoStart: Boolean(command.autoStart),
-        useForPreview: Boolean(command.useForPreview)
+        stayRunning: Boolean(command.stayRunning)
       });
       this.emit(project.id, "stderr", message, {
         commandId: command.id,
@@ -359,7 +353,6 @@ export class ProjectTerminalManager {
       commandId: command.id,
       command: command.command,
       name: command.name,
-      useForPreview: Boolean(command.useForPreview)
     };
     this.running.set(toRunningKey(project.id, command.id), running);
 
@@ -372,7 +365,7 @@ export class ProjectTerminalManager {
       lastExitCode: undefined,
       updatedAt: nowIso(),
       autoStart: Boolean(command.autoStart),
-      useForPreview: Boolean(command.useForPreview)
+      stayRunning: Boolean(command.stayRunning)
     });
 
     this.emit(project.id, "status", `Started: ${command.name}`, {
@@ -382,11 +375,9 @@ export class ProjectTerminalManager {
       envHash: createHash("sha1").update(JSON.stringify(env)).digest("hex")
     });
 
-    if (command.useForPreview) {
-      const fallbackUrl = fallbackUrlFromCommand(command.command);
-      if (fallbackUrl) {
-        this.applyPreviewUrl(project.id, fallbackUrl, "command_fallback");
-      }
+    const fallbackUrl = fallbackUrlFromCommand(command.command);
+    if (fallbackUrl) {
+      this.applyPreviewUrl(project.id, fallbackUrl, "command_fallback");
     }
 
     ptyProcess.onData((chunk) => {
@@ -409,11 +400,9 @@ export class ProjectTerminalManager {
         commandName: command.name
       });
 
-      if (command.useForPreview) {
-        const match = detectPreviewUrlFromOutput(cleaned);
-        if (match) {
-          this.applyPreviewUrl(project.id, match, "output");
-        }
+      const match = detectPreviewUrlFromOutput(cleaned);
+      if (match) {
+        this.applyPreviewUrl(project.id, match, "output");
       }
     });
 
@@ -473,14 +462,6 @@ export class ProjectTerminalManager {
       throw new Error("Project not found");
     }
     return project;
-  }
-
-  private resolveSwitchBehavior(projectSettings: ProjectSettings): ProjectTerminalSwitchBehavior {
-    if (projectSettings.switchBehaviorOverride) {
-      return projectSettings.switchBehaviorOverride;
-    }
-    const defaults: AppSettings = this.deps.repository.getSettings();
-    return defaults.projectTerminalSwitchBehaviorDefault ?? "start_stop";
   }
 
   private applyPreviewUrl(projectId: string, url: string, source: "output" | "command_fallback") {

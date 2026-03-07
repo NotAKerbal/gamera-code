@@ -83,6 +83,7 @@ export const initializeDatabase = (dbPath: string) => {
       dev_commands_json TEXT NOT NULL,
       web_links_json TEXT NOT NULL DEFAULT '[]',
       browser_enabled INTEGER NOT NULL DEFAULT 1,
+      stay_running_actions INTEGER NOT NULL DEFAULT 0,
       default_dev_command_id TEXT,
       auto_start_dev_terminal INTEGER NOT NULL DEFAULT 1,
       switch_behavior_override TEXT,
@@ -174,6 +175,10 @@ export const initializeDatabase = (dbPath: string) => {
   const hasWebLinksColumn = projectSettingsColumns.some((column) => column.name === "web_links_json");
   if (!hasWebLinksColumn) {
     db.exec("ALTER TABLE project_settings ADD COLUMN web_links_json TEXT NOT NULL DEFAULT '[]';");
+  }
+  const hasStayRunningActionsColumn = projectSettingsColumns.some((column) => column.name === "stay_running_actions");
+  if (!hasStayRunningActionsColumn) {
+    db.exec("ALTER TABLE project_settings ADD COLUMN stay_running_actions INTEGER NOT NULL DEFAULT 0;");
   }
   const hasSubthreadPolicyOverride = projectSettingsColumns.some((column) => column.name === "subthread_policy_override");
   if (!hasSubthreadPolicyOverride) {

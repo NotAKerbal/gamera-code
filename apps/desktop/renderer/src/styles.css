@@ -431,6 +431,76 @@ webview {
   animation: dropdown-fade 120ms ease-out;
 }
 
+.project-action-item {
+  @apply w-full rounded-md border border-transparent bg-transparent px-2 py-1.5 text-left text-xs text-accent transition hover:border-border/70 hover:bg-panel/70;
+}
+
+.terminal-header-controls {
+  @apply flex items-center gap-2;
+}
+
+.terminal-actions-group {
+  margin-left: 0;
+  padding: 0.125rem;
+}
+
+.terminal-action-segment {
+  @apply relative flex items-center px-0;
+  padding-right: 0;
+  transition: padding-right 180ms ease;
+}
+
+.terminal-action-segment:hover,
+.terminal-action-segment:focus-within {
+  padding-right: 1.5rem;
+}
+
+.terminal-action-segment-running {
+  border-color: rgba(34, 197, 94, 0.72) !important;
+  background-color: rgba(34, 197, 94, 0.2) !important;
+}
+
+.terminal-action-segment-success {
+  border-color: rgba(59, 130, 246, 0.72) !important;
+  background-color: rgba(59, 130, 246, 0.2) !important;
+}
+
+.terminal-action-segment-error {
+  border-color: rgba(239, 68, 68, 0.72) !important;
+  background-color: rgba(239, 68, 68, 0.2) !important;
+}
+
+.terminal-action-main {
+  @apply inline-flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-accent transition hover:bg-panel/50 disabled:opacity-50;
+}
+
+.terminal-action-more {
+  @apply inline-flex h-5 w-5 items-center justify-center rounded text-xs text-slate-400 transition;
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(3px);
+}
+
+.terminal-action-segment:hover .terminal-action-more,
+.terminal-action-segment:focus-within .terminal-action-more,
+.terminal-action-more.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
+}
+
+.terminal-action-more:hover {
+  @apply bg-panel/70 text-slate-200;
+}
+
+.terminal-action-pop {
+  top: calc(100% + 6px);
+  right: 0;
+}
+
 .changelog-pop {
   @apply absolute left-0 top-7 z-30 w-72 rounded-md border border-border bg-surface/95 p-2 shadow-lg backdrop-blur;
   animation: dropdown-fade 120ms ease-out;
@@ -1722,6 +1792,10 @@ webview {
   @apply h-6 w-6 rounded bg-zinc-800/70 text-sm leading-none text-slate-300 transition hover:bg-zinc-700 hover:text-white disabled:opacity-50;
 }
 
+.composer-plus-btn-recording {
+  @apply bg-red-600/70 text-red-100 hover:bg-red-500 hover:text-white;
+}
+
 .composer-select {
   @apply w-auto appearance-none bg-transparent px-1.5 py-1 pr-5 text-sm text-slate-400 outline-none transition hover:text-slate-200;
   border: none;
@@ -1948,6 +2022,32 @@ webview {
 
 .settings-toggle-btn-compact {
   @apply h-7 px-2 py-0 text-[11px];
+}
+
+.action-stay-btn {
+  @apply h-7 w-full rounded-md border border-transparent px-2 text-[11px] whitespace-nowrap transition outline-none;
+  min-width: 0;
+  background: rgba(245, 158, 11, 0.14);
+  color: rgb(253, 224, 71);
+}
+
+.action-stay-btn:hover {
+  background: rgba(245, 158, 11, 0.2);
+}
+
+.action-stay-btn:focus,
+.action-stay-btn:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.action-stay-btn.is-enabled {
+  background: rgba(59, 130, 246, 0.16);
+  color: rgb(191, 219, 254);
+}
+
+.action-stay-btn.is-enabled:hover {
+  background: rgba(59, 130, 246, 0.24);
 }
 
 .project-settings-toggle {

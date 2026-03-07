@@ -61,6 +61,8 @@ const sessionsReviewThreadChannel =
   (IPC_CHANNELS as Record<string, string>).sessionsReviewThread ?? "sessions:reviewThread";
 const sessionsReviewCommitChannel =
   (IPC_CHANNELS as Record<string, string>).sessionsReviewCommit ?? "sessions:reviewCommit";
+const audioTranscribeChannel =
+  (IPC_CHANNELS as Record<string, string>).audioTranscribe ?? "audio:transcribe";
 const installerGetCodexAuthStatusChannel =
   (IPC_CHANNELS as Record<string, string>).installerGetCodexAuthStatus ?? "installer:getCodexAuthStatus";
 const installerLoginCodexChannel =
@@ -124,6 +126,15 @@ type DesktopApiWithGitExtras = DesktopApi & {
   };
   sessions: DesktopApi["sessions"] & {
     reviewThread: (input: { threadId: string; instructions?: string }) => Promise<{ ok: boolean }>;
+  };
+  audio: {
+    transcribe: (input: {
+      audioDataUrl: string;
+      projectId?: string;
+      model?: string;
+      language?: string;
+      prompt?: string;
+    }) => Promise<{ text: string; model: string; language?: string; durationSeconds?: number }>;
   };
   git: DesktopApi["git"] & {
     init: (input: { projectId: string }) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
@@ -256,6 +267,10 @@ const api: DesktopApiWithGitExtras = {
       ipcRenderer.on(IPC_CHANNELS.sessionsEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.sessionsEvent, wrapped);
     }
+  },
+  audio: {
+    transcribe: (input: { audioDataUrl: string; projectId?: string; model?: string; language?: string; prompt?: string }) =>
+      ipcRenderer.invoke(audioTranscribeChannel, input)
   },
   installer: {
     doctor: () => ipcRenderer.invoke(IPC_CHANNELS.installerDoctor),

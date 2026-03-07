@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AudioTranscriptionResult,
   CodexThreadOptions,
   GitCommitResult,
   GitCommandResult,
@@ -85,12 +86,11 @@ export interface DesktopApi {
     set: (input: {
       projectId: string;
       envVars?: Record<string, string>;
-      devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; useForPreview?: boolean }>;
+      devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; stayRunning?: boolean }>;
       webLinks?: Array<{ id: string; name: string; url: string }>;
       browserEnabled?: boolean;
       defaultDevCommandId?: string;
       autoStartDevTerminal?: boolean;
-      switchBehaviorOverride?: "start_stop" | "start_only" | "manual";
       subthreadPolicyOverride?: SubthreadPolicy;
       lastDetectedPreviewUrl?: string;
     }) => Promise<ProjectSettings>;
@@ -172,6 +172,15 @@ export interface DesktopApi {
     }) => Promise<ThreadMetadataSuggestion | null>;
     resize: (input: { threadId: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
     onEvent: (listener: (event: SessionEvent) => void) => () => void;
+  };
+  audio: {
+    transcribe: (input: {
+      audioDataUrl: string;
+      projectId?: string;
+      model?: string;
+      language?: string;
+      prompt?: string;
+    }) => Promise<AudioTranscriptionResult>;
   };
   installer: {
     doctor: () => Promise<InstallStatus>;

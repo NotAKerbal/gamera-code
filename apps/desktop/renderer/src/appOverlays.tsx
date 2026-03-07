@@ -6,12 +6,10 @@ import type {
   Project,
   Workspace,
   SubthreadPolicy,
-  ProjectTerminalSwitchBehavior,
   ProjectWebLink,
   SkillRecord
 } from "@code-app/shared";
 import {
-  PROJECT_SWITCH_BEHAVIOR_OPTIONS,
   SUBTHREAD_POLICY_OPTIONS,
   sanitizeProjectDirName,
   type RenameDialogState
@@ -19,17 +17,19 @@ import {
 
 type ProjectTemplateId = "nextjs" | "electron";
 
-type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean };
-type ProjectSettingsTab = "general" | "env" | "commands" | "links" | "skills";
+type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean };
+type ProjectSettingsTab = "general" | "env" | "links" | "skills";
 type ProjectSettingsDraft = {
   projectName: string;
   projectWorkspaceTargetId: string;
-  projectSettingsBrowserEnabled: boolean;
   projectSettingsEnvText: string;
-  projectSettingsCommands: ProjectCommand[];
   projectSettingsWebLinks: ProjectWebLink[];
-  projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
   projectSubthreadPolicyOverride: SubthreadPolicy | "";
+};
+
+type ProjectActionsSettingsDraft = {
+  focusCommandId?: string;
+  projectSettingsCommands: Array<ProjectCommand & { stayRunning: boolean }>;
 };
 
 type ToggleButtonProps = {
@@ -110,13 +110,8 @@ export const ProjectSettingsModal = memo(({
   const [projectSettingsTab, setProjectSettingsTab] = useState<ProjectSettingsTab>("general");
   const [projectSettingsProjectName, setProjectSettingsProjectName] = useState(initialDraft.projectName);
   const [projectWorkspaceTargetId, setProjectWorkspaceTargetId] = useState(initialDraft.projectWorkspaceTargetId);
-  const [projectSettingsBrowserEnabled, setProjectSettingsBrowserEnabled] = useState(initialDraft.projectSettingsBrowserEnabled);
   const [projectSettingsEnvText, setProjectSettingsEnvText] = useState(initialDraft.projectSettingsEnvText);
-  const [projectSettingsCommands, setProjectSettingsCommands] = useState<ProjectCommand[]>(initialDraft.projectSettingsCommands);
   const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>(initialDraft.projectSettingsWebLinks);
-  const [projectSwitchBehaviorOverride, setProjectSwitchBehaviorOverride] = useState<ProjectTerminalSwitchBehavior | "">(
-    initialDraft.projectSwitchBehaviorOverride
-  );
   const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">(
     initialDraft.projectSubthreadPolicyOverride
   );
@@ -161,12 +156,6 @@ export const ProjectSettingsModal = memo(({
                 <span className="settings-nav-label">Environment</span>
               </button>
               <button
-                className={projectSettingsTab === "commands" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
-                onClick={() => setProjectSettingsTab("commands")}
-              >
-                <span className="settings-nav-label">Dev Commands</span>
-              </button>
-              <button
                 className={projectSettingsTab === "links" ? "settings-nav-btn mt-1 is-active" : "settings-nav-btn mt-1"}
                 onClick={() => setProjectSettingsTab("links")}
               >
@@ -193,22 +182,6 @@ export const ProjectSettingsModal = memo(({
                   onChange={(event) => setProjectSettingsProjectName(event.target.value)}
                   placeholder="Project name"
                 />
-              </div>
-              <div className="mx-2 border-t border-border/70" />
-              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                <div className="text-sm text-muted">Switch behavior override</div>
-                <select
-                  className="input text-xs"
-                  value={projectSwitchBehaviorOverride}
-                  onChange={(event) => setProjectSwitchBehaviorOverride(event.target.value as ProjectTerminalSwitchBehavior | "")}
-                >
-                  <option value="">Use app default</option>
-                  {PROJECT_SWITCH_BEHAVIOR_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
               </div>
               <div className="mx-2 border-t border-border/70" />
               <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -253,17 +226,6 @@ export const ProjectSettingsModal = memo(({
                   </button>
                 </div>
               </div>
-              <div className="mx-2 border-t border-border/70" />
-              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                <div className="text-sm text-muted">In-app browser</div>
-                <ToggleButton
-                  enabled={projectSettingsBrowserEnabled}
-                  className="md:justify-self-end"
-                  onLabel="Enabled"
-                  offLabel="Disabled"
-                  onToggle={setProjectSettingsBrowserEnabled}
-                />
-              </div>
             </section>
           )}
 
@@ -281,108 +243,12 @@ export const ProjectSettingsModal = memo(({
             </section>
           )}
 
-          {projectSettingsTab === "commands" && (
-            <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-              <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Dev Commands</div>
-              <div className="mx-2 space-y-2 px-2 py-3">
-                {projectSettingsCommands.map((command, index) => (
-                  <div key={command.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_96px_96px_28px]">
-                    <input
-                      className="input text-xs"
-                      value={command.name}
-                      placeholder="Name"
-                      onChange={(event) =>
-                        setProjectSettingsCommands((prev) =>
-                          prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
-                        )
-                      }
-                    />
-                    <input
-                      className="input text-xs"
-                      value={command.command}
-                      placeholder="Command"
-                      onChange={(event) =>
-                        setProjectSettingsCommands((prev) =>
-                          prev.map((item, idx) => (idx === index ? { ...item, command: event.target.value } : item))
-                        )
-                      }
-                    />
-                    <div className="project-settings-toggle-inline">
-                      <ToggleButton
-                        enabled={command.autoStart}
-                        className="settings-toggle-btn-compact"
-                        onLabel="Auto"
-                        offLabel="Auto"
-                        onToggle={(enabled) =>
-                          setProjectSettingsCommands((prev) =>
-                            prev.map((item, idx) => (idx === index ? { ...item, autoStart: enabled } : item))
-                          )
-                        }
-                      />
-                    </div>
-                    {projectSettingsBrowserEnabled ? (
-                      <ToggleButton
-                        enabled={command.useForPreview}
-                        className="settings-toggle-btn-compact"
-                        onLabel="Browser"
-                        offLabel="Browser"
-                        onToggle={(enabled) => {
-                          if (!enabled) {
-                            return;
-                          }
-                          setProjectSettingsCommands((prev) =>
-                            prev.map((item, idx) => ({ ...item, useForPreview: idx === index }))
-                          );
-                        }}
-                      />
-                    ) : (
-                      <div />
-                    )}
-                    <button
-                      className="btn-secondary px-0"
-                      onClick={() => setProjectSettingsCommands((prev) => prev.filter((_, idx) => idx !== index))}
-                      disabled={projectSettingsCommands.length <= 1}
-                      title="Remove command"
-                    >
-                      <FaTrashAlt className="mx-auto text-[12px]" />
-                    </button>
-                  </div>
-                ))}
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    className="btn-secondary"
-                    onClick={() =>
-                      setProjectSettingsCommands((prev) => [
-                        ...prev,
-                        {
-                          id: `cmd-${crypto.randomUUID()}`,
-                          name: `Command ${prev.length + 1}`,
-                          command: "",
-                          autoStart: false,
-                          useForPreview: false
-                        }
-                      ])
-                    }
-                  >
-                    Add command
-                  </button>
-                  <p className="text-xs text-slate-400">
-                    {projectSettingsBrowserEnabled
-                      ? "Choose auto-start commands and exactly one Browser command for preview URL detection."
-                      : "Choose which commands auto-start when entering this project."}
-                  </p>
-                </div>
-              </div>
-            </section>
-          )}
-
           {projectSettingsTab === "links" && (
             <section className="rounded-xl border border-border/80 bg-black/20 py-2">
               <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Header Web Links</div>
               <div className="mx-2 space-y-2 px-2 py-3">
                 {projectSettingsWebLinks.map((link, index) => (
-                  <div key={link.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_28px]">
+                  <div key={link.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_40px]">
                     <input
                       className="input text-xs"
                       value={link.name}
@@ -404,7 +270,7 @@ export const ProjectSettingsModal = memo(({
                       }
                     />
                     <button
-                      className="btn-secondary px-0"
+                      className="btn-secondary h-9 w-9 px-0"
                       onClick={() => setProjectSettingsWebLinks((prev) => prev.filter((_, idx) => idx !== index))}
                       title="Remove web link"
                     >
@@ -583,11 +449,8 @@ export const ProjectSettingsModal = memo(({
               onSaveProjectSettings({
                 projectName: projectSettingsProjectName,
                 projectWorkspaceTargetId,
-                projectSettingsBrowserEnabled,
                 projectSettingsEnvText,
-                projectSettingsCommands,
                 projectSettingsWebLinks,
-                projectSwitchBehaviorOverride,
                 projectSubthreadPolicyOverride
               }).catch((error) => {
                 appendLog(`Project settings save failed: ${String(error)}`);
@@ -601,6 +464,149 @@ export const ProjectSettingsModal = memo(({
       </div>
     </div>
   </div>
+  );
+});
+
+type ProjectActionsSettingsModalProps = {
+  initialDraft: ProjectActionsSettingsDraft;
+  onClose: () => void;
+  onSave: (draft: ProjectActionsSettingsDraft) => Promise<void>;
+  appendLog: (line: string) => void;
+};
+
+export const ProjectActionsSettingsModal = memo(({
+  initialDraft,
+  onClose,
+  onSave,
+  appendLog
+}: ProjectActionsSettingsModalProps) => {
+  const [projectSettingsCommands, setProjectSettingsCommands] = useState<Array<ProjectCommand & { stayRunning: boolean }>>(
+    initialDraft.projectSettingsCommands
+  );
+  const filteredByFocus = initialDraft.focusCommandId
+    ? projectSettingsCommands.filter((command) => command.id === initialDraft.focusCommandId)
+    : projectSettingsCommands;
+  const filteredCommands = filteredByFocus.length > 0 ? filteredByFocus : projectSettingsCommands;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-4xl rounded-2xl border border-border bg-surface p-4 shadow-neon">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Action Settings</h3>
+          <button className="btn-secondary" onClick={onClose}>
+            <span className="inline-flex items-center gap-1"><FaTimes className="text-[11px]" />Close</span>
+          </button>
+        </div>
+        <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+          <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Dev Actions</div>
+          <div className="mx-2 space-y-2 px-2 py-3">
+            {filteredCommands.map((command) => {
+              const index = projectSettingsCommands.findIndex((item) => item.id === command.id);
+              return (
+              <div key={command.id || index} className="grid gap-2 md:grid-cols-[140px_1fr_96px_92px_40px]">
+                <input
+                  className="input text-xs"
+                  value={command.name}
+                  placeholder="Name"
+                  onChange={(event) =>
+                    setProjectSettingsCommands((prev) =>
+                      prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
+                    )
+                  }
+                />
+                <input
+                  className="input text-xs"
+                  value={command.command}
+                  placeholder="Command"
+                  onChange={(event) =>
+                    setProjectSettingsCommands((prev) =>
+                      prev.map((item, idx) => (idx === index ? { ...item, command: event.target.value } : item))
+                    )
+                  }
+                />
+                <div className="project-settings-toggle-inline">
+                  <ToggleButton
+                    enabled={command.autoStart}
+                    className="settings-toggle-btn-compact"
+                    onLabel="Auto"
+                    offLabel="Auto"
+                    onToggle={(enabled) =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item, idx) => (idx === index ? { ...item, autoStart: enabled } : item))
+                      )
+                    }
+                  />
+                </div>
+                <div className="project-settings-toggle-inline">
+                  <button
+                    type="button"
+                    className={`action-stay-btn ${command.stayRunning ? "is-enabled" : ""}`}
+                    aria-pressed={command.stayRunning}
+                    title={command.stayRunning ? "Action will stay running when you switch away." : "Action will stop when idle and you switch away."}
+                    onClick={() =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item, idx) => (idx === index ? { ...item, stayRunning: !item.stayRunning } : item))
+                      )
+                    }
+                  >
+                    {command.stayRunning ? "Stay running" : "Stop on idle"}
+                  </button>
+                </div>
+                <button
+                  className="btn-secondary h-9 w-9 px-0"
+                  onClick={() => setProjectSettingsCommands((prev) => prev.filter((_, idx) => idx !== index))}
+                  disabled={projectSettingsCommands.length <= 1 || Boolean(initialDraft.focusCommandId)}
+                  title="Remove command"
+                >
+                  <FaTrashAlt className="mx-auto text-[12px]" />
+                </button>
+              </div>
+            );
+            })}
+
+            {!initialDraft.focusCommandId ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="btn-secondary"
+                onClick={() =>
+                  setProjectSettingsCommands((prev) => [
+                    ...prev,
+                    {
+                      id: `cmd-${crypto.randomUUID()}`,
+                      name: `Command ${prev.length + 1}`,
+                      command: "",
+                      autoStart: false,
+                      stayRunning: false
+                    }
+                  ])
+                }
+              >
+                Add action
+              </button>
+              <p className="text-xs text-slate-400">
+                `Auto` starts when entering a project. `Stay` prevents stop on workspace/project switch.
+              </p>
+            </div>
+            ) : null}
+          </div>
+        </section>
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={() => {
+              onSave({
+                projectSettingsCommands
+              }).catch((error) => {
+                appendLog(`Action settings save failed: ${String(error)}`);
+              });
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
   );
 });
 

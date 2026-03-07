@@ -8,7 +8,6 @@ import {
   useState,
   type ClipboardEventHandler,
   type DragEventHandler,
-  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type KeyboardEventHandler
 } from "react";
@@ -26,6 +25,7 @@ import {
   FaCog,
   FaEye,
   FaGlobeAmericas,
+  FaMicrophone,
   FaNetworkWired,
   FaPen,
   FaFolderOpen,
@@ -70,7 +70,6 @@ import type {
   ProjectFileEntry,
   ProjectSetupEvent,
   ProjectSettings,
-  ProjectTerminalSwitchBehavior,
   ProjectWebLink,
   ProjectTerminalEvent,
   ProjectTerminalState,
@@ -192,6 +191,7 @@ import {
   ActivityLogOverlay,
   ImportProjectModal,
   NewProjectModal,
+  ProjectActionsSettingsModal,
   ProjectSettingsModal,
   RenameThreadModal,
   WorkspaceModal
@@ -263,7 +263,17 @@ import { BranchDropdownPortal } from "./appBranchDropdown";
 import { MainHeader } from "./appMainHeader";
 import { MonacoCodePanel } from "./MonacoCodePanel";
 
-const api = window.desktopAPI;
+const api = window.desktopAPI as typeof window.desktopAPI & {
+  audio: {
+    transcribe: (input: {
+      audioDataUrl: string;
+      projectId?: string;
+      model?: string;
+      language?: string;
+      prompt?: string;
+    }) => Promise<{ text: string; model: string; language?: string; durationSeconds?: number }>;
+  };
+};
 const platformHints = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
 const isMacOS = platformHints.includes("mac");
 const isWindows = platformHints.includes("win");
@@ -446,15 +456,17 @@ export const App = () => {
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
+  const [showProjectActionsSettings, setShowProjectActionsSettings] = useState(false);
   const [projectSettingsInitialDraft, setProjectSettingsInitialDraft] = useState<{
     projectName: string;
     projectWorkspaceTargetId: string;
-    projectSettingsBrowserEnabled: boolean;
     projectSettingsEnvText: string;
-    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>;
     projectSettingsWebLinks: ProjectWebLink[];
-    projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
     projectSubthreadPolicyOverride: SubthreadPolicy | "";
+  } | null>(null);
+  const [projectActionsSettingsInitialDraft, setProjectActionsSettingsInitialDraft] = useState<{
+    focusCommandId?: string;
+    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; stayRunning: boolean }>;
   } | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
@@ -547,7 +559,6 @@ export const App = () => {
   const [gitActivityByProjectId, setGitActivityByProjectId] = useState<Record<string, GitActivityEntry[]>>({});
   const [gitActivityExpandedByProjectId, setGitActivityExpandedByProjectId] = useState<Record<string, boolean>>({});
   const [isGitPoppedOut, setIsGitPoppedOut] = useState(false);
-  const [isTerminalDashboardPoppedOut, setIsTerminalDashboardPoppedOut] = useState(false);
   const [isCodePanelPoppedOut, setIsCodePanelPoppedOut] = useState(false);
   const planPopoutWindowRef = useRef<Window | null>(null);
   const [orchestrationRunsByParentId, setOrchestrationRunsByParentId] = useState<Record<string, OrchestrationRun[]>>({});
@@ -557,7 +568,6 @@ export const App = () => {
   const [removingProject, setRemovingProject] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
-  const [isTerminalMenuOpen, setIsTerminalMenuOpen] = useState(false);
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [branchDropdownPosition, setBranchDropdownPosition] = useState<{ bottom: number; left: number; width: number } | null>(null);
   const [composerDropdown, setComposerDropdown] = useState<{
@@ -566,6 +576,8 @@ export const App = () => {
     left: number;
     width: number;
   } | null>(null);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [isVoiceTranscribing, setIsVoiceTranscribing] = useState(false);
   const activeThreadIdRef = useRef<string | null>(null);
   const previousActiveThreadIdRef = useRef<string | null>(null);
   const composerRef = useRef("");
@@ -578,7 +590,6 @@ export const App = () => {
   const previewWebviewRef = useRef<HTMLElement | null>(null);
   const branchTriggerRef = useRef<HTMLDivElement | null>(null);
   const branchListRef = useRef<HTMLDivElement | null>(null);
-  const terminalMenuRef = useRef<HTMLDivElement | null>(null);
   const changelogRef = useRef<HTMLDivElement | null>(null);
   const branchDropdownMenuRef = useRef<HTMLDivElement | null>(null);
   const composerModelTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -591,8 +602,6 @@ export const App = () => {
   const composerDropdownMenuRef = useRef<HTMLDivElement | null>(null);
   const composerMentionRafRef = useRef<number | null>(null);
   const composerResizeRafRef = useRef<number | null>(null);
-  const terminalMenuContentRef = useRef<HTMLDivElement | null>(null);
-  const terminalMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const threadCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const threadCreateInputRef = useRef<HTMLInputElement | null>(null);
   const threadContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -617,8 +626,10 @@ export const App = () => {
   const queuedPromptsByThreadIdRef = useRef<Record<string, QueuedPrompt[]>>({});
   const queueProcessingThreadIdsRef = useRef<Set<string>>(new Set());
   const completionAudioContextRef = useRef<AudioContext | null>(null);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
   const terminalPopoutWindowsRef = useRef<Record<string, Window | null>>({});
-  const terminalDashboardWindowRef = useRef<Window | null>(null);
   const isLightTheme = (settings.theme ?? "midnight") === "dawn" || (settings.theme ?? "midnight") === "linen";
   const appIconSrc = isLightTheme ? appIconLight : appIconDark;
   const appendLog = useCallback((line: string) => {
@@ -747,10 +758,6 @@ export const App = () => {
   const activeProjectTerminals = useMemo(
     () => activeProjectTerminalState?.terminals ?? [],
     [activeProjectTerminalState]
-  );
-  const activeRunningTerminalsCount = useMemo(
-    () => activeProjectTerminals.filter((terminal) => terminal.running).length,
-    [activeProjectTerminals]
   );
   const activeProjectPreviewUrl = useMemo(
     () => (activeProjectId ? projectPreviewUrlById[activeProjectId] ?? "" : ""),
@@ -1674,6 +1681,137 @@ export const App = () => {
     }
   };
 
+  const blobToDataUrl = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result === "string") {
+          resolve(result);
+          return;
+        }
+        reject(new Error("Failed to read audio blob."));
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read audio blob."));
+      reader.readAsDataURL(blob);
+    });
+
+  const stopVoiceStream = () => {
+    voiceStreamRef.current?.getTracks().forEach((track) => {
+      track.stop();
+    });
+    voiceStreamRef.current = null;
+  };
+
+  const appendVoiceTranscriptToComposer = (text: string) => {
+    const transcript = text.trim();
+    if (!transcript) {
+      return;
+    }
+    const currentValue = composerRef.current;
+    const separator = currentValue.trim().length === 0 || /\s$/.test(currentValue) ? "" : " ";
+    const nextValue = `${currentValue}${separator}${transcript}`;
+    const nextCaret = nextValue.length;
+    applyComposerText(nextValue, true, nextCaret);
+    onComposerChange(nextValue, nextCaret);
+    const threadId = activeThreadIdRef.current;
+    if (threadId) {
+      setComposerDraftByThreadId((prev) => ({
+        ...prev,
+        [threadId]: nextValue
+      }));
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    const recorder = voiceRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      return;
+    }
+    recorder.stop();
+  };
+
+  const toggleVoiceRecording = async () => {
+    if (!activeThreadIdRef.current || activeThreadSendPending || isVoiceTranscribing) {
+      return;
+    }
+
+    if (isVoiceRecording) {
+      stopVoiceRecording();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setLogs((prev) => [...prev, "Voice input unavailable: microphone capture is not supported in this environment."]);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeTypeCandidates = ["audio/webm;codecs=opus", "audio/webm"];
+      const preferredMimeType = mimeTypeCandidates.find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      const recorder = preferredMimeType ? new MediaRecorder(stream, { mimeType: preferredMimeType }) : new MediaRecorder(stream);
+      voiceStreamRef.current = stream;
+      voiceRecorderRef.current = recorder;
+      voiceChunksRef.current = [];
+      setIsVoiceRecording(true);
+
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size > 0) {
+          voiceChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const chunks = voiceChunksRef.current;
+        voiceChunksRef.current = [];
+        setIsVoiceRecording(false);
+        voiceRecorderRef.current = null;
+        stopVoiceStream();
+        if (chunks.length === 0) {
+          return;
+        }
+
+        const transcribe = async () => {
+          setIsVoiceTranscribing(true);
+          try {
+            const mimeType = recorder.mimeType || preferredMimeType || "audio/webm";
+            const audioBlob = new Blob(chunks, { type: mimeType });
+            const audioDataUrl = await blobToDataUrl(audioBlob);
+            const result = await api.audio.transcribe({
+              audioDataUrl,
+              projectId: activeProjectId ?? undefined,
+              model: "whisper-1"
+            });
+            appendVoiceTranscriptToComposer(result.text);
+          } catch (error) {
+            setLogs((prev) => [...prev, `Voice transcription failed: ${String(error)}`]);
+          } finally {
+            setIsVoiceTranscribing(false);
+          }
+        };
+
+        transcribe().catch((error) => {
+          setLogs((prev) => [...prev, `Voice transcription failed: ${String(error)}`]);
+          setIsVoiceTranscribing(false);
+        });
+      };
+
+      recorder.onerror = () => {
+        setLogs((prev) => [...prev, "Voice recording failed."]);
+        setIsVoiceRecording(false);
+        voiceRecorderRef.current = null;
+        stopVoiceStream();
+      };
+
+      recorder.start();
+    } catch (error) {
+      setLogs((prev) => [...prev, `Microphone access failed: ${String(error)}`]);
+      setIsVoiceRecording(false);
+      stopVoiceStream();
+    }
+  };
+
   const scheduleComposerResize = (textarea?: HTMLTextAreaElement | null) => {
     const target = textarea ?? composerTextareaRef.current;
     if (!target) {
@@ -1818,6 +1956,12 @@ export const App = () => {
         URL.revokeObjectURL(attachment.previewUrl);
       });
       completionAudioContextRef.current?.close().catch(() => {});
+      if (voiceRecorderRef.current && voiceRecorderRef.current.state !== "inactive") {
+        voiceRecorderRef.current.stop();
+      }
+      voiceRecorderRef.current = null;
+      stopVoiceStream();
+      voiceChunksRef.current = [];
     },
     []
   );
@@ -2769,57 +2913,6 @@ export const App = () => {
 
   useEffect(() => {
     (window as Window & {
-      __codeappTerminalDashboardAction?: (action: string, commandId?: string) => void;
-      __codeappTerminalPopoutAction?: (action: string, commandId: string) => void;
-    }).__codeappTerminalDashboardAction = (action: string, commandId?: string) => {
-      if (action === "start_all") {
-        startActiveProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Terminal start failed: ${String(error)}`]));
-        return;
-      }
-      if (action === "stop_all") {
-        stopActiveProjectTerminal().catch((error) => setLogs((prev) => [...prev, `Terminal stop failed: ${String(error)}`]));
-        return;
-      }
-      if (action === "restart_all") {
-        Promise.all(
-          activeProjectTerminals
-            .filter((terminal) => terminal.running)
-            .map((terminal) =>
-              startActiveProjectTerminal(terminal.commandId).catch((error) =>
-                setLogs((prev) => [...prev, `Terminal restart failed: ${String(error)}`])
-              )
-            )
-        ).catch(() => undefined);
-        return;
-      }
-      if (!commandId) {
-        return;
-      }
-      const terminal = activeProjectTerminals.find((item) => item.commandId === commandId);
-      if (!terminal) {
-        return;
-      }
-      if (action === "start") {
-        startActiveProjectTerminal(commandId).catch((error) => setLogs((prev) => [...prev, `Terminal start failed: ${String(error)}`]));
-        return;
-      }
-      if (action === "stop") {
-        stopActiveProjectTerminal(commandId).catch((error) => setLogs((prev) => [...prev, `Terminal stop failed: ${String(error)}`]));
-        return;
-      }
-      if (action === "copy") {
-        copyTerminalOutput(terminal.name, terminal.outputTail || "");
-        return;
-      }
-      if (action === "open_popout") {
-        openTerminalPopout(terminal);
-        return;
-      }
-      if (action === "close_popout" && activeProjectId) {
-        closeTerminalPopout(getTerminalPopoutKey(activeProjectId, commandId));
-      }
-    };
-    (window as Window & {
       __codeappTerminalPopoutAction?: (action: string, commandId: string) => void;
     }).__codeappTerminalPopoutAction = (action: string, commandId: string) => {
       if (!commandId) {
@@ -2834,12 +2927,10 @@ export const App = () => {
       }
     };
     return () => {
-      delete (window as Window & { __codeappTerminalDashboardAction?: (action: string, commandId?: string) => void })
-        .__codeappTerminalDashboardAction;
       delete (window as Window & { __codeappTerminalPopoutAction?: (action: string, commandId: string) => void })
         .__codeappTerminalPopoutAction;
     };
-  }, [activeProjectId, activeProjectTerminals, terminalPopoutByKey]);
+  }, [activeProjectId]);
 
   useEffect(() => {
     clearClosedTerminalPopouts();
@@ -2856,11 +2947,7 @@ export const App = () => {
       const projectName = projects.find((project) => project.id === parsed.projectId)?.name;
       renderTerminalPopout(popout, terminal, projectName);
     });
-    const dashboardPopout = terminalDashboardWindowRef.current;
-    if (dashboardPopout && !dashboardPopout.closed) {
-      renderTerminalDashboardPopout(dashboardPopout);
-    }
-  }, [projectTerminalById, projects, activeProjectId, activeProject, activeProjectTerminals, activeRunningTerminalsCount, terminalPopoutByKey]);
+  }, [projectTerminalById, projects, terminalPopoutByKey]);
 
   useEffect(() => {
     return () => {
@@ -2870,10 +2957,6 @@ export const App = () => {
         }
       });
       terminalPopoutWindowsRef.current = {};
-      if (terminalDashboardWindowRef.current && !terminalDashboardWindowRef.current.closed) {
-        terminalDashboardWindowRef.current.close();
-      }
-      terminalDashboardWindowRef.current = null;
       setIsCodePanelPoppedOut(false);
     };
   }, []);
@@ -2902,7 +2985,6 @@ export const App = () => {
     setIsBranchDropdownOpen(false);
     setGitBranchSearch("");
     setComposerDropdown(null);
-    setIsTerminalMenuOpen(false);
     setFileMention(null);
     setSkillMention(null);
   }, [activeProjectId]);
@@ -3023,32 +3105,6 @@ export const App = () => {
     },
     []
   );
-
-  useEffect(() => {
-    if (!isTerminalMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (!terminalMenuRef.current?.contains(target)) {
-        setIsTerminalMenuOpen(false);
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsTerminalMenuOpen(false);
-      }
-    };
-
-    window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleEscape);
-    return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleEscape);
-    };
-  }, [isTerminalMenuOpen]);
 
   useEffect(() => {
     if (!isChangelogOpen) {
@@ -3490,11 +3546,6 @@ export const App = () => {
       return;
     }
     const current = projectSettingsById[projectId] ?? (await loadProjectSettings(projectId));
-    const nextCommands = current.devCommands.map((command, index) => ({
-      ...command,
-      autoStart: command.autoStart ?? index === 0,
-      useForPreview: command.useForPreview ?? index === 0
-    }));
     const nextWebLinks = (current.webLinks ?? []).map((link, index) => ({
       id: link.id?.trim() || `link-${index + 1}`,
       name: link.name ?? "",
@@ -3505,11 +3556,8 @@ export const App = () => {
     setProjectSettingsInitialDraft({
       projectName,
       projectWorkspaceTargetId: projectWorkspaceId,
-      projectSettingsBrowserEnabled: current.browserEnabled ?? true,
       projectSettingsEnvText: envVarsToText(current.envVars),
-      projectSettingsCommands: nextCommands,
       projectSettingsWebLinks: nextWebLinks,
-      projectSwitchBehaviorOverride: current.switchBehaviorOverride ?? "",
       projectSubthreadPolicyOverride: current.subthreadPolicyOverride ?? ""
     });
     if (activeProjectId !== projectId) {
@@ -3518,14 +3566,34 @@ export const App = () => {
     setShowProjectSettings(true);
   };
 
+  const openActiveProjectActionsSettings = async (commandId?: string) => {
+    const projectId = activeProjectId;
+    if (!projectId) {
+      return;
+    }
+    const current = projectSettingsById[projectId] ?? (await loadProjectSettings(projectId));
+    const nextCommands = current.devCommands.map((command, index) => ({
+      id: command.id?.trim() || `cmd-${index + 1}`,
+      name: command.name ?? "",
+      command: command.command ?? "",
+      autoStart: command.autoStart ?? index === 0,
+      stayRunning: command.stayRunning ?? false
+    }));
+    setProjectActionsSettingsInitialDraft({
+      focusCommandId: commandId,
+      projectSettingsCommands: nextCommands
+    });
+    if (activeProjectId !== projectId) {
+      setActiveProjectId(projectId);
+    }
+    setShowProjectActionsSettings(true);
+  };
+
   const saveProjectSettings = async (draft: {
     projectName: string;
     projectWorkspaceTargetId: string;
-    projectSettingsBrowserEnabled: boolean;
     projectSettingsEnvText: string;
-    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; useForPreview: boolean }>;
     projectSettingsWebLinks: ProjectWebLink[];
-    projectSwitchBehaviorOverride: ProjectTerminalSwitchBehavior | "";
     projectSubthreadPolicyOverride: SubthreadPolicy | "";
   }) => {
     if (!activeProjectId) {
@@ -3543,25 +3611,6 @@ export const App = () => {
     } catch (error) {
       setLogs((prev) => [...prev, `Project settings save failed: ${String(error)}`]);
       return;
-    }
-
-    const sanitizedCommands = draft.projectSettingsCommands
-      .map((command) => ({
-        id: command.id.trim(),
-        name: command.name.trim(),
-        command: command.command.trim(),
-        autoStart: Boolean(command.autoStart),
-        useForPreview: Boolean(command.useForPreview)
-      }))
-      .filter((command) => command.id && command.name && command.command);
-
-    if (sanitizedCommands.length === 0) {
-      setLogs((prev) => [...prev, "Project settings save failed: at least one dev command is required."]);
-      return;
-    }
-
-    if (!sanitizedCommands.some((command) => command.useForPreview) && sanitizedCommands[0]) {
-      sanitizedCommands[0] = { ...sanitizedCommands[0], useForPreview: true };
     }
 
     const sanitizedWebLinks: ProjectWebLink[] = [];
@@ -3600,11 +3649,7 @@ export const App = () => {
     const saved = await api.projectSettings.set({
       projectId: activeProjectId,
       envVars,
-      devCommands: sanitizedCommands,
       webLinks: sanitizedWebLinks,
-      browserEnabled: draft.projectSettingsBrowserEnabled,
-      autoStartDevTerminal: sanitizedCommands.some((command) => command.autoStart),
-      switchBehaviorOverride: draft.projectSwitchBehaviorOverride || undefined,
       subthreadPolicyOverride: draft.projectSubthreadPolicyOverride || undefined
     });
 
@@ -3620,6 +3665,43 @@ export const App = () => {
     }
     setShowProjectSettings(false);
     setProjectSettingsInitialDraft(null);
+    setShowProjectActionsSettings(false);
+    setProjectActionsSettingsInitialDraft(null);
+  };
+
+  const saveProjectActionsSettings = async (draft: {
+    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; stayRunning: boolean }>;
+  }) => {
+    if (!activeProjectId) {
+      return;
+    }
+    const sanitizedCommands = draft.projectSettingsCommands
+      .map((command) => ({
+        id: command.id.trim(),
+        name: command.name.trim(),
+        command: command.command.trim(),
+        autoStart: Boolean(command.autoStart),
+        stayRunning: Boolean(command.stayRunning)
+      }))
+      .filter((command) => command.id && command.name && command.command);
+
+    if (sanitizedCommands.length === 0) {
+      setLogs((prev) => [...prev, "Action settings save failed: at least one action is required."]);
+      return;
+    }
+
+    const saved = await api.projectSettings.set({
+      projectId: activeProjectId,
+      devCommands: sanitizedCommands,
+      autoStartDevTerminal: sanitizedCommands.some((command) => command.autoStart)
+    });
+
+    setProjectSettingsById((prev) => ({
+      ...prev,
+      [activeProjectId]: saved
+    }));
+    setShowProjectActionsSettings(false);
+    setProjectActionsSettingsInitialDraft(null);
   };
 
   const removeActiveProject = async () => {
@@ -3642,6 +3724,8 @@ export const App = () => {
       await api.projects.delete({ id: projectIdToRemove });
       setShowProjectSettings(false);
       setProjectSettingsInitialDraft(null);
+      setShowProjectActionsSettings(false);
+      setProjectActionsSettingsInitialDraft(null);
       setProjectSettingsById((prev) => {
         const next = { ...prev };
         delete next[projectIdToRemove];
@@ -4454,12 +4538,6 @@ export const App = () => {
   };
 
   const clearClosedTerminalPopouts = () => {
-    const dashboard = terminalDashboardWindowRef.current;
-    if (dashboard && dashboard.closed) {
-      terminalDashboardWindowRef.current = null;
-      setIsTerminalDashboardPoppedOut(false);
-    }
-
     const closedKeys = Object.entries(terminalPopoutWindowsRef.current)
       .filter(([, popout]) => !popout || popout.closed)
       .map(([key]) => key);
@@ -4492,14 +4570,6 @@ export const App = () => {
         delete next[key];
         return next;
       });
-    };
-    popout.addEventListener("beforeunload", handleClose, { once: true });
-  };
-
-  const attachTerminalDashboardCloseListener = (popout: Window) => {
-    const handleClose = () => {
-      terminalDashboardWindowRef.current = null;
-      setIsTerminalDashboardPoppedOut(false);
     };
     popout.addEventListener("beforeunload", handleClose, { once: true });
   };
@@ -4641,28 +4711,6 @@ export const App = () => {
     });
   };
 
-  const moveTerminalMenuFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
-      return;
-    }
-
-    const focusables = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [role="button"][tabindex]:not([tabindex="-1"])'
-      )
-    );
-    if (focusables.length === 0) {
-      return;
-    }
-
-    const currentIndex = focusables.findIndex((element) => element === document.activeElement);
-    const step = event.key === "ArrowDown" ? 1 : -1;
-    const nextIndex = currentIndex === -1 ? (step === 1 ? 0 : focusables.length - 1) : (currentIndex + step + focusables.length) % focusables.length;
-
-    event.preventDefault();
-    focusables[nextIndex]?.focus();
-  };
-
   const createThread = async (projectId = activeProjectId, title = "New thread") => {
     if (!projectId) {
       setLogs((prev) => [...prev, "Create or select a project first."]);
@@ -4699,21 +4747,15 @@ export const App = () => {
     [activeProjectId]
   );
 
-  const openTerminalMenu = useCallback(() => {
+  const openDefaultTerminalFromShortcut = useCallback(() => {
     if (!activeProjectId) {
       setLogs((prev) => [...prev, "Create or select a project first."]);
       return;
     }
-    setIsTerminalMenuOpen(true);
-    window.requestAnimationFrame(() => {
-      const firstFocusable = terminalMenuContentRef.current?.querySelector<HTMLElement>("button:not([disabled]), [tabindex=\"0\"]");
-      if (firstFocusable) {
-        firstFocusable.focus();
-        return;
-      }
-      terminalMenuTriggerRef.current?.focus();
+    openProjectTerminal().catch((error) => {
+      setLogs((prev) => [...prev, `Open terminal failed: ${String(error)}`]);
     });
-  }, [activeProjectId]);
+  }, [activeProjectId, openProjectTerminal]);
 
   const runShortcutByKey = useCallback(
     (key: string) => {
@@ -4722,14 +4764,14 @@ export const App = () => {
         return;
       }
       if (key === "t") {
-        openTerminalMenu();
+        openDefaultTerminalFromShortcut();
         return;
       }
       openAppSettingsWindow().catch((error) => {
         setLogs((prev) => [...prev, `Open settings window failed: ${String(error)}`]);
       });
     },
-    [openTerminalMenu, openThreadCreationMenu]
+    [openDefaultTerminalFromShortcut, openThreadCreationMenu]
   );
 
   useEffect(() => {
@@ -4963,6 +5005,41 @@ export const App = () => {
       const fallback =
         remaining.find((item) => item.projectId === thread.projectId && !item.archivedAt) ??
         remaining.find((item) => item.projectId === thread.projectId);
+      setActiveThreadId(fallback?.id ?? null);
+    }
+
+    await loadThreads();
+  };
+
+  const deleteArchivedThreadsInProject = async (projectId: string) => {
+    const currentThreads = threadsRef.current;
+    const archivedInProject = currentThreads.filter((thread) => thread.projectId === projectId && Boolean(thread.archivedAt));
+    if (archivedInProject.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${archivedInProject.length} archived thread${archivedInProject.length === 1 ? "" : "s"}?\n\nThis permanently deletes archived threads and any archived sub-threads from GameraCode. Files on disk stay intact.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const archivedById = new Map(archivedInProject.map((thread) => [thread.id, thread]));
+    const rootArchivedThreads = archivedInProject.filter(
+      (thread) => !thread.parentThreadId || !archivedById.has(thread.parentThreadId)
+    );
+
+    for (const thread of rootArchivedThreads) {
+      await api.threads.delete({ id: thread.id });
+    }
+
+    const deletedIds = new Set(archivedInProject.map((thread) => thread.id));
+    if (activeThreadId && deletedIds.has(activeThreadId)) {
+      const remaining = currentThreads.filter((thread) => !deletedIds.has(thread.id));
+      const fallback =
+        remaining.find((thread) => thread.projectId === projectId && !thread.archivedAt) ??
+        remaining.find((thread) => thread.projectId === projectId);
       setActiveThreadId(fallback?.id ?? null);
     }
 
@@ -6041,347 +6118,6 @@ export const App = () => {
     doc.body.replaceChildren(shell);
   };
 
-  const ensureTerminalDashboardFrame = (popout: Window) => {
-    const doc = popout.document;
-    if (doc.getElementById("codeapp-terminal-dashboard-popout")) {
-      return;
-    }
-    doc.open();
-    doc.write(`<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Terminal Dashboard</title>
-    <style>
-      :root { color-scheme: ${terminalPopupTheme.colorScheme}; font-family: "Space Grotesk", "Avenir Next", sans-serif; }
-      * { box-sizing: border-box; }
-      body { margin: 0; background: ${terminalPopupTheme.bodyBg}; color: ${terminalPopupTheme.text}; height: 100vh; }
-      .shell { height: 100vh; display: flex; flex-direction: column; }
-      .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 10px; border-bottom: 1px solid ${terminalPopupTheme.shellBorder}; background: ${terminalPopupTheme.shellBg}; -webkit-app-region: drag; }
-      .head.macos { padding-left: 5rem; }
-      .meta { min-width: 0; }
-      .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
-      .icon { width: 26px; height: 26px; border-radius: 8px; }
-      .title { font-size: 13px; font-weight: 700; color: ${terminalPopupTheme.text}; }
-      .subtitle { font-size: 11px; color: ${terminalPopupTheme.muted}; }
-      .actions { display: flex; gap: 6px; -webkit-app-region: no-drag; align-items: center; }
-      .btn { height: 30px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: ${terminalPopupTheme.buttonText}; padding: 0 10px; font-size: 12px; cursor: pointer; }
-      .btn:hover { background: ${terminalPopupTheme.buttonHoverBg}; color: ${terminalPopupTheme.buttonHoverText}; }
-      .window-btn { width: 34px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: ${terminalPopupTheme.buttonText}; font-size: 13px; cursor: pointer; }
-      .window-btn:hover { background: ${terminalPopupTheme.buttonHoverBg}; color: ${terminalPopupTheme.buttonHoverText}; }
-      .window-btn.close:hover { background: rgba(239, 68, 68, 0.2); color: #fee2e2; }
-      .content { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 10px; }
-      .card { display: flex; flex-direction: column; min-height: 250px; border: 1px solid ${terminalPopupTheme.shellBorder}; border-radius: 10px; background: ${terminalPopupTheme.cardBg}; padding: 10px; }
-      .card-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-      .card-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .card-command { font-size: 10px; color: ${terminalPopupTheme.muted}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .badge-running { font-size: 11px; color: #4ade80; }
-      .badge-stopped { font-size: 11px; color: ${terminalPopupTheme.muted}; }
-      .card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-      .output { margin: 0; padding: 8px; flex: 1; min-height: 0; overflow: auto; border-radius: 8px; border: 1px solid ${terminalPopupTheme.shellBorder}; background: ${terminalPopupTheme.outputBg}; font-family: "IBM Plex Mono", "Fira Code", monospace; font-size: 11px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
-      .line { display: block; min-height: 1.35em; }
-      .dim { opacity: 0.72; }
-      .bold { font-weight: 700; }
-      .italic { font-style: italic; }
-      .underline { text-decoration: underline; }
-    </style>
-  </head>
-  <body>
-    <div id="codeapp-terminal-dashboard-popout" class="shell">
-      <div class="head${isMacOS ? " macos" : ""}">
-        <div class="brand">
-          <img src="${appIconSrc}" class="icon" alt="" />
-          <div class="meta">
-            <div id="dashboard-title" class="title">Terminal Dashboard</div>
-            <div id="dashboard-subtitle" class="subtitle"></div>
-          </div>
-        </div>
-        <div class="actions">
-          <button class="btn" data-action="start_all">Start All</button>
-          <button class="btn" data-action="restart_all">Restart Running</button>
-          <button class="btn" data-action="stop_all">Stop All</button>
-          ${useWindowsStyleHeader
-            ? `<button id="windowMinBtn" class="window-btn" title="Minimize">&#8722;</button>
-          <button id="windowMaxBtn" class="window-btn" title="Maximize or restore">&#9723;</button>
-          <button id="windowCloseBtn" class="window-btn close" title="Close">&times;</button>`
-            : ""}
-        </div>
-      </div>
-      <div class="content">
-        <div id="dashboard-grid" class="grid"></div>
-      </div>
-    </div>
-    <script>
-      const colorByCode = {
-        30: "#111827", 31: "#f87171", 32: "#4ade80", 33: "#facc15", 34: "#60a5fa", 35: "#c084fc", 36: "#22d3ee", 37: "#e5e7eb",
-        90: "#6b7280", 91: "#ef4444", 92: "#22c55e", 93: "#eab308", 94: "#3b82f6", 95: "#a855f7", 96: "#06b6d4", 97: "#f9fafb",
-        40: "#111827", 41: "#7f1d1d", 42: "#14532d", 43: "#713f12", 44: "#1e3a8a", 45: "#581c87", 46: "#155e75", 47: "#d1d5db",
-        100: "#374151", 101: "#991b1b", 102: "#166534", 103: "#854d0e", 104: "#1d4ed8", 105: "#6b21a8", 106: "#0e7490", 107: "#f3f4f6"
-      };
-      const defaultStyle = () => ({ fg: "", bg: "", bold: false, dim: false, italic: false, underline: false });
-      const applySgr = (style, paramsText) => {
-        const params = paramsText.length ? paramsText.split(";").map((token) => Number(token) || 0) : [0];
-        for (const code of params) {
-          if (code === 0) { Object.assign(style, defaultStyle()); continue; }
-          if (code === 1) { style.bold = true; continue; }
-          if (code === 2) { style.dim = true; continue; }
-          if (code === 3) { style.italic = true; continue; }
-          if (code === 4) { style.underline = true; continue; }
-          if (code === 22) { style.bold = false; style.dim = false; continue; }
-          if (code === 23) { style.italic = false; continue; }
-          if (code === 24) { style.underline = false; continue; }
-          if (code === 39) { style.fg = ""; continue; }
-          if (code === 49) { style.bg = ""; continue; }
-          if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) { style.fg = colorByCode[code] || ""; continue; }
-          if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) { style.bg = colorByCode[code] || ""; }
-        }
-      };
-      const styleKey = (style) => JSON.stringify(style);
-      const pushText = (segments, style, text) => {
-        if (!text) return;
-        const key = styleKey(style);
-        const prev = segments.length > 0 ? segments[segments.length - 1] : null;
-        if (prev && prev.key === key) { prev.text += text; return; }
-        segments.push({ key, text, style: { ...style } });
-      };
-      const popBackspace = (segments, buffer) => {
-        if (buffer.length > 0) return buffer.slice(0, -1);
-        const last = segments.length > 0 ? segments[segments.length - 1] : null;
-        if (!last || last.text.length === 0) return buffer;
-        last.text = last.text.slice(0, -1);
-        if (!last.text) segments.pop();
-        return buffer;
-      };
-      const parseTerminal = (raw) => {
-        const lines = [];
-        let lineSegments = [];
-        let textBuffer = "";
-        const style = defaultStyle();
-        const flush = () => {
-          if (!textBuffer) return;
-          pushText(lineSegments, style, textBuffer);
-          textBuffer = "";
-        };
-        for (let index = 0; index < raw.length; index += 1) {
-          const ch = raw[index];
-          if (ch === "\\u001b" && raw[index + 1] === "]") {
-            flush();
-            let end = index + 2;
-            while (end < raw.length) {
-              if (raw[end] === "\\u0007") break;
-              if (raw[end] === "\\u001b" && raw[end + 1] === "\\\\") { end += 1; break; }
-              end += 1;
-            }
-            index = end;
-            continue;
-          }
-          if (ch === "\\u001b" && raw[index + 1] === "[") {
-            flush();
-            let end = index + 2;
-            while (end < raw.length && !/[A-Za-z]/.test(raw[end])) end += 1;
-            if (end < raw.length) {
-              const command = raw[end];
-              const params = raw.slice(index + 2, end);
-              if (command === "m") applySgr(style, params);
-              else if (command === "K") { lineSegments = []; textBuffer = ""; }
-              else if (command === "J" && params.trim() === "2") { lines.length = 0; lineSegments = []; textBuffer = ""; }
-              index = end;
-              continue;
-            }
-          }
-          if (ch === "\\r") { if (raw[index + 1] === "\\n") continue; flush(); lineSegments = []; textBuffer = ""; continue; }
-          if (ch === "\\n") { flush(); lines.push(lineSegments); lineSegments = []; continue; }
-          if (ch === "\\b") { textBuffer = popBackspace(lineSegments, textBuffer); continue; }
-          if (ch === "\\t") { textBuffer += "    "; continue; }
-          textBuffer += ch;
-        }
-        flush();
-        lines.push(lineSegments);
-        return lines;
-      };
-      const renderOutputTo = (container, raw) => {
-        const isNearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 20;
-        const lines = parseTerminal(String(raw || ""));
-        container.textContent = "";
-        const fragment = document.createDocumentFragment();
-        for (const segments of lines) {
-          const line = document.createElement("div");
-          line.className = "line";
-          for (const segment of segments) {
-            if (!segment.text) continue;
-            const span = document.createElement("span");
-            if (segment.style.bold) span.classList.add("bold");
-            if (segment.style.dim) span.classList.add("dim");
-            if (segment.style.italic) span.classList.add("italic");
-            if (segment.style.underline) span.classList.add("underline");
-            if (segment.style.fg) span.style.color = segment.style.fg;
-            if (segment.style.bg) span.style.backgroundColor = segment.style.bg;
-            span.textContent = segment.text;
-            line.appendChild(span);
-          }
-          fragment.appendChild(line);
-        }
-        container.appendChild(fragment);
-        if (!String(raw || "").length) {
-          container.textContent = "No terminal output yet.";
-        }
-        if (isNearBottom) {
-          container.scrollTop = container.scrollHeight;
-        }
-      };
-
-      const escapeHtml = (value) =>
-        String(value || "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;");
-
-      window.__codeappRenderDashboard = (payload) => {
-        const grid = document.getElementById("dashboard-grid");
-        const title = document.getElementById("dashboard-title");
-        const subtitle = document.getElementById("dashboard-subtitle");
-        if (!grid || !title || !subtitle) return;
-        const terminals = Array.isArray(payload?.terminals) ? payload.terminals : [];
-        const running = Number(payload?.runningCount || 0);
-        const projectName = String(payload?.projectName || "Project");
-        title.textContent = "Terminal Dashboard - " + projectName;
-        subtitle.textContent = "Running " + running + "/" + terminals.length;
-        grid.innerHTML = terminals
-          .map((terminal) => {
-            const statusClass = terminal.running ? "badge-running" : "badge-stopped";
-            const statusText = terminal.running ? "Running" : "Stopped";
-            const popAction = terminal.poppedOut ? "close_popout" : "open_popout";
-            const popLabel = terminal.poppedOut ? "Close Pop-out" : "Pop Out";
-            return '<section class="card" data-command-id="' + escapeHtml(terminal.commandId) + '">\
-  <div class="card-head">
-    <div style="min-width:0;">
-      <div class="card-title">' + escapeHtml(terminal.name) + (terminal.useForPreview ? " (Browser)" : "") + '</div>\
-      <div class="card-command">' + escapeHtml(terminal.command) + '</div>
-    </div>
-    <div class="' + statusClass + '">' + statusText + '</div>
-  </div>
-  <div class="card-actions">
-    <button class="btn" data-action="start" data-command-id="' + escapeHtml(terminal.commandId) + '">' + (terminal.running ? "Restart" : "Start") + '</button>\
-    <button class="btn" data-action="stop" data-command-id="' + escapeHtml(terminal.commandId) + '" ' + (terminal.running ? "" : "disabled") + '>Stop</button>\
-    <button class="btn" data-action="copy" data-command-id="' + escapeHtml(terminal.commandId) + '" ' + (terminal.outputTail ? "" : "disabled") + '>Copy</button>\
-    <button class="btn" data-action="' + popAction + '" data-command-id="' + escapeHtml(terminal.commandId) + '">' + popLabel + '</button>
-  </div>
-  <div id="out-' + escapeHtml(terminal.commandId) + '" class="output"></div>\
-</section>';
-          })
-          .join("");
-
-        terminals.forEach((terminal) => {
-          const out = document.getElementById("out-" + terminal.commandId);
-          if (out) {
-            renderOutputTo(out, terminal.outputTail || "");
-          }
-        });
-      };
-
-      document.addEventListener("click", (event) => {
-        const target = event.target instanceof HTMLElement ? event.target : null;
-        const action = target?.getAttribute("data-action");
-        if (!action) return;
-        const commandId = target?.getAttribute("data-command-id") || undefined;
-        if (window.opener && typeof window.opener.__codeappTerminalDashboardAction === "function") {
-          window.opener.__codeappTerminalDashboardAction(action, commandId);
-        }
-      });
-      const desktopApi = window.desktopAPI;
-      const windowMinBtn = document.getElementById("windowMinBtn");
-      const windowMaxBtn = document.getElementById("windowMaxBtn");
-      const windowCloseBtn = document.getElementById("windowCloseBtn");
-      const syncWindowState = async () => {
-        if (!desktopApi?.windowControls || !windowMaxBtn) {
-          return;
-        }
-        const state = await desktopApi.windowControls.isMaximized();
-        if (state?.ok) {
-          windowMaxBtn.textContent = state.maximized ? "\u2750" : "\u25A1";
-        }
-      };
-      windowMinBtn?.addEventListener("click", () => {
-        if (!desktopApi?.windowControls) {
-          window.close();
-          return;
-        }
-        desktopApi.windowControls.minimize().catch(() => undefined);
-      });
-      windowMaxBtn?.addEventListener("click", async () => {
-        if (!desktopApi?.windowControls) {
-          return;
-        }
-        const state = await desktopApi.windowControls.toggleMaximize();
-        if (state?.ok) {
-          windowMaxBtn.textContent = state.maximized ? "\u2750" : "\u25A1";
-        }
-      });
-      windowCloseBtn?.addEventListener("click", () => {
-        if (!desktopApi?.windowControls) {
-          window.close();
-          return;
-        }
-        desktopApi.windowControls.close().catch(() => undefined);
-      });
-      syncWindowState().catch(() => undefined);
-    </script>
-  </body>
-</html>`);
-    doc.close();
-  };
-
-  const renderTerminalDashboardPopout = (popout: Window) => {
-    if (popout.closed) {
-      return;
-    }
-    ensureTerminalDashboardFrame(popout);
-    const renderer = popout as Window & {
-      __codeappRenderDashboard?: (payload: {
-        projectName: string;
-        runningCount: number;
-        terminals: Array<
-          ProjectTerminalState["terminals"][number] & {
-            poppedOut: boolean;
-          }
-        >;
-      }) => void;
-    };
-    const terminals = activeProjectTerminals.map((terminal) => ({
-      ...terminal,
-      poppedOut: Boolean(activeProjectId ? terminalPopoutByKey[getTerminalPopoutKey(activeProjectId, terminal.commandId)] : false)
-    }));
-    renderer.__codeappRenderDashboard?.({
-      projectName: activeProject?.name ?? "Project",
-      runningCount: activeRunningTerminalsCount,
-      terminals
-    });
-  };
-
-  const openTerminalDashboardPopout = () => {
-    if (!activeProjectId) {
-      return;
-    }
-    const existing = terminalDashboardWindowRef.current;
-    if (existing && !existing.closed) {
-      renderTerminalDashboardPopout(existing);
-      existing.focus();
-      setIsTerminalDashboardPoppedOut(true);
-      return;
-    }
-    const popout = window.open("", "codeapp-terminal-dashboard", "popup=yes,width=1440,height=920,resizable=yes,scrollbars=yes");
-    if (!popout) {
-      setLogs((prev) => [...prev, "Terminal dashboard pop-out blocked."]);
-      return;
-    }
-    terminalDashboardWindowRef.current = popout;
-    renderTerminalDashboardPopout(popout);
-    setIsTerminalDashboardPoppedOut(true);
-    attachTerminalDashboardCloseListener(popout);
-  };
 const stopActiveRun = async () => {
     if (!activeThreadId) {
       return;
@@ -7595,6 +7331,11 @@ TODO: Describe what this skill does.
     setProjectSettingsInitialDraft(null);
   }, []);
 
+  const closeProjectActionsSettingsModal = useCallback(() => {
+    setShowProjectActionsSettings(false);
+    setProjectActionsSettingsInitialDraft(null);
+  }, []);
+
   const moveProjectWorkspace = useCallback(
     async (workspaceId: string) => {
       if (!activeProjectId || !workspaceId) {
@@ -7690,20 +7431,12 @@ TODO: Describe what this skill does.
               onDismissUpdate={dismissUpdatePrompt}
               activeProjectWebLinks={activeProjectWebLinks}
               onOpenProjectWebLink={openProjectWebLink}
-              terminalMenuRef={terminalMenuRef}
-              terminalMenuTriggerRef={terminalMenuTriggerRef}
-              terminalMenuContentRef={terminalMenuContentRef}
-              isTerminalMenuOpen={isTerminalMenuOpen}
-              setIsTerminalMenuOpen={setIsTerminalMenuOpen}
-              moveTerminalMenuFocus={moveTerminalMenuFocus}
               activeProjectId={activeProjectId}
               activeProjectTerminals={activeProjectTerminals}
-              activeRunningTerminalsCount={activeRunningTerminalsCount}
               systemTerminals={systemTerminals}
-              isTerminalDashboardPoppedOut={isTerminalDashboardPoppedOut}
               onOpenProjectTerminal={openProjectTerminal}
-              onOpenTerminalDashboardPopout={openTerminalDashboardPopout}
               onOpenTerminalPopout={openTerminalPopout}
+              onOpenProjectSettings={openActiveProjectActionsSettings}
               onStartTerminal={startActiveProjectTerminal}
               onStopTerminal={stopActiveProjectTerminal}
               onCopyTerminalOutput={copyTerminalOutput}
@@ -8131,18 +7864,34 @@ TODO: Describe what this skill does.
                           );
                         })}
                         {archivedRows.length > 0 && (
-                          <button
-                            className="thread-archived-toggle"
-                            onClick={() =>
-                              setShowArchivedByProjectId((prev) => ({
-                                ...prev,
-                                [project.id]: !showArchived
-                              }))
-                            }
-                            title="View archived threads"
-                          >
-                            {showArchived ? "Hide archived" : `View archived (${archivedRows.length})`}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              className="thread-archived-toggle"
+                              onClick={() =>
+                                setShowArchivedByProjectId((prev) => ({
+                                  ...prev,
+                                  [project.id]: !showArchived
+                                }))
+                              }
+                              title="View archived threads"
+                            >
+                              {showArchived ? "Hide archived" : `View archived (${archivedRows.length})`}
+                            </button>
+                            {showArchived ? (
+                              <button
+                                className="thread-row-action-btn"
+                                title="Delete archived threads"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  deleteArchivedThreadsInProject(project.id).catch((error) => {
+                                    setLogs((prev) => [...prev, `Delete archived threads failed: ${String(error)}`]);
+                                  });
+                                }}
+                              >
+                                <FaTrashAlt className="text-[10px]" />
+                              </button>
+                            ) : null}
+                          </div>
                         )}
                         <div className={showArchived ? "thread-archived-group expanded" : "thread-archived-group"}>
                           <div className="thread-archived-group-inner">
@@ -9017,6 +8766,25 @@ TODO: Describe what this skill does.
                         <FaPlus className="mx-auto text-[11px]" />
                       </button>
                       <button
+                        className={`composer-plus-btn composer-tooltip-target ${isVoiceRecording ? "composer-plus-btn-recording" : ""}`}
+                        data-composer-tooltip={
+                          isVoiceTranscribing
+                            ? composerTooltipText("Transcribing Voice", "Converting your recording to text with Whisper.")
+                            : isVoiceRecording
+                              ? composerTooltipText("Stop Recording", "Finish recording and transcribe into the composer.")
+                              : composerTooltipText("Voice Input", "Record speech and insert transcript into the composer.")
+                        }
+                        aria-label={isVoiceRecording ? "Stop recording voice input" : "Start recording voice input"}
+                        disabled={!activeThreadId || activeThreadSendPending || isVoiceTranscribing}
+                        onClick={() => {
+                          toggleVoiceRecording().catch((error) => {
+                            setLogs((prev) => [...prev, `Voice input failed: ${String(error)}`]);
+                          });
+                        }}
+                      >
+                        {isVoiceRecording ? <FaStop className="mx-auto text-[11px]" /> : <FaMicrophone className="mx-auto text-[11px]" />}
+                      </button>
+                      <button
                         ref={composerModelTriggerRef}
                         className="composer-dropdown-trigger composer-tooltip-target"
                         data-composer-tooltip={composerTooltipText("Model", "Choose which model handles this request.")}
@@ -9840,6 +9608,15 @@ TODO: Describe what this skill does.
           onRefreshProjectSkills={refreshActiveProjectSkills}
           onCreateProjectSkill={createProjectSkill}
           onOpenSkillEditor={openSkillEditor}
+          appendLog={appendLog}
+        />
+      )}
+
+      {showProjectActionsSettings && projectActionsSettingsInitialDraft && (
+        <ProjectActionsSettingsModal
+          initialDraft={projectActionsSettingsInitialDraft}
+          onClose={closeProjectActionsSettingsModal}
+          onSave={saveProjectActionsSettings}
           appendLog={appendLog}
         />
       )}

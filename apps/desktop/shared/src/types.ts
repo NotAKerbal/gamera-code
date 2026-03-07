@@ -76,7 +76,7 @@ export interface ProjectDevCommand {
   name: string;
   command: string;
   autoStart?: boolean;
-  useForPreview?: boolean;
+  stayRunning?: boolean;
 }
 
 export interface ProjectWebLink {
@@ -106,7 +106,6 @@ export interface ProjectSettings {
   browserEnabled: boolean;
   defaultDevCommandId?: string;
   autoStartDevTerminal: boolean;
-  switchBehaviorOverride?: ProjectTerminalSwitchBehavior;
   subthreadPolicyOverride?: SubthreadPolicy;
   lastDetectedPreviewUrl?: string;
   createdAt: string;
@@ -136,7 +135,7 @@ export interface ProjectTerminalState {
     lastExitCode?: number;
     updatedAt: string;
     autoStart: boolean;
-    useForPreview: boolean;
+    stayRunning: boolean;
   }>;
   commandId?: string;
   command?: string;
@@ -210,6 +209,13 @@ export interface MessageEvent {
   attachments?: PromptAttachment[];
   ts: string;
   streamSeq: number;
+}
+
+export interface AudioTranscriptionResult {
+  text: string;
+  model: string;
+  language?: string;
+  durationSeconds?: number;
 }
 
 export interface ThreadEventsPage {

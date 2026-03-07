@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+- Improved theming
+- Thread deletion
+
 ## 0.5.0
 - Code editor
 - Better Subagent visuals in thread history

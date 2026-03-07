@@ -12,7 +12,6 @@ import type {
   ProjectDevCommand,
   ProjectSettings,
   ProjectWebLink,
-  ProjectTerminalSwitchBehavior,
   Provider,
   Session,
   SubthreadPolicy,
@@ -27,8 +26,7 @@ const DEFAULT_DEV_COMMAND: ProjectDevCommand = {
   id: "default",
   name: "Dev Server",
   command: "npm run dev",
-  autoStart: true,
-  useForPreview: true
+  autoStart: true
 };
 
 const DEFAULT_SETTINGS = {
@@ -132,9 +130,9 @@ interface ProjectSettingsRow {
   dev_commands_json: string;
   web_links_json: string;
   browser_enabled: number;
+  stay_running_actions: number;
   default_dev_command_id: string | null;
   auto_start_dev_terminal: number;
-  switch_behavior_override: string | null;
   subthread_policy_override: string | null;
   last_detected_preview_url: string | null;
   created_at: string;
@@ -267,8 +265,6 @@ const mapMessage = (row: MessageRow): MessageEvent => ({
   streamSeq: row.stream_seq
 });
 
-const isSwitchBehavior = (value: unknown): value is ProjectTerminalSwitchBehavior =>
-  value === "start_stop" || value === "start_only" || value === "manual";
 const isSubthreadPolicy = (value: unknown): value is SubthreadPolicy =>
   value === "manual" || value === "ask" || value === "auto";
 
@@ -306,21 +302,15 @@ const parseDevCommands = (value: unknown): ProjectDevCommand[] => {
       continue;
     }
     const autoStart = typeof row.autoStart === "boolean" ? row.autoStart : index === 0;
-    const useForPreview = typeof row.useForPreview === "boolean" ? row.useForPreview : index === 0;
-    parsed.push({ id, name, command, autoStart, useForPreview });
+    const stayRunning = typeof row.stayRunning === "boolean" ? row.stayRunning : false;
+    parsed.push({ id, name, command, autoStart, stayRunning });
   }
 
   if (parsed.length === 0) {
     return [DEFAULT_DEV_COMMAND];
   }
 
-  const normalized = parsed.slice(0, 10);
-  const hasPreviewTarget = normalized.some((command) => command.useForPreview);
-  if (!hasPreviewTarget && normalized[0]) {
-    normalized[0] = { ...normalized[0], useForPreview: true };
-  }
-
-  return normalized;
+  return parsed.slice(0, 10);
 };
 
 const parseWebLinks = (value: unknown): ProjectWebLink[] => {
@@ -371,7 +361,6 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
   } catch {
     webLinks = [];
   }
-  const switchBehavior = isSwitchBehavior(row.switch_behavior_override) ? row.switch_behavior_override : undefined;
   const subthreadPolicyOverride = isSubthreadPolicy(row.subthread_policy_override)
     ? row.subthread_policy_override
     : undefined;
@@ -384,7 +373,6 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
     browserEnabled: row.browser_enabled !== 0,
     defaultDevCommandId: row.default_dev_command_id ?? undefined,
     autoStartDevTerminal: row.auto_start_dev_terminal === 1,
-    switchBehaviorOverride: switchBehavior,
     subthreadPolicyOverride,
     lastDetectedPreviewUrl: row.last_detected_preview_url ?? undefined,
     createdAt: row.created_at,
@@ -633,9 +621,9 @@ export class Repository {
       dev_commands_json: JSON.stringify([DEFAULT_DEV_COMMAND]),
       web_links_json: JSON.stringify([]),
       browser_enabled: 1,
+      stay_running_actions: 0,
       default_dev_command_id: DEFAULT_DEV_COMMAND.id,
       auto_start_dev_terminal: 1,
-      switch_behavior_override: null,
       subthread_policy_override: null,
       last_detected_preview_url: null,
       created_at: now,
@@ -649,23 +637,23 @@ export class Repository {
           env_vars_json,
           dev_commands_json,
           web_links_json,
-             browser_enabled,
-             default_dev_command_id,
-             auto_start_dev_terminal,
-             switch_behavior_override,
-             subthread_policy_override,
-             last_detected_preview_url,
-             created_at,
-             updated_at
+          browser_enabled,
+          stay_running_actions,
+          default_dev_command_id,
+          auto_start_dev_terminal,
+          subthread_policy_override,
+          last_detected_preview_url,
+          created_at,
+          updated_at
         ) VALUES (
           @project_id,
           @env_vars_json,
           @dev_commands_json,
           @web_links_json,
           @browser_enabled,
+          @stay_running_actions,
           @default_dev_command_id,
           @auto_start_dev_terminal,
-          @switch_behavior_override,
           @subthread_policy_override,
           @last_detected_preview_url,
           @created_at,
@@ -685,7 +673,6 @@ export class Repository {
     browserEnabled?: boolean;
     defaultDevCommandId?: string;
     autoStartDevTerminal?: boolean;
-    switchBehaviorOverride?: ProjectTerminalSwitchBehavior;
     subthreadPolicyOverride?: SubthreadPolicy;
     lastDetectedPreviewUrl?: string;
   }): ProjectSettings {
@@ -713,7 +700,6 @@ export class Repository {
              browser_enabled = @browser_enabled,
              default_dev_command_id = @default_dev_command_id,
              auto_start_dev_terminal = @auto_start_dev_terminal,
-             switch_behavior_override = @switch_behavior_override,
              subthread_policy_override = @subthread_policy_override,
              last_detected_preview_url = @last_detected_preview_url,
              updated_at = @updated_at
@@ -727,7 +713,6 @@ export class Repository {
         browser_enabled: browserEnabled ? 1 : 0,
         default_dev_command_id: validDefaultCommandId ?? null,
         auto_start_dev_terminal: autoStartDevTerminal ? 1 : 0,
-        switch_behavior_override: input.switchBehaviorOverride ?? current.switchBehaviorOverride ?? null,
         subthread_policy_override: input.subthreadPolicyOverride ?? current.subthreadPolicyOverride ?? null,
         last_detected_preview_url: input.lastDetectedPreviewUrl ?? current.lastDetectedPreviewUrl ?? null,
         updated_at: now
