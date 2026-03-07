@@ -652,6 +652,7 @@ export const App = () => {
   const [gitSharedHistoryLoadingByProjectId, setGitSharedHistoryLoadingByProjectId] = useState<Record<string, boolean>>({});
   const [gitSelectedPathByProjectId, setGitSelectedPathByProjectId] = useState<Record<string, string | null>>({});
   const [gitBusyAction, setGitBusyAction] = useState<string | null>(null);
+  const [isGitRefreshBusy, setIsGitRefreshBusy] = useState(false);
   const [gitInitRevealByProjectId, setGitInitRevealByProjectId] = useState<Record<string, boolean>>({});
   const [gitCommitIsGeneratingMessage, setGitCommitIsGeneratingMessage] = useState(false);
   const [gitBranchSearch, setGitBranchSearch] = useState("");
@@ -7651,6 +7652,26 @@ TODO: Describe what this skill does.
     await loadProjectSkills(activeProjectId);
   }, [activeProjectId, loadProjectSkills]);
 
+  const refreshGitStateFromHeader = useCallback(async () => {
+    if (!activeProjectId || gitBusyAction || isGitRefreshBusy) {
+      return;
+    }
+    setIsGitRefreshBusy(true);
+    try {
+      const snapshot = await loadGitSnapshot(activeProjectId);
+      const state = snapshot.state;
+      const selectedPath =
+        activeSelectedGitPath && state.files.some((file) => file.path === activeSelectedGitPath)
+          ? activeSelectedGitPath
+          : state.files[0]?.path;
+      selectGitPath(activeProjectId, selectedPath);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Git refresh failed: ${String(error)}`]);
+    } finally {
+      setIsGitRefreshBusy(false);
+    }
+  }, [activeProjectId, activeSelectedGitPath, gitBusyAction, isGitRefreshBusy, loadGitSnapshot, selectGitPath]);
+
   const handleSelectWorkspace = useCallback(
     (workspaceId: string) => {
       focusWorkspace(workspaceId).catch((error) => {
@@ -7730,11 +7751,12 @@ TODO: Describe what this skill does.
               isPreviewOpen={isPreviewOpen}
               isGitPanelOpen={isGitPanelOpen}
               isGitPushBusy={Boolean(gitBusyAction)}
+              isGitRefreshBusy={isGitRefreshBusy}
               onToggleCodePanel={toggleCodePanel}
               onTogglePreviewPanel={togglePreviewPanel}
-              onToggleGitPanel={toggleGitPanel}
               onOpenGitPanel={toggleGitPanel}
               onPushGitChanges={pushGitChanges}
+              onRefreshGitState={refreshGitStateFromHeader}
               showHeaderGitDiffStats={Boolean(showHeaderGitDiffStats)}
               activeGitAddedLines={activeGitAddedLines}
               activeGitRemovedLines={activeGitRemovedLines}

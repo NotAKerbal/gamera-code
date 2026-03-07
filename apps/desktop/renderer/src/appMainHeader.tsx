@@ -9,6 +9,7 @@ import {
   FaExternalLinkAlt,
   FaEye,
   FaFolderOpen,
+  FaRedoAlt,
   FaTerminal,
   FaTimes,
   FaPlus,
@@ -69,10 +70,12 @@ type MainHeaderProps = {
   isPreviewOpen: boolean;
   isGitPanelOpen: boolean;
   isGitPushBusy: boolean;
+  isGitRefreshBusy: boolean;
   onToggleCodePanel: () => void;
   onTogglePreviewPanel: () => void;
   onOpenGitPanel: () => void;
   onPushGitChanges: () => void;
+  onRefreshGitState: () => Promise<void>;
   showHeaderGitDiffStats: boolean;
   activeGitAddedLines: number;
   activeGitRemovedLines: number;
@@ -181,10 +184,12 @@ const MainHeaderComponent = ({
   isPreviewOpen,
   isGitPanelOpen,
   isGitPushBusy,
+  isGitRefreshBusy,
   onToggleCodePanel,
   onTogglePreviewPanel,
   onOpenGitPanel,
   onPushGitChanges,
+  onRefreshGitState,
   showHeaderGitDiffStats,
   activeGitAddedLines,
   activeGitRemovedLines,
@@ -765,6 +770,15 @@ const MainHeaderComponent = ({
           </span>
         </button>
         <button
+          className="git-header-panel-btn app-tooltip-target border-r border-border/80"
+          data-app-tooltip={tooltipText("Refresh Git", "Refresh git status, files, and branch details.")}
+          aria-label="Refresh git state"
+          onClick={() => onRefreshGitState().catch((error) => appendLog(`Git refresh failed: ${String(error)}`))}
+          disabled={!activeProjectId || isGitPushBusy || isGitRefreshBusy}
+        >
+          <FaRedoAlt className={`text-[10px] ${isGitRefreshBusy ? "animate-spin" : ""}`} />
+        </button>
+        <button
           className="git-header-panel-btn app-tooltip-target"
           data-app-tooltip={
             isGitPanelOpen
@@ -774,13 +788,13 @@ const MainHeaderComponent = ({
           aria-label={isGitPanelOpen ? "Close git panel" : "Open git panel"}
           onClick={onOpenGitPanel}
           disabled={!activeProjectId}
-        >
-          <FaChevronLeft
-            className={`text-[10px] transition-transform duration-200 ease-out ${
-              isGitPanelOpen ? "rotate-180" : "rotate-0"
-            }`}
-          />
-        </button>
+          >
+            <FaChevronLeft
+              className={`text-[10px] transition-transform duration-200 ease-out ${
+                isGitPanelOpen ? "rotate-180" : "rotate-0"
+              }`}
+            />
+          </button>
       </div>
       <button
         className="sidebar-settings-btn app-tooltip-target inline-flex h-8 w-8 items-center justify-center px-0"
