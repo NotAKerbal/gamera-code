@@ -568,7 +568,7 @@ const MainHeaderComponent = ({
               return (
                 <div
                   key={`terminal-action-${terminal.commandId}`}
-                  className={`workspace-segment ${statusClass ? `active ${statusClass}` : ""} terminal-action-segment ${isError ? "terminal-action-segment-has-dismiss" : ""}`}
+                  className={`workspace-segment ${statusClass ? `active ${statusClass}` : ""} terminal-action-segment ${hasCompleted ? "terminal-action-segment-has-dismiss" : ""}`}
                   ref={isMenuOpen ? actionMenuRef : null}
                 >
                   <button
@@ -581,11 +581,9 @@ const MainHeaderComponent = ({
                         return;
                       }
                       if (hasCompleted) {
-                        if (isError) {
-                          const commandId = terminal.commandId.trim();
-                          if (commandId) {
-                            onAcknowledgeTerminalError(commandId);
-                          }
+                        const commandId = terminal.commandId.trim();
+                        if (commandId) {
+                          onAcknowledgeTerminalError(commandId);
                         }
                         openTerminalOutput(terminal);
                         return;
@@ -600,20 +598,24 @@ const MainHeaderComponent = ({
                     </span>
                   </button>
                   <div className={`terminal-action-controls ${isMenuOpen ? "is-open" : ""}`}>
-                    {isError ? (
+                    {hasCompleted ? (
                       <button
                         type="button"
                         className="terminal-action-dismiss-error app-tooltip-target"
-                        aria-label={`Dismiss error for ${terminal.name}`}
-                        data-app-tooltip={tooltipText("Dismiss Error", "Clear this error state without opening the output modal.")}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        const commandId = terminal.commandId.trim();
-                        if (commandId) {
-                          onAcknowledgeTerminalError(commandId);
+                        aria-label={`Dismiss result for ${terminal.name}`}
+                        data-app-tooltip={
+                          isError
+                            ? tooltipText("Dismiss Error", "Clear this error state without opening the output modal.")
+                            : tooltipText("Dismiss Result", "Clear this completed state without opening the output modal.")
                         }
-                      }}
-                    >
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const commandId = terminal.commandId.trim();
+                          if (commandId) {
+                            onAcknowledgeTerminalError(commandId);
+                          }
+                        }}
+                      >
                         <FaTimes className="text-[10px] text-slate-400" />
                       </button>
                     ) : null}

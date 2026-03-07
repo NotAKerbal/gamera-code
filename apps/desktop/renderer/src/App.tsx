@@ -24,7 +24,6 @@ import {
   FaCodeBranch,
   FaCog,
   FaEye,
-  FaGlobeAmericas,
   FaMicrophone,
   FaNetworkWired,
   FaPen,
@@ -39,7 +38,6 @@ import {
   FaThumbtack,
   FaTrashAlt,
   FaBoxOpen,
-  FaUserShield,
   FaWindowMaximize,
   FaWindowMinimize,
   FaWindowRestore
@@ -48,12 +46,10 @@ import appIconDark from "./assets/icon_rounded.png";
 import appIconLight from "./assets/icon_light.png";
 import type {
   AppSettings,
-  CodexApprovalMode,
   CodexCollaborationMode,
   CodexModelReasoningEffort,
   CodexSandboxMode,
   CodexThreadOptions,
-  CodexWebSearchMode,
   GitHistoryCommit,
   GitRepositoryCandidate,
   GitOutgoingCommit,
@@ -82,7 +78,6 @@ import type {
 } from "@code-app/shared";
 import {
   APP_VERSION_LABEL,
-  APPROVAL_OPTIONS,
   BRANCH_LIST_OVERSCAN,
   BRANCH_ROW_HEIGHT_PX,
   CHANGELOG_ITEMS,
@@ -107,7 +102,6 @@ import {
   SKILL_MENTION_MATCH_LIMIT,
   THREAD_COLOR_PRESETS,
   THREAD_SUMMARY_STORAGE_KEY,
-  WEB_SEARCH_OPTIONS,
   areSkillReferencesEqual,
   asRecord,
   asString,
@@ -702,8 +696,6 @@ export const App = () => {
   const composerEffortTriggerRef = useRef<HTMLButtonElement | null>(null);
   const composerModeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const composerSandboxTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const composerApprovalTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const composerWebSearchTriggerRef = useRef<HTMLButtonElement | null>(null);
   const gitCommitInputRef = useRef<HTMLInputElement | null>(null);
   const composerDropdownMenuRef = useRef<HTMLDivElement | null>(null);
   const composerMentionRafRef = useRef<number | null>(null);
@@ -1117,9 +1109,6 @@ export const App = () => {
   const sandboxLabel =
     SANDBOX_OPTIONS.find((option) => option.value === (composerOptions.sandboxMode ?? "workspace-write"))?.label ??
     "Read + Write";
-  const approvalLabel =
-    APPROVAL_OPTIONS.find((option) => option.value === (composerOptions.approvalPolicy ?? "on-request"))?.label ?? "AI decides";
-  const webSearchLabel = WEB_SEARCH_OPTIONS.find((option) => option.value === (composerOptions.webSearchMode ?? "cached"))?.label ?? "Cached";
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
   const composerTooltipText = (label: string, detail: string, shortcut?: string) =>
     [label, detail, shortcut ? `Shortcut: ${shortcut}` : null].filter(Boolean).join("\n");
@@ -3449,9 +3438,7 @@ export const App = () => {
         composerModelTriggerRef.current,
         composerEffortTriggerRef.current,
         composerModeTriggerRef.current,
-        composerSandboxTriggerRef.current,
-        composerApprovalTriggerRef.current,
-        composerWebSearchTriggerRef.current
+        composerSandboxTriggerRef.current
       ];
       if (
         !composerDropdownMenuRef.current?.contains(target) &&
@@ -9244,53 +9231,6 @@ TODO: Describe what this skill does.
                             <FaChevronDown className="text-[10px] text-slate-500" />
                           </button>
                         </span>
-                        <span className="composer-option">
-                          <FaUserShield className="composer-option-icon" />
-                          <button
-                            ref={composerApprovalTriggerRef}
-                            className="composer-dropdown-trigger composer-tooltip-target"
-                            data-composer-tooltip={composerTooltipText("Approval Policy", "Decide when actions need manual approval.")}
-                            aria-label="Choose approval policy"
-                            onClick={() => openComposerDropdown("approval", composerApprovalTriggerRef.current)}
-                            disabled={!activeThreadId}
-                          >
-                            <span>{approvalLabel}</span>
-                            <FaChevronDown className="text-[10px] text-slate-500" />
-                          </button>
-                        </span>
-                        <span className="composer-option">
-                          <FaGlobeAmericas className="composer-option-icon" />
-                          <button
-                            ref={composerWebSearchTriggerRef}
-                            className="composer-dropdown-trigger composer-tooltip-target"
-                            data-composer-tooltip={composerTooltipText("Web Search Mode", "Choose how the agent can use web search.")}
-                            aria-label="Choose web search mode"
-                            onClick={() => openComposerDropdown("websearch", composerWebSearchTriggerRef.current)}
-                            disabled={!activeThreadId}
-                          >
-                            <span>{webSearchLabel.toLowerCase()}</span>
-                            <FaChevronDown className="text-[10px] text-slate-500" />
-                          </button>
-                        </span>
-                        <button
-                          className={`composer-toggle-btn composer-tooltip-target ${(composerOptions.networkAccessEnabled ?? true) ? "enabled" : ""}`}
-                          data-composer-tooltip={composerTooltipText(
-                            "Network Access",
-                            "Toggle whether commands may access the network."
-                          )}
-                          aria-label="Toggle network access"
-                          aria-pressed={composerOptions.networkAccessEnabled ?? true}
-                          onClick={() =>
-                            setComposerOptions((prev) => ({
-                              ...prev,
-                              networkAccessEnabled: !(prev.networkAccessEnabled ?? true)
-                            }))
-                          }
-                          disabled={!activeThreadId}
-                          >
-                            <FaNetworkWired className="composer-option-icon" />
-                          Network
-                        </button>
                         <button
                           className="composer-toggle-btn composer-tooltip-target"
                           data-composer-tooltip={composerTooltipText("Summarize Context", "Summarize older thread history to reduce context size.")}
