@@ -13,7 +13,6 @@ import type {
   SessionEvent,
   SessionEventType,
   SkillRecord,
-  SubthreadPolicy,
   SubthreadProposal,
   Thread,
   ThreadMetadataSuggestion
@@ -2554,14 +2553,6 @@ export class SessionManager {
     }
   }
 
-  private getEffectiveSubthreadPolicy(thread: Thread): SubthreadPolicy {
-    const projectSettings = this.deps.repository.getProjectSettings(thread.projectId);
-    if (projectSettings.subthreadPolicyOverride) {
-      return projectSettings.subthreadPolicyOverride;
-    }
-    return this.deps.repository.getSettings().subthreadPolicyDefault ?? "ask";
-  }
-
   private async maybeCreateSubthreadOrchestration(parentThreadId: string, assistantMessage: string): Promise<void> {
     const thread = this.deps.repository.getThread(parentThreadId);
     if (!thread || thread.provider !== "codex") {
@@ -2572,12 +2563,12 @@ export class SessionManager {
     if (!proposal) {
       return;
     }
-    const policy = this.getEffectiveSubthreadPolicy(thread);
+    const policy = "auto" as const;
     const run = this.deps.repository.createOrchestrationRun({
       parentThreadId,
       proposal,
       policy,
-      status: policy === "auto" ? "queued" : "proposed"
+      status: "queued"
     });
     for (const task of proposal.tasks) {
       this.deps.repository.createOrchestrationChild({
@@ -2585,20 +2576,16 @@ export class SessionManager {
         taskKey: task.key,
         title: task.title,
         prompt: task.prompt,
-        status: policy === "auto" ? "queued" : "proposed"
+        status: "queued"
       });
     }
     this.emitOrchestrationMilestone(
       run.id,
-      policy === "auto"
-        ? `Auto-spawning ${proposal.tasks.length} sub-threads`
-        : `Sub-thread proposal created (${proposal.tasks.length} tasks)`,
+      `Auto-spawning ${proposal.tasks.length} sub-threads`,
       "orchestration_proposal",
       { policy, taskCount: proposal.tasks.length, runId: run.id }
     );
-    if (policy === "auto") {
-      await this.scheduleRunSpawns(run.id);
-    }
+    await this.scheduleRunSpawns(run.id);
   }
 
   private async scheduleRunSpawns(runId: string): Promise<void> {
@@ -2666,9 +2653,28 @@ export class SessionManager {
       lastCheckinAt: new Date().toISOString(),
       lastError: ""
     });
-    this.childToRunId.set(createdThread.id, run.id);
     const parentSession = this.sessions.get(parentThread.id);
-    const options = parentSession && parentSession.kind === "codex_app_server" ? parentSession.threadOptions : undefined;
+    if (!parentSession || parentSession.kind !== "codex_app_server") {
+      this.deps.repository.updateOrchestrationChild({
+        id: child.id,
+        childThreadId: createdThread.id,
+        status: "failed",
+        lastCheckinAt: new Date().toISOString(),
+        lastError: "Parent Codex session is not running; cannot inherit parent permissions"
+      });
+      this.emitOrchestrationMilestone(
+        run.id,
+        `Child failed to start: ${child.title} (parent session unavailable)`,
+        "orchestration_child_failed",
+        {
+          childThreadId: createdThread.id,
+          childId: child.id
+        }
+      );
+      return;
+    }
+    this.childToRunId.set(createdThread.id, run.id);
+    const options = parentSession.threadOptions;
     this.emitOrchestrationMilestone(run.id, `Child started: ${child.title}`, "orchestration_child_started", {
       childThreadId: createdThread.id,
       childId: child.id

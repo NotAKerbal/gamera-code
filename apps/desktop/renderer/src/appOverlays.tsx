@@ -5,12 +5,10 @@ import type {
   GitRepositoryCandidate,
   Project,
   Workspace,
-  SubthreadPolicy,
   ProjectWebLink,
   SkillRecord
 } from "@code-app/shared";
 import {
-  SUBTHREAD_POLICY_OPTIONS,
   sanitizeProjectDirName,
   type RenameDialogState
 } from "./appCore";
@@ -24,7 +22,6 @@ type ProjectSettingsDraft = {
   projectWorkspaceTargetId: string;
   projectSettingsEnvText: string;
   projectSettingsWebLinks: ProjectWebLink[];
-  projectSubthreadPolicyOverride: SubthreadPolicy | "";
 };
 
 type ProjectActionsSettingsDraft = {
@@ -180,9 +177,6 @@ export const ProjectSettingsModal = memo(({
   const [projectWorkspaceTargetId, setProjectWorkspaceTargetId] = useState(initialDraft.projectWorkspaceTargetId);
   const [projectSettingsEnvText, setProjectSettingsEnvText] = useState(initialDraft.projectSettingsEnvText);
   const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>(initialDraft.projectSettingsWebLinks);
-  const [projectSubthreadPolicyOverride, setProjectSubthreadPolicyOverride] = useState<SubthreadPolicy | "">(
-    initialDraft.projectSubthreadPolicyOverride
-  );
   const [newProjectSkillName, setNewProjectSkillName] = useState("");
   const [projectSkillsBusy, setProjectSkillsBusy] = useState(false);
   const [skillEditorNotice, setSkillEditorNotice] = useState("");
@@ -250,22 +244,6 @@ export const ProjectSettingsModal = memo(({
                   onChange={(event) => setProjectSettingsProjectName(event.target.value)}
                   placeholder="Project name"
                 />
-              </div>
-              <div className="mx-2 border-t border-border/70" />
-              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                <div className="text-sm text-muted">Sub-thread policy override</div>
-                <select
-                  className="input text-xs"
-                  value={projectSubthreadPolicyOverride}
-                  onChange={(event) => setProjectSubthreadPolicyOverride(event.target.value as SubthreadPolicy | "")}
-                >
-                  <option value="">Use app default</option>
-                  {SUBTHREAD_POLICY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
               </div>
               <div className="mx-2 border-t border-border/70" />
               <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -518,8 +496,7 @@ export const ProjectSettingsModal = memo(({
                 projectName: projectSettingsProjectName,
                 projectWorkspaceTargetId,
                 projectSettingsEnvText,
-                projectSettingsWebLinks,
-                projectSubthreadPolicyOverride
+                projectSettingsWebLinks
               }).catch((error) => {
                 appendLog(`Project settings save failed: ${String(error)}`);
               });

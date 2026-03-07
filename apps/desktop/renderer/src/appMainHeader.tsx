@@ -783,7 +783,7 @@ const MainHeaderComponent = ({
         </button>
       </div>
       <button
-        className="sidebar-settings-btn app-tooltip-target"
+        className="sidebar-settings-btn app-tooltip-target inline-flex h-8 w-8 items-center justify-center px-0"
         data-app-tooltip={tooltipText("Settings", "Open application settings.", `${platformShortcutModifier}+I`)}
         aria-label="Open app settings"
         onClick={() => {
@@ -792,7 +792,7 @@ const MainHeaderComponent = ({
           });
         }}
       >
-        <span className="inline-flex items-center gap-1"><FaCog className="text-[11px]" />Settings</span>
+        <FaCog className="text-[11px]" />
       </button>
       {useWindowsStyleHeader ? (
         <div className="window-controls ml-1">

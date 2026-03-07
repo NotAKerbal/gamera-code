@@ -76,7 +76,6 @@ import type {
   SystemTerminalOption,
   SessionEvent,
   SkillRecord,
-  SubthreadPolicy,
   Thread,
   ThreadEventsPage,
   Workspace
@@ -563,7 +562,6 @@ export const App = () => {
     projectWorkspaceTargetId: string;
     projectSettingsEnvText: string;
     projectSettingsWebLinks: ProjectWebLink[];
-    projectSubthreadPolicyOverride: SubthreadPolicy | "";
   } | null>(null);
   const [projectActionsSettingsInitialDraft, setProjectActionsSettingsInitialDraft] = useState<{
     focusCommandId?: string;
@@ -667,7 +665,6 @@ export const App = () => {
   const [orchestrationRunsByParentId, setOrchestrationRunsByParentId] = useState<Record<string, OrchestrationRun[]>>({});
   const [orchestrationChildrenByRunId, setOrchestrationChildrenByRunId] = useState<Record<string, OrchestrationChild[]>>({});
   const [showRunningSubthreadsByThreadId, setShowRunningSubthreadsByThreadId] = useState<Record<string, boolean>>({});
-  const [selectedOrchestrationTaskKeysByRunId, setSelectedOrchestrationTaskKeysByRunId] = useState<Record<string, string[]>>({});
   const [removingProject, setRemovingProject] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
@@ -3714,8 +3711,7 @@ export const App = () => {
       projectName,
       projectWorkspaceTargetId: projectWorkspaceId,
       projectSettingsEnvText: envVarsToText(current.envVars),
-      projectSettingsWebLinks: nextWebLinks,
-      projectSubthreadPolicyOverride: current.subthreadPolicyOverride ?? ""
+      projectSettingsWebLinks: nextWebLinks
     });
     if (activeProjectId !== projectId) {
       setActiveProjectId(projectId);
@@ -3752,7 +3748,6 @@ export const App = () => {
     projectWorkspaceTargetId: string;
     projectSettingsEnvText: string;
     projectSettingsWebLinks: ProjectWebLink[];
-    projectSubthreadPolicyOverride: SubthreadPolicy | "";
   }) => {
     if (!activeProjectId) {
       return;
@@ -3807,8 +3802,7 @@ export const App = () => {
     const saved = await api.projectSettings.set({
       projectId: activeProjectId,
       envVars,
-      webLinks: sanitizedWebLinks,
-      subthreadPolicyOverride: draft.projectSubthreadPolicyOverride || undefined
+      webLinks: sanitizedWebLinks
     });
 
     setProjectSettingsById((prev) => ({
@@ -7532,11 +7526,6 @@ TODO: Describe what this skill does.
     [activeThreadId, orchestrationRunsByParentId]
   );
 
-  const activeAskOrchestrationRuns = useMemo(
-    () => activeOrchestrationRuns.filter((run) => run.status === "proposed" && run.policy === "ask"),
-    [activeOrchestrationRuns]
-  );
-
   useEffect(() => {
     const pendingRestore = pendingHistoryScrollRestoreRef.current;
     const viewport = timelineViewportRef.current;
@@ -7587,21 +7576,6 @@ TODO: Describe what this skill does.
       window.cancelAnimationFrame(frameId);
     };
   }, [activeRunState, activeThreadId, timelineItems.length]);
-
-  const approveOrchestrationRun = async (runId: string, selectedTaskKeys?: string[]) => {
-    const result = await api.orchestration.approveProposal({ runId, selectedTaskKeys });
-    if (!result.ok) {
-      throw new Error("Failed to approve orchestration run");
-    }
-    setSelectedOrchestrationTaskKeysByRunId((prev) => {
-      const next = { ...prev };
-      delete next[runId];
-      return next;
-    });
-    if (activeThreadId) {
-      await loadOrchestrationRuns(activeThreadId);
-    }
-  };
 
   const stopOrchestrationChild = async (childThreadId: string) => {
     const result = await api.orchestration.stopChild({ childThreadId });
@@ -8629,90 +8603,6 @@ TODO: Describe what this skill does.
 
                 </div>
               </section>
-
-              {activeThreadId && activeAskOrchestrationRuns.length > 0 && (
-                <section className="px-5 pb-1">
-                  <div className="space-y-2">
-                    {activeAskOrchestrationRuns.map((run) => {
-                      const allTaskKeys = run.proposal.tasks.map((task) => task.key);
-                      const selectedTaskKeys = selectedOrchestrationTaskKeysByRunId[run.id] ?? allTaskKeys;
-                      const selectedCount = selectedTaskKeys.length;
-                      return (
-                        <div key={`orchestration-ask-${run.id}`} className="rounded-lg border border-border bg-black/25 p-3">
-                          <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Sub-thread request</div>
-                          <div className="mt-1 text-sm text-slate-100">{run.proposal.reason}</div>
-                          <div className="mt-1 text-xs text-slate-400">Goal: {run.proposal.parentGoal}</div>
-                          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                            {run.proposal.tasks.map((task) => {
-                              const isSelected = selectedTaskKeys.includes(task.key);
-                              return (
-                                <button
-                                  key={`${run.id}-${task.key}`}
-                                  type="button"
-                                  className={
-                                    isSelected
-                                      ? "h-9 w-full rounded-md border border-zinc-600 bg-zinc-800 px-2 text-left text-xs text-slate-100"
-                                      : "h-9 w-full rounded-md border border-border bg-zinc-900/60 px-2 text-left text-xs text-slate-300 hover:bg-zinc-800"
-                                  }
-                                  onClick={() =>
-                                    setSelectedOrchestrationTaskKeysByRunId((prev) => {
-                                      const prior = prev[run.id] ?? allTaskKeys;
-                                      const next = prior.includes(task.key)
-                                        ? prior.filter((key) => key !== task.key)
-                                        : [...prior, task.key];
-                                      return { ...prev, [run.id]: next };
-                                    })
-                                  }
-                                >
-                                  {task.title}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-[11px] text-slate-400">
-                              {selectedCount} of {allTaskKeys.length} selected
-                            </div>
-                            <div className="inline-flex items-center gap-2">
-                              <button
-                                className="btn-secondary h-7 px-2 py-0 text-xs"
-                                onClick={() => {
-                                  approveOrchestrationRun(run.id, []).catch((error) => {
-                                    setLogs((prev) => [...prev, `Decline orchestration failed: ${String(error)}`]);
-                                  });
-                                }}
-                              >
-                                Decline
-                              </button>
-                              <button
-                                className="btn-secondary h-7 px-2 py-0 text-xs"
-                                onClick={() => {
-                                  approveOrchestrationRun(run.id, selectedTaskKeys).catch((error) => {
-                                    setLogs((prev) => [...prev, `Spawn selected failed: ${String(error)}`]);
-                                  });
-                                }}
-                                disabled={selectedCount === 0}
-                              >
-                                Spawn selected
-                              </button>
-                              <button
-                                className="btn-primary h-7 px-2 py-0 text-xs"
-                                onClick={() => {
-                                  approveOrchestrationRun(run.id).catch((error) => {
-                                    setLogs((prev) => [...prev, `Spawn all failed: ${String(error)}`]);
-                                  });
-                                }}
-                              >
-                                Spawn all
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              )}
 
               <section className="bg-transparent px-5 py-3">
                 <div

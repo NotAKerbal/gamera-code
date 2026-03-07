@@ -21,7 +21,6 @@ import {
   hasDangerFullAccessWarningAcknowledged,
   MODEL_SUGGESTIONS,
   PROJECT_SWITCH_BEHAVIOR_OPTIONS,
-  SUBTHREAD_POLICY_OPTIONS,
   THEME_OPTIONS,
   REASONING_OPTIONS,
   SANDBOX_OPTIONS,
@@ -574,20 +573,6 @@ export const SettingsModal = memo(({
                     }
                   />
                 </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Sub-thread spawn policy</div>
-                  <CustomSelect
-                    value={settings.subthreadPolicyDefault ?? "ask"}
-                    options={SUBTHREAD_POLICY_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                    onChange={(value) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        subthreadPolicyDefault: value as "manual" | "ask" | "auto"
-                      }))
-                    }
-                  />
-                </div>
               </section>
 
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
@@ -634,20 +619,6 @@ export const SettingsModal = memo(({
                       setComposerOptions((prev) => ({
                         ...prev,
                         collaborationMode: value as CodexCollaborationMode
-                      }))
-                    }
-                  />
-                </div>
-                <div className="mx-2 border-t border-border/70" />
-                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                  <div className="text-sm text-muted">Sub-thread spawn policy</div>
-                  <CustomSelect
-                    value={settings.subthreadPolicyDefault ?? "ask"}
-                    options={SUBTHREAD_POLICY_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                    onChange={(value) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        subthreadPolicyDefault: value as "manual" | "ask" | "auto"
                       }))
                     }
                   />
