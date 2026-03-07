@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+- Replaced Terminal Dropdown
+- Improved Actions Controls
+
 ## 0.5.1
 - Improved theming
 - Thread deletion
