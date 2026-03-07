@@ -722,13 +722,13 @@ const MainHeaderComponent = ({
           className="btn-ghost app-tooltip-target"
           data-app-tooltip={
             isPreviewOpen
-              ? tooltipText("Preview Panel", "Hide the live preview panel.")
-              : tooltipText("Preview Panel", "Show the live preview panel.")
+              ? tooltipText("Browser Panel", "Hide the live browser panel.")
+              : tooltipText("Browser Panel", "Show the live browser panel.")
           }
-          aria-label={isPreviewOpen ? "Hide preview panel" : "Show preview panel"}
+          aria-label={isPreviewOpen ? "Hide browser panel" : "Show browser panel"}
           onClick={onTogglePreviewPanel}
         >
-          <span className="inline-flex items-center gap-1"><FaEye className="text-[10px]" />{isPreviewOpen ? "Hide Preview" : "Preview"}</span>
+          <span className="inline-flex items-center gap-1"><FaEye className="text-[10px]" />{isPreviewOpen ? "Hide Browser" : "Browser"}</span>
         </button>
       )}
       <button

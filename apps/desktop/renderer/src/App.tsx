@@ -9324,7 +9324,7 @@ TODO: Describe what this skill does.
                     {!isPreviewPoppedOut ? (
                       <section className="flex min-h-0 flex-1 flex-col">
                         <div className="truncate border-b border-border/80 px-3 py-2 text-xs text-slate-300">
-                          {activeProjectPreviewUrl || "Start dev command to detect preview URL."}
+                          {activeProjectPreviewUrl || "Start dev command to detect browser URL."}
                         </div>
                         <div className="min-h-0 flex-1">
                           {activeProjectBrowserEnabled && activeProjectPreviewUrl ? (
@@ -9335,14 +9335,14 @@ TODO: Describe what this skill does.
                             />
                           ) : (
                             <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted">
-                              {activeProjectBrowserEnabled ? "No preview URL detected yet." : "Browser preview is disabled for this project."}
+                              {activeProjectBrowserEnabled ? "No browser URL detected yet." : "Browser is disabled for this project."}
                             </div>
                           )}
                         </div>
                       </section>
                     ) : (
                       <section className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-muted">
-                        Preview is popped out. Close pop-out to return it to the sidebar.
+                        Browser is popped out. Close pop-out to return it to the sidebar.
                       </section>
                     )}
                   </>
