@@ -2050,6 +2050,32 @@ webview {
   background: rgba(59, 130, 246, 0.24);
 }
 
+.action-auto-btn {
+  @apply h-7 w-full rounded-md border border-transparent px-2 text-[11px] whitespace-nowrap transition outline-none;
+  min-width: 0;
+  background: rgba(71, 85, 105, 0.22);
+  color: rgb(203, 213, 225);
+}
+
+.action-auto-btn:hover {
+  background: rgba(71, 85, 105, 0.32);
+}
+
+.action-auto-btn:focus,
+.action-auto-btn:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.action-auto-btn.is-enabled {
+  background: rgba(16, 185, 129, 0.2);
+  color: rgb(167, 243, 208);
+}
+
+.action-auto-btn.is-enabled:hover {
+  background: rgba(16, 185, 129, 0.28);
+}
+
 .project-settings-toggle {
   @apply flex w-full items-center gap-2 rounded-lg border border-border/80 bg-black/20 px-3 py-2 text-sm text-slate-200;
 }

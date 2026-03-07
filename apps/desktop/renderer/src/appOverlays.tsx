@@ -525,23 +525,39 @@ export const ProjectActionsSettingsModal = memo(({
                   }
                 />
                 <div className="project-settings-toggle-inline">
-                  <ToggleButton
-                    enabled={command.autoStart}
-                    className="settings-toggle-btn-compact"
-                    onLabel="Auto"
-                    offLabel="Auto"
-                    onToggle={(enabled) =>
+                  <button
+                    type="button"
+                    className={`action-auto-btn app-tooltip-target ${command.autoStart ? "is-enabled" : ""}`}
+                    aria-pressed={command.autoStart}
+                    data-app-tooltip={
+                      command.autoStart
+                        ? "Auto: On\nThis action starts asynchronously when you enter/select this project.\nIt will not restart if already running."
+                        : "Auto: Off\nThis action will not auto-start when entering a project.\nStart it manually from the header action chip."
+                    }
+                    title={
+                      command.autoStart
+                        ? "Action auto-starts when the project becomes active."
+                        : "Action requires manual start."
+                    }
+                    onClick={() =>
                       setProjectSettingsCommands((prev) =>
-                        prev.map((item, idx) => (idx === index ? { ...item, autoStart: enabled } : item))
+                        prev.map((item, idx) => (idx === index ? { ...item, autoStart: !item.autoStart } : item))
                       )
                     }
-                  />
+                  >
+                    {command.autoStart ? "Auto on" : "Auto off"}
+                  </button>
                 </div>
                 <div className="project-settings-toggle-inline">
                   <button
                     type="button"
-                    className={`action-stay-btn ${command.stayRunning ? "is-enabled" : ""}`}
+                    className={`action-stay-btn app-tooltip-target ${command.stayRunning ? "is-enabled" : ""}`}
                     aria-pressed={command.stayRunning}
+                    data-app-tooltip={
+                      command.stayRunning
+                        ? "Stay running: On\nThis action keeps running when you leave/switch projects or workspaces."
+                        : "Stop on idle: On\nThis action is stopped when you leave the project and there are no active threads in it."
+                    }
                     title={command.stayRunning ? "Action will stay running when you switch away." : "Action will stop when idle and you switch away."}
                     onClick={() =>
                       setProjectSettingsCommands((prev) =>
