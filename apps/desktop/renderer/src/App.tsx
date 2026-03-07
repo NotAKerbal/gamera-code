@@ -537,6 +537,7 @@ export const App = () => {
   const [skillMention, setSkillMention] = useState<SkillMentionState | null>(null);
   const [projectSettingsById, setProjectSettingsById] = useState<Record<string, ProjectSettings>>({});
   const [projectTerminalById, setProjectTerminalById] = useState<Record<string, ProjectTerminalState>>({});
+  const dismissedTerminalErrorStampByKeyRef = useRef<Record<string, string>>({});
   const [systemTerminals, setSystemTerminals] = useState<SystemTerminalOption[]>([]);
   const [projectPreviewUrlById, setProjectPreviewUrlById] = useState<Record<string, string>>({});
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -635,6 +636,36 @@ export const App = () => {
   const appendLog = useCallback((line: string) => {
     setLogs((prev) => [...prev, line]);
   }, []);
+  const terminalErrorKey = useCallback((projectId: string, commandId: string) => `${projectId}:${commandId}`, []);
+  const applyDismissedTerminalErrors = useCallback(
+    (projectId: string, state: ProjectTerminalState): ProjectTerminalState => {
+      const nextTerminals = state.terminals.map((terminal) => {
+        const dismissedStamp =
+          dismissedTerminalErrorStampByKeyRef.current[terminalErrorKey(projectId, terminal.commandId)];
+        if (
+          dismissedStamp &&
+          typeof terminal.lastExitCode === "number" &&
+          terminal.lastExitCode !== 0 &&
+          terminal.updatedAt === dismissedStamp
+        ) {
+          return {
+            ...terminal,
+            lastExitCode: undefined
+          };
+        }
+        return terminal;
+      });
+      const aggregateTerminal = nextTerminals.find((terminal) => terminal.commandId === state.commandId);
+      return {
+        ...state,
+        running: nextTerminals.some((terminal) => terminal.running),
+        terminals: nextTerminals,
+        outputTail: aggregateTerminal?.outputTail ?? state.outputTail,
+        lastExitCode: aggregateTerminal?.lastExitCode
+      };
+    },
+    [terminalErrorKey]
+  );
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
   const activeComposerDraft = useMemo(
@@ -1541,11 +1572,12 @@ export const App = () => {
 
   const loadProjectTerminalState = async (projectId: string) => {
     const state = await api.projectTerminal.getState({ projectId });
+    const nextState = applyDismissedTerminalErrors(projectId, state);
     setProjectTerminalById((prev) => ({
       ...prev,
-      [projectId]: state
+      [projectId]: nextState
     }));
-    return state;
+    return nextState;
   };
 
   const loadGitSnapshot = async (projectId: string) => {
@@ -2808,9 +2840,10 @@ export const App = () => {
       api.projectTerminal
         .getState({ projectId: activeProjectId })
         .then((state) => {
+          const nextState = applyDismissedTerminalErrors(activeProjectId, state);
           setProjectTerminalById((prev) => ({
             ...prev,
-            [activeProjectId]: state
+            [activeProjectId]: nextState
           }));
         })
         .catch((error) => {
@@ -2930,7 +2963,7 @@ export const App = () => {
       delete (window as Window & { __codeappTerminalPopoutAction?: (action: string, commandId: string) => void })
         .__codeappTerminalPopoutAction;
     };
-  }, [activeProjectId]);
+  }, [activeProjectId, applyDismissedTerminalErrors]);
 
   useEffect(() => {
     clearClosedTerminalPopouts();
@@ -3700,6 +3733,11 @@ export const App = () => {
       ...prev,
       [activeProjectId]: saved
     }));
+    try {
+      await loadProjectTerminalState(activeProjectId);
+    } catch (error) {
+      setLogs((prev) => [...prev, `Action terminal refresh failed: ${String(error)}`]);
+    }
     setShowProjectActionsSettings(false);
     setProjectActionsSettingsInitialDraft(null);
   };
@@ -3735,6 +3773,11 @@ export const App = () => {
         const next = { ...prev };
         delete next[projectIdToRemove];
         return next;
+      });
+      Object.keys(dismissedTerminalErrorStampByKeyRef.current).forEach((key) => {
+        if (key.startsWith(`${projectIdToRemove}:`)) {
+          delete dismissedTerminalErrorStampByKeyRef.current[key];
+        }
       });
       setProjectPreviewUrlById((prev) => {
         const next = { ...prev };
@@ -3794,10 +3837,17 @@ export const App = () => {
     if (!activeProjectId) {
       return;
     }
-    const state = await api.projectTerminal.start({ projectId: activeProjectId, commandId });
+    const normalizedCommandId = commandId?.trim();
+    if (!normalizedCommandId) {
+      setLogs((prev) => [...prev, "Terminal start failed: missing command id."]);
+      return;
+    }
+    delete dismissedTerminalErrorStampByKeyRef.current[terminalErrorKey(activeProjectId, normalizedCommandId)];
+    const state = await api.projectTerminal.start({ projectId: activeProjectId, commandId: normalizedCommandId });
+    const nextState = applyDismissedTerminalErrors(activeProjectId, state);
     setProjectTerminalById((prev) => ({
       ...prev,
-      [activeProjectId]: state
+      [activeProjectId]: nextState
     }));
   };
 
@@ -3805,11 +3855,17 @@ export const App = () => {
     if (!activeProjectId) {
       return;
     }
-    await api.projectTerminal.stop({ projectId: activeProjectId, commandId });
+    const normalizedCommandId = commandId?.trim();
+    if (!normalizedCommandId) {
+      setLogs((prev) => [...prev, "Terminal stop failed: missing command id."]);
+      return;
+    }
+    await api.projectTerminal.stop({ projectId: activeProjectId, commandId: normalizedCommandId });
     const state = await api.projectTerminal.getState({ projectId: activeProjectId });
+    const nextState = applyDismissedTerminalErrors(activeProjectId, state);
     setProjectTerminalById((prev) => ({
       ...prev,
-      [activeProjectId]: state
+      [activeProjectId]: nextState
     }));
   };
 
@@ -3823,6 +3879,11 @@ export const App = () => {
       if (!current) {
         return prev;
       }
+      const terminal = current.terminals.find((item) => item.commandId === commandId);
+      if (!terminal) {
+        return prev;
+      }
+      dismissedTerminalErrorStampByKeyRef.current[terminalErrorKey(activeProjectId, commandId)] = terminal.updatedAt;
       const nextTerminals = current.terminals.map((terminal) =>
         terminal.commandId === commandId
           ? { ...terminal, lastExitCode: undefined, updatedAt: now }

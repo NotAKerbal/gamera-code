@@ -205,9 +205,14 @@ const MainHeaderComponent = ({
       });
   };
   const toggleProjectTerminal = (terminal: HeaderTerminal) => {
+    const commandId = terminal.commandId.trim();
+    if (!commandId) {
+      appendLog(`Terminal ${terminal.running ? "stop" : "start"} failed: missing command id for ${terminal.name}`);
+      return;
+    }
     const actionId = `${terminal.commandId}:${terminal.running ? "stop" : "start"}`;
     setRunningTerminalActionId(actionId);
-    const task = terminal.running ? onStopTerminal(terminal.commandId) : onStartTerminal(terminal.commandId);
+    const task = terminal.running ? onStopTerminal(commandId) : onStartTerminal(commandId);
     task
       .catch((error) => appendLog(`Terminal ${terminal.running ? "stop" : "start"} failed: ${String(error)}`))
       .finally(() => {
@@ -215,11 +220,16 @@ const MainHeaderComponent = ({
       });
   };
   const runNamedTerminalAction = (terminal: HeaderTerminal, action: "restart" | "view" | "copy") => {
+    const commandId = terminal.commandId.trim();
+    if ((action === "restart" || action === "view" || action === "copy") && !commandId) {
+      appendLog(`Terminal ${action} failed: missing command id for ${terminal.name}`);
+      return;
+    }
     const actionId = `${terminal.commandId}:${action}`;
     setRunningTerminalActionId(actionId);
     const task =
       action === "restart"
-        ? onStartTerminal(terminal.commandId)
+        ? onStartTerminal(commandId)
         : action === "view"
           ? Promise.resolve(onOpenTerminalPopout(terminal))
           : Promise.resolve(onCopyTerminalOutput(terminal.name, terminal.outputTail || ""));
@@ -405,6 +415,13 @@ const MainHeaderComponent = ({
               const hasCompleted = !terminal.running && typeof terminal.lastExitCode === "number";
               const isSuccess = hasCompleted && terminal.lastExitCode === 0;
               const isError = hasCompleted && terminal.lastExitCode !== 0;
+              const actionTooltip = terminal.running
+                ? tooltipText("Stop Action", "This action is running. Click to stop it.")
+                : isError
+                  ? tooltipText("View Error Output", "The last run failed. Click to open output and clear the error state.")
+                  : isSuccess
+                    ? tooltipText("View Final Output", "The last run completed successfully. Click to view the final output.")
+                    : tooltipText("Start Action", "This action is idle. Click to start it.");
               const statusClass = isSuccess
                 ? "terminal-action-segment-success"
                 : isError
@@ -415,12 +432,13 @@ const MainHeaderComponent = ({
               return (
                 <div
                   key={`terminal-action-${terminal.commandId}`}
-                  className={`workspace-segment ${statusClass ? `active ${statusClass}` : ""} terminal-action-segment`}
+                  className={`workspace-segment ${statusClass ? `active ${statusClass}` : ""} terminal-action-segment ${isError ? "terminal-action-segment-has-dismiss" : ""}`}
                   ref={isMenuOpen ? actionMenuRef : null}
                 >
                   <button
                     type="button"
-                    className="terminal-action-main"
+                    className="terminal-action-main app-tooltip-target"
+                    data-app-tooltip={actionTooltip}
                     onClick={() => {
                       if (terminal.running) {
                         toggleProjectTerminal(terminal);
@@ -428,7 +446,10 @@ const MainHeaderComponent = ({
                       }
                       if (hasCompleted) {
                         if (isError) {
-                          onAcknowledgeTerminalError(terminal.commandId);
+                          const commandId = terminal.commandId.trim();
+                          if (commandId) {
+                            onAcknowledgeTerminalError(commandId);
+                          }
                         }
                         openTerminalOutput(terminal);
                         return;
@@ -438,18 +459,37 @@ const MainHeaderComponent = ({
                     disabled={runningTerminalActionId === busyToggleId}
                     title={terminal.name}
                   >
-                  <span className="workspace-segment-name truncate">
-                    {terminal.name}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className={`terminal-action-more ${isMenuOpen ? "is-open" : ""}`}
-                  aria-label={`Open actions for ${terminal.name}`}
-                  onClick={() => setOpenTerminalActionMenuId((current) => (current === terminal.commandId ? null : terminal.commandId))}
-                >
-                  <FaChevronDown className="text-[10px] text-slate-400" />
-                </button>
+                    <span className="workspace-segment-name truncate">
+                      {terminal.name}
+                    </span>
+                  </button>
+                  <div className={`terminal-action-controls ${isMenuOpen ? "is-open" : ""}`}>
+                    {isError ? (
+                      <button
+                        type="button"
+                        className="terminal-action-dismiss-error app-tooltip-target"
+                        aria-label={`Dismiss error for ${terminal.name}`}
+                        data-app-tooltip={tooltipText("Dismiss Error", "Clear this error state without opening the output modal.")}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const commandId = terminal.commandId.trim();
+                        if (commandId) {
+                          onAcknowledgeTerminalError(commandId);
+                        }
+                      }}
+                    >
+                        <FaTimes className="text-[10px] text-slate-400" />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className={`terminal-action-more ${isMenuOpen ? "is-open" : ""}`}
+                      aria-label={`Open actions for ${terminal.name}`}
+                      onClick={() => setOpenTerminalActionMenuId((current) => (current === terminal.commandId ? null : terminal.commandId))}
+                    >
+                      <FaChevronDown className="text-[10px] text-slate-400" />
+                    </button>
+                  </div>
                 {isMenuOpen ? (
                   <div className="project-action-pop terminal-action-pop">
                     <button

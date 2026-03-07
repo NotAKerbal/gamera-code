@@ -446,13 +446,6 @@ webview {
 
 .terminal-action-segment {
   @apply relative flex items-center px-0;
-  padding-right: 0;
-  transition: padding-right 180ms ease;
-}
-
-.terminal-action-segment:hover,
-.terminal-action-segment:focus-within {
-  padding-right: 1.5rem;
 }
 
 .terminal-action-segment-running {
@@ -474,25 +467,40 @@ webview {
   @apply inline-flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-accent transition hover:bg-panel/50 disabled:opacity-50;
 }
 
-.terminal-action-more {
-  @apply inline-flex h-5 w-5 items-center justify-center rounded text-xs text-slate-400 transition;
+.terminal-action-controls {
   position: absolute;
   right: 5px;
   top: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-50%) translateX(3px);
+  transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.terminal-action-segment:hover .terminal-action-more,
-.terminal-action-segment:focus-within .terminal-action-more,
-.terminal-action-more.is-open {
+.terminal-action-segment:hover .terminal-action-controls,
+.terminal-action-segment:focus-within .terminal-action-controls,
+.terminal-action-controls.is-open {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(-50%) translateX(0);
 }
 
+.terminal-action-more {
+  @apply inline-flex h-5 w-5 items-center justify-center rounded text-xs text-slate-400 transition;
+}
+
 .terminal-action-more:hover {
+  @apply bg-panel/70 text-slate-200;
+}
+
+.terminal-action-dismiss-error {
+  @apply inline-flex h-5 w-5 items-center justify-center rounded text-xs text-slate-400 transition;
+}
+
+.terminal-action-dismiss-error:hover {
   @apply bg-panel/70 text-slate-200;
 }
 
