@@ -1,7 +1,7 @@
 import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
 import type Database from "better-sqlite3";
+import { DEFAULT_HARNESS_OPTIONS } from "@code-app/shared";
 import type {
   AppSettings,
   HarnessId,
@@ -25,13 +25,6 @@ import type {
 } from "@code-app/shared";
 import { getThreadDataPath, type AppPaths } from "./paths";
 
-const SharedHarnesses = require(resolve(__dirname, "../../../shared/dist/harnesses.js")) as {
-  DEFAULT_HARNESS_OPTIONS: Pick<HarnessSettings, "codex" | "opencode"> & {
-    codex: NonNullable<HarnessSettings["codex"]>["defaults"];
-    opencode: NonNullable<HarnessSettings["opencode"]>["defaults"];
-  };
-};
-
 const DEFAULT_DEV_COMMAND: ProjectDevCommand = {
   id: "default",
   name: "Dev Server",
@@ -45,10 +38,10 @@ const DEFAULT_SETTINGS = {
   defaultHarnessId: "codex",
   harnessSettings: {
     codex: {
-      defaults: SharedHarnesses.DEFAULT_HARNESS_OPTIONS.codex
+      defaults: DEFAULT_HARNESS_OPTIONS.codex
     },
     opencode: {
-      defaults: SharedHarnesses.DEFAULT_HARNESS_OPTIONS.opencode
+      defaults: DEFAULT_HARNESS_OPTIONS.opencode
     }
   },
   binaryOverrides: {},
@@ -249,7 +242,7 @@ const normalizeHarnessSettings = (partial: Partial<AppSettings> | null | undefin
       ...(input.binaryOverrides?.opencode ? { binaryOverride: input.binaryOverrides.opencode } : {}),
       ...opencodeCurrent,
       defaults: {
-        ...SharedHarnesses.DEFAULT_HARNESS_OPTIONS.opencode,
+        ...DEFAULT_HARNESS_OPTIONS.opencode,
         ...(opencodeCurrent.defaults ?? {})
       }
     };
