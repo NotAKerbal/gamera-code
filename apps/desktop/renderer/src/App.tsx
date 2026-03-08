@@ -548,7 +548,7 @@ export const App = () => {
     settings: AppSettings;
     composerOptions: CodexThreadOptions;
     settingsEnvText: string;
-    settingsTab: "general" | "codex" | "env" | "skills";
+    settingsTab: "general" | "harnesses" | "codex" | "env" | "skills";
   }>({
     settings: DEFAULT_SETTINGS,
     composerOptions: getHarnessOptionsFromSettings(DEFAULT_SETTINGS, DEFAULT_SETTINGS.defaultHarnessId ?? "codex"),
@@ -9938,6 +9938,7 @@ TODO: Describe what this skill does.
           isWindows={isWindows}
           appIconSrc={appIconSrc}
           appSkills={appSkills}
+          installStatus={installStatus}
           systemTerminals={systemTerminals}
           skillEditorPath={skillEditorPath}
           skillEditorContent={skillEditorContent}
