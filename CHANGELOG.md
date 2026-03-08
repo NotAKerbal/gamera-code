@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.0
+- OpenCode integration
+
 ## 0.5.4
 - Refresh button for git on header
 - Add to output mode
