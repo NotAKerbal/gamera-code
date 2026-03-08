@@ -650,14 +650,15 @@ const MainHeaderComponent = ({
                       Restart
                     </button>
                     <button
-                      className="project-action-item"
+                      className="project-action-item app-tooltip-target"
+                      data-app-tooltip={tooltipText("Add output", "Add output to the current thread.")}
                       onClick={() => {
                         runNamedTerminalAction(terminal, "copy");
                         setOpenTerminalActionMenuId(null);
                       }}
                       disabled={!terminal.outputTail?.trim()}
                     >
-                      Copy output
+                      Add output
                     </button>
                     <button
                       className="project-action-item"

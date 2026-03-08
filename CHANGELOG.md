@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.4
+- Refresh button for git on header
+- Add to output mode
+- Improvements to actions UI
+
 ## 0.5.3
 - One click git push button
 - Compact settings
