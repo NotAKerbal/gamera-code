@@ -1,6 +1,7 @@
 import { createPortal } from "react-dom";
 import { memo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CodexSandboxMode, CodexThreadOptions, HarnessId } from "@code-app/shared";
+import { getModelTooltip } from "../../shared/src/modelTooltips";
 import {
   APPROVAL_OPTIONS,
   COLLABORATION_OPTIONS,
@@ -106,6 +107,7 @@ const ComposerDropdownPortalComponent = ({
                               {group.models.map((model) => {
                                 const selected = harnessIsActive && (composerOptions.model ?? "").trim() === model;
                                 const disabled = !harnessIsActive && !canSwitchHarnesses;
+                                const tooltip = getModelTooltip(model);
                                 return (
                                   <button
                                     key={`${harness.id}:${model}`}
@@ -113,7 +115,8 @@ const ComposerDropdownPortalComponent = ({
                                       selected ? "composer-model-option composer-model-option-current" : "composer-model-option"
                                     }
                                     disabled={disabled}
-                                    title={model}
+                                    data-app-tooltip={tooltip}
+                                    title={tooltip}
                                     onClick={() => {
                                       onSelectHarnessModel(harness.id, model);
                                       setComposerDropdown(null);
