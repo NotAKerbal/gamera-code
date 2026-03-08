@@ -9,6 +9,7 @@ import type {
   CodexSandboxMode,
   CodexThreadOptions,
   CodexWebSearchMode,
+  HarnessId,
   PermissionMode,
   ProjectTerminalSwitchBehavior,
   SystemTerminalOption,
@@ -18,12 +19,15 @@ import {
   acknowledgeDangerFullAccessWarning,
   APPROVAL_OPTIONS,
   COLLABORATION_OPTIONS,
+  getHarnessOptionsFromSettings,
+  getSupportedHarness,
+  harnessSupports,
   hasDangerFullAccessWarningAcknowledged,
-  MODEL_SUGGESTIONS,
   PROJECT_SWITCH_BEHAVIOR_OPTIONS,
   THEME_OPTIONS,
   REASONING_OPTIONS,
   SANDBOX_OPTIONS,
+  SUPPORTED_HARNESSES,
   WEB_SEARCH_OPTIONS,
   type AppSettingsTab
 } from "./appCore";
@@ -35,6 +39,7 @@ type SettingsModalProps = {
     settingsEnvText: string;
     settingsTab: AppSettingsTab;
   };
+  currentHarnessId: HarnessId;
   isSettingsWindow: boolean;
   isMacOS: boolean;
   isWindows: boolean;
@@ -202,6 +207,7 @@ const THEME_PREVIEW_STYLES: Record<AppTheme, CSSProperties> = {
 
 export const SettingsModal = memo(({
   initialDraft,
+  currentHarnessId,
   isSettingsWindow,
   isMacOS,
   isWindows,
@@ -228,6 +234,9 @@ export const SettingsModal = memo(({
   const [settingsEnvText, setSettingsEnvText] = useState(initialDraft.settingsEnvText);
   const [pendingDangerSandboxMode, setPendingDangerSandboxMode] = useState<CodexSandboxMode | null>(null);
   const [skillEditorNotice, setSkillEditorNotice] = useState("");
+  const selectedHarnessId = settings.defaultHarnessId ?? currentHarnessId;
+  const currentHarness = getSupportedHarness(selectedHarnessId);
+  const modelSuggestions = currentHarness?.modelGroups.flatMap((group) => group.models) ?? [];
 
   useEffect(() => {
     setSettingsTab(initialDraft.settingsTab);
@@ -481,6 +490,25 @@ export const SettingsModal = memo(({
                   </div>
                 </div>
               </section>
+
+              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
+                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Harness</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Default harness</div>
+                  <CustomSelect
+                    value={selectedHarnessId}
+                    options={SUPPORTED_HARNESSES.map((harness) => ({ value: harness.id, label: harness.label }))}
+                    onChange={(value) => {
+                      const harnessId = value as HarnessId;
+                      setSettings((prev) => ({
+                        ...prev,
+                        defaultHarnessId: harnessId
+                      }));
+                      setComposerOptions(getHarnessOptionsFromSettings(settings, harnessId));
+                    }}
+                  />
+                </div>
+              </section>
             </div>
           )}
 
@@ -508,56 +536,68 @@ export const SettingsModal = memo(({
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Sandbox mode</div>
-                  <CustomSelect
-                    value={composerOptions.sandboxMode ?? "workspace-write"}
-                    options={SANDBOX_OPTIONS.map((option) => ({
-                      value: option.value,
-                      label: option.dropdownLabel ?? option.label,
-                      triggerLabel: option.label
-                    }))}
-                    onChange={(value) => {
-                      if (value === "danger-full-access" && !hasDangerFullAccessWarningAcknowledged()) {
-                        setPendingDangerSandboxMode("danger-full-access");
-                        return;
-                      }
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        sandboxMode: value as CodexSandboxMode
-                      }));
-                    }}
-                  />
+                  {harnessSupports(selectedHarnessId, "sandbox") ? (
+                    <CustomSelect
+                      value={composerOptions.sandboxMode ?? "workspace-write"}
+                      options={SANDBOX_OPTIONS.map((option) => ({
+                        value: option.value,
+                        label: option.dropdownLabel ?? option.label,
+                        triggerLabel: option.label
+                      }))}
+                      onChange={(value) => {
+                        if (value === "danger-full-access" && !hasDangerFullAccessWarningAcknowledged()) {
+                          setPendingDangerSandboxMode("danger-full-access");
+                          return;
+                        }
+                        setComposerOptions((prev) => ({
+                          ...prev,
+                          sandboxMode: value as CodexSandboxMode
+                        }));
+                      }}
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-400">Not supported by {currentHarness?.label ?? "this harness"}.</div>
+                  )}
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Approval policy</div>
-                  <CustomSelect
-                    value={composerOptions.approvalPolicy ?? "on-request"}
-                    options={APPROVAL_OPTIONS.map((option) => ({
-                      value: option.value,
-                      label: option.dropdownLabel ?? option.label,
-                      triggerLabel: option.label
-                    }))}
-                    onChange={(value) =>
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        approvalPolicy: value as CodexApprovalMode
-                      }))
-                    }
-                  />
+                  {harnessSupports(selectedHarnessId, "approval_policy") ? (
+                    <CustomSelect
+                      value={composerOptions.approvalPolicy ?? "on-request"}
+                      options={APPROVAL_OPTIONS.map((option) => ({
+                        value: option.value,
+                        label: option.dropdownLabel ?? option.label,
+                        triggerLabel: option.label
+                      }))}
+                      onChange={(value) =>
+                        setComposerOptions((prev) => ({
+                          ...prev,
+                          approvalPolicy: value as CodexApprovalMode
+                        }))
+                      }
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-400">Not supported by {currentHarness?.label ?? "this harness"}.</div>
+                  )}
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Web search mode</div>
-                  <CustomSelect
-                    value={composerOptions.webSearchMode ?? "cached"}
-                    options={WEB_SEARCH_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                    onChange={(value) =>
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        webSearchMode: value as CodexWebSearchMode
-                      }))
-                    }
-                  />
+                  {harnessSupports(selectedHarnessId, "web_search") ? (
+                    <CustomSelect
+                      value={composerOptions.webSearchMode ?? "cached"}
+                      options={WEB_SEARCH_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                      onChange={(value) =>
+                        setComposerOptions((prev) => ({
+                          ...prev,
+                          webSearchMode: value as CodexWebSearchMode
+                        }))
+                      }
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-400">Not supported by {currentHarness?.label ?? "this harness"}.</div>
+                  )}
                 </div>
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -595,16 +635,20 @@ export const SettingsModal = memo(({
                 <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Reasoning effort</div>
-                  <CustomSelect
-                    value={composerOptions.modelReasoningEffort ?? "medium"}
-                    options={REASONING_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                    onChange={(value) =>
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        modelReasoningEffort: value as CodexModelReasoningEffort
-                      }))
-                    }
-                  />
+                  {harnessSupports(selectedHarnessId, "reasoning_effort") ? (
+                    <CustomSelect
+                      value={composerOptions.modelReasoningEffort ?? "medium"}
+                      options={REASONING_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                      onChange={(value) =>
+                        setComposerOptions((prev) => ({
+                          ...prev,
+                          modelReasoningEffort: value as CodexModelReasoningEffort
+                        }))
+                      }
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-400">Not supported by {currentHarness?.label ?? "this harness"}.</div>
+                  )}
                 </div>
               </section>
 
@@ -612,16 +656,20 @@ export const SettingsModal = memo(({
                 <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Collaboration</div>
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Collaboration mode</div>
-                  <CustomSelect
-                    value={composerOptions.collaborationMode ?? "plan"}
-                    options={COLLABORATION_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                    onChange={(value) =>
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        collaborationMode: value as CodexCollaborationMode
-                      }))
-                    }
-                  />
+                  {harnessSupports(selectedHarnessId, "collaboration_mode") ? (
+                    <CustomSelect
+                      value={composerOptions.collaborationMode ?? "plan"}
+                      options={COLLABORATION_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                      onChange={(value) =>
+                        setComposerOptions((prev) => ({
+                          ...prev,
+                          collaborationMode: value as CodexCollaborationMode
+                        }))
+                      }
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-400">Not supported by {currentHarness?.label ?? "this harness"}.</div>
+                  )}
                 </div>
               </section>
 
@@ -723,7 +771,7 @@ export const SettingsModal = memo(({
       </div>
 
       <datalist id="model-suggestions">
-        {MODEL_SUGGESTIONS.map((model) => (
+        {modelSuggestions.map((model) => (
           <option key={model} value={model} />
         ))}
       </datalist>

@@ -2,7 +2,7 @@
   "name": "code-app",
   "version": "0.5.4",
   "private": true,
-  "description": "Cross-platform desktop wrapper for Codex app server",
+  "description": "Cross-platform desktop wrapper for multiple agent harnesses",
   "workspaces": [
     "apps/desktop/shared",
     "apps/desktop/main",

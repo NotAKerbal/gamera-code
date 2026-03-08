@@ -1,4 +1,69 @@
-export type Provider = "codex" | "gemini";
+export interface HarnessDefaultsById {
+  codex: CodexThreadOptions;
+  opencode: CodexThreadOptions;
+  gemini: Record<string, never>;
+}
+
+export interface HarnessCapabilityMap {
+  codex:
+    | "streaming"
+    | "attachments"
+    | "reasoning_effort"
+    | "sandbox"
+    | "web_search"
+    | "approval_policy"
+    | "collaboration_mode"
+    | "thread_compact"
+    | "thread_fork"
+    | "review"
+    | "steer"
+    | "subthreads"
+    | "user_input";
+  opencode:
+    | "streaming"
+    | "attachments"
+    | "reasoning_effort"
+    | "sandbox"
+    | "web_search"
+    | "approval_policy"
+    | "collaboration_mode";
+  gemini: "streaming";
+}
+
+export interface HarnessModelGroupMap {
+  codex: "flagship" | "codex" | "spark";
+  opencode: "openai" | "anthropic" | "google" | "xai" | "deepseek" | "glm" | "kimi" | "vertex_oss" | "minimax";
+  gemini: never;
+}
+
+export type HarnessId = keyof HarnessDefaultsById;
+export type Provider = HarnessId;
+export type HarnessCapability<T extends HarnessId = HarnessId> = HarnessCapabilityMap[T];
+export type HarnessModelGroupId<T extends HarnessId = HarnessId> = HarnessModelGroupMap[T];
+
+export interface HarnessSettingsEntry<TDefaults = Record<string, never>> {
+  binaryOverride?: string;
+  defaults?: Partial<TDefaults>;
+}
+
+export type HarnessSettings = {
+  [K in HarnessId]?: HarnessSettingsEntry<HarnessDefaultsById[K]>;
+};
+
+export interface HarnessModelGroup<T extends HarnessId = HarnessId> {
+  id: HarnessModelGroupId<T>;
+  harnessId: T;
+  label: string;
+  models: string[];
+  defaultModel?: string;
+}
+
+export interface HarnessDescriptor<T extends HarnessId = HarnessId> {
+  id: T;
+  label: string;
+  capabilities: HarnessCapability<T>[];
+  modelGroups: HarnessModelGroup<T>[];
+}
 
 export type PermissionMode = "prompt_on_risk" | "always_ask" | "auto_allow";
 export type AppTheme = "midnight" | "graphite" | "dawn" | "linen" | "orange-cat";
@@ -185,6 +250,7 @@ export interface Thread {
   parentThreadId?: string;
   title: string;
   color?: string;
+  harnessId: HarnessId;
   provider: Provider;
   status: ThreadStatus;
   createdAt: string;
@@ -237,7 +303,7 @@ export interface RiskCheck {
 }
 
 export interface InstallDetail {
-  key: "node" | "npm" | "git" | "rg" | "codex" | "gemini";
+  key: "node" | "npm" | "git" | "rg" | "codex" | "opencode" | "gemini";
   ok: boolean;
   message: string;
   version?: string;
@@ -249,11 +315,13 @@ export interface InstallStatus {
   gitOk: boolean;
   rgOk: boolean;
   codexOk: boolean;
+  opencodeOk: boolean;
   geminiOk: boolean;
+  readyHarnessIds: HarnessId[];
   details: InstallDetail[];
 }
 
-export type InstallDependencyKey = "node" | "npm" | "git" | "rg" | "codex";
+export type InstallDependencyKey = "node" | "npm" | "git" | "rg" | "codex" | "opencode";
 
 export interface InstallDependenciesResult {
   ok: boolean;
@@ -300,6 +368,8 @@ export interface ThreadMetadataSuggestion {
 export interface AppSettings {
   permissionMode: PermissionMode;
   theme?: AppTheme;
+  defaultHarnessId?: HarnessId;
+  harnessSettings: HarnessSettings;
   binaryOverrides: Partial<Record<Provider, string>>;
   envVars: Record<string, string>;
   codexDefaults: CodexThreadOptions;

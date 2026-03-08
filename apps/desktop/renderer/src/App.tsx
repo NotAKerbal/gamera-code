@@ -50,6 +50,7 @@ import type {
   CodexModelReasoningEffort,
   CodexSandboxMode,
   CodexThreadOptions,
+  HarnessId,
   GitHistoryCommit,
   GitRepositoryCandidate,
   GitOutgoingCommit,
@@ -92,14 +93,13 @@ import {
   INSTALL_DETAIL_LABELS,
   MARKDOWN_REMARK_PLUGINS,
   MAX_ATTACHMENTS,
-  MODEL_SUGGESTIONS,
   PROJECT_SWITCH_BEHAVIOR_OPTIONS,
   REASONING_OPTIONS,
   REQUIRED_SETUP_KEYS,
-  SETUP_BLOCKING_KEYS,
   SANDBOX_OPTIONS,
   SHOW_TERMINAL,
   SKILL_MENTION_MATCH_LIMIT,
+  SUPPORTED_HARNESSES,
   THREAD_COLOR_PRESETS,
   THREAD_SUMMARY_STORAGE_KEY,
   areSkillReferencesEqual,
@@ -123,6 +123,9 @@ import {
   findDuplicateBasenames,
   flattenThreadRows,
   formatModelDisplayName,
+  getHarnessOptionsFromSettings,
+  getSupportedHarness,
+  harnessSupports,
   formatMentionFileLabel,
   formatRelative,
   getProjectNameFromPath,
@@ -289,7 +292,7 @@ type ActivityBundleRowProps = {
   onViewPlan: (planId: string) => void;
   onBuildPlan: (planId: string) => void;
   onCopyPlan: (planId: string) => void;
-  onForkFromUserMessage: (message: MessageEvent) => void;
+  onForkFromUserMessage?: (message: MessageEvent) => void;
 };
 type TimelinePlanRowProps = {
   item: TimelineEventItem;
@@ -298,7 +301,7 @@ type TimelinePlanRowProps = {
   onViewPlan: (planId: string) => void;
   onBuildPlan: (planId: string) => void;
   onCopyPlan: (planId: string) => void;
-  onForkFromUserMessage: (message: MessageEvent) => void;
+  onForkFromUserMessage?: (message: MessageEvent) => void;
 };
 
 type ProjectTemplateId = "nextjs" | "electron";
@@ -548,7 +551,7 @@ export const App = () => {
     settingsTab: "general" | "codex" | "env" | "skills";
   }>({
     settings: DEFAULT_SETTINGS,
-    composerOptions: DEFAULT_SETTINGS.codexDefaults,
+    composerOptions: getHarnessOptionsFromSettings(DEFAULT_SETTINGS, DEFAULT_SETTINGS.defaultHarnessId ?? "codex"),
     settingsEnvText: envVarsToText(DEFAULT_SETTINGS.envVars),
     settingsTab: "general"
   });
@@ -625,7 +628,9 @@ export const App = () => {
   const [skillEditorContent, setSkillEditorContent] = useState<string>("");
   const [skillEditorSaving, setSkillEditorSaving] = useState(false);
   const [threadSummaryById, setThreadSummaryById] = useState<Record<string, string>>(() => readStoredThreadSummaries());
-  const [composerOptions, setComposerOptions] = useState<CodexThreadOptions>(DEFAULT_SETTINGS.codexDefaults);
+  const [composerOptions, setComposerOptions] = useState<CodexThreadOptions>(
+    getHarnessOptionsFromSettings(DEFAULT_SETTINGS, DEFAULT_SETTINGS.defaultHarnessId ?? "codex")
+  );
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [composerMentionedFiles, setComposerMentionedFiles] = useState<string[]>([]);
   const [composerMentionedSkills, setComposerMentionedSkills] = useState<Array<{ name: string; path: string }>>([]);
@@ -848,6 +853,23 @@ export const App = () => {
   );
 
   const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
+  const activeHarnessId = (activeThread?.harnessId ?? activeThread?.provider ?? settings.defaultHarnessId ?? "codex") as HarnessId;
+  const activeHarness = useMemo(
+    () => getSupportedHarness(activeHarnessId) ?? getSupportedHarness("codex")!,
+    [activeHarnessId]
+  );
+  const activeHarnessSupportsCompact = harnessSupports(activeHarnessId, "thread_compact");
+  const activeHarnessSupportsFork = harnessSupports(activeHarnessId, "thread_fork");
+  const activeHarnessSupportsReview = harnessSupports(activeHarnessId, "review");
+  const activeHarnessSupportsSubthreads = harnessSupports(activeHarnessId, "subthreads");
+  const activeHarnessRequiredSetupKeys = useMemo(
+    () => new Set(activeHarness?.setup.requiredKeys ?? ["node", "npm", "git", "rg"]),
+    [activeHarness]
+  );
+  const activeHarnessBlockingSetupKeys = useMemo(
+    () => new Set(activeHarness?.setup.blockingKeys ?? []),
+    [activeHarness]
+  );
   const activeComposerDraft = useMemo(
     () => (activeThreadId ? composerDraftByThreadId[activeThreadId] ?? "" : ""),
     [activeThreadId, composerDraftByThreadId]
@@ -1619,23 +1641,24 @@ export const App = () => {
 
   const loadThreads = async () => {
     const data = await api.threads.list({ includeArchived: true });
-    const codexThreads = data.filter((thread) => thread.provider === "codex");
-    const sortedThreads = sortThreadsForSidebar(codexThreads);
-    const threadIds = codexThreads.map((thread) => thread.id);
-    setThreads(codexThreads);
+    const sortedThreads = sortThreadsForSidebar(data);
+    const threadIds = sortedThreads.map((thread) => thread.id);
+    setThreads(sortedThreads);
     await Promise.all(
-      threadIds.map((threadId) =>
-        loadOrchestrationRuns(threadId).catch((error) => {
+      sortedThreads
+        .filter((thread) => harnessSupports((thread.harnessId ?? thread.provider) as HarnessId, "subthreads"))
+        .map((thread) =>
+          loadOrchestrationRuns(thread.id).catch((error) => {
           setLogs((prev) => [...prev, `Load orchestration failed: ${String(error)}`]);
-        })
-      )
+          })
+        )
     );
     const threadIdSet = new Set(threadIds);
     setOrchestrationRunsByParentId((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([threadId]) => threadIdSet.has(threadId)))
     );
 
-    if (activeThreadId && !codexThreads.some((thread) => thread.id === activeThreadId)) {
+    if (activeThreadId && !sortedThreads.some((thread) => thread.id === activeThreadId)) {
       const fallbackThread = sortedThreads[0] ?? null;
       setActiveThreadId(fallbackThread?.id ?? null);
       if (fallbackThread) {
@@ -1644,7 +1667,7 @@ export const App = () => {
       return;
     }
 
-    if (!activeThreadId && codexThreads.length > 0) {
+    if (!activeThreadId && sortedThreads.length > 0) {
       if (activeWorkspaceId) {
         const workspaceProjectIds = new Set(
           projects.filter((project) => project.workspaceId === activeWorkspaceId).map((project) => project.id)
@@ -1667,7 +1690,7 @@ export const App = () => {
     applySettings(current);
     setAppSettingsInitialDraft({
       settings: current,
-      composerOptions: current.codexDefaults,
+      composerOptions: getHarnessOptionsFromSettings(current, current.defaultHarnessId ?? "codex"),
       settingsEnvText: envVarsToText(current.envVars),
       settingsTab: "general"
     });
@@ -1676,7 +1699,10 @@ export const App = () => {
 
   const applySettings = (next: AppSettings) => {
     setSettings(next);
-    setComposerOptions(next.codexDefaults);
+    setComposerOptions((prev) => ({
+      ...getHarnessOptionsFromSettings(next, activeThread?.harnessId ?? next.defaultHarnessId ?? "codex"),
+      ...prev
+    }));
   };
 
   const loadOrchestrationRuns = async (parentThreadId: string) => {
@@ -2095,13 +2121,21 @@ export const App = () => {
     if (!activeThreadId) {
       return;
     }
-    if (activeThread?.provider !== "codex") {
+    if (!activeHarnessSupportsSubthreads) {
       return;
     }
     loadOrchestrationRuns(activeThreadId).catch((error) => {
       setLogs((prev) => [...prev, `Load orchestration failed: ${String(error)}`]);
     });
-  }, [activeThreadId, activeThread?.provider]);
+  }, [activeHarnessSupportsSubthreads, activeThreadId]);
+
+  useEffect(() => {
+    const harnessId = activeThread?.harnessId ?? settings.defaultHarnessId ?? "codex";
+    setComposerOptions((prev) => ({
+      ...getHarnessOptionsFromSettings(settings, harnessId),
+      model: prev.model && harnessId === activeHarnessId ? prev.model : getHarnessOptionsFromSettings(settings, harnessId).model
+    }));
+  }, [activeThread?.id, activeThread?.harnessId, settings, activeHarnessId]);
 
   useEffect(() => {
     runStateByThreadIdRef.current = runStateByThreadId;
@@ -3630,7 +3664,7 @@ export const App = () => {
       }
       setAppSettingsInitialDraft({
         settings,
-        composerOptions: settings.codexDefaults,
+        composerOptions: getHarnessOptionsFromSettings(settings, settings.defaultHarnessId ?? "codex"),
         settingsEnvText: envVarsToText(settings.envVars),
         settingsTab: "general"
       });
@@ -5006,6 +5040,11 @@ export const App = () => {
       return;
     }
     const rect = trigger.getBoundingClientRect();
+    const width = kind === "model" ? Math.min(window.innerWidth - 16, 860) : Math.max(180, rect.width);
+    const left =
+      kind === "model"
+        ? Math.min(Math.max(8, rect.right - width), Math.max(8, window.innerWidth - width - 8))
+        : Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8));
     setComposerDropdown((prev) => {
       if (prev?.kind === kind) {
         return null;
@@ -5013,13 +5052,17 @@ export const App = () => {
       return {
         kind,
         bottom: Math.max(8, window.innerHeight - rect.top + 6),
-        left: Math.max(8, rect.left),
-        width: Math.max(180, rect.width)
+        left,
+        width
       };
     });
   };
 
-  const createThread = async (projectId = activeProjectId, title = "New thread") => {
+  const createThread = async (
+    projectId = activeProjectId,
+    title = "New thread",
+    harnessId: HarnessId = settings.defaultHarnessId ?? "codex"
+  ) => {
     if (!projectId) {
       setLogs((prev) => [...prev, "Create or select a project first."]);
       return;
@@ -5028,7 +5071,8 @@ export const App = () => {
     const thread = await api.threads.create({
       projectId,
       title: title.trim() || "New thread",
-      provider: "codex"
+      harnessId,
+      provider: harnessId
     });
 
     await loadThreads();
@@ -5054,6 +5098,34 @@ export const App = () => {
     },
     [activeProjectId]
   );
+
+  const canSwitchActiveThreadHarness =
+    Boolean(activeThreadId) && !hasUserPromptInThread && activeRunState !== "running";
+
+  const selectHarnessModel = async (harnessId: HarnessId, model: string) => {
+    if (!activeThreadId) {
+      return;
+    }
+
+    if (activeHarnessId !== harnessId) {
+      if (!canSwitchActiveThreadHarness) {
+        setLogs((prev) => [...prev, "Create a new thread to switch harnesses after a conversation has started."]);
+        return;
+      }
+      await api.threads.update({
+        id: activeThreadId,
+        harnessId,
+        provider: harnessId
+      });
+      await loadThreads();
+    }
+
+    setComposerOptions((prev) => ({
+      ...getHarnessOptionsFromSettings(settings, harnessId),
+      ...prev,
+      model
+    }));
+  };
 
   const openDefaultTerminalFromShortcut = useCallback(() => {
     if (!activeProjectId) {
@@ -6830,9 +6902,9 @@ const stopActiveRun = async () => {
     });
   };
 
-  const verifyCodexSdk = async () => {
-    setLogs((prev) => [...prev, "Checking Codex app server..."]);
-    const result = await api.installer.installCli({ provider: "codex" });
+  const installHarnessCli = async (harnessId: HarnessId) => {
+    setLogs((prev) => [...prev, `Checking ${getSupportedHarness(harnessId)?.label ?? harnessId} setup...`]);
+    const result = await api.installer.installCli({ harnessId, provider: harnessId });
     setLogs((prev) => [...prev, ...result.logs]);
     await loadInstallerStatus();
   };
@@ -6905,7 +6977,7 @@ const stopActiveRun = async () => {
 
     try {
       const result = await api.installer.installDependencies({
-        targets: ["node", "npm", "git", "rg", "codex"]
+        targets: ["node", "npm", "git", "rg"]
       });
       setInstallStatus(result.status);
       setLogs((prev) => [...prev, ...result.logs]);
@@ -6954,10 +7026,22 @@ const stopActiveRun = async () => {
     setSettingsSaving(true);
     try {
       const mode = draft.settings.permissionMode as PermissionMode;
+      const defaultHarnessId = draft.settings.defaultHarnessId ?? settings.defaultHarnessId ?? "codex";
+      const nextHarnessSettings = {
+        ...settings.harnessSettings,
+        ...draft.settings.harnessSettings,
+        [defaultHarnessId]: {
+          ...settings.harnessSettings[defaultHarnessId],
+          ...draft.settings.harnessSettings?.[defaultHarnessId],
+          defaults: draft.composerOptions
+        }
+      };
 
       const saved = await api.settings.set({
         permissionMode: mode,
         theme: draft.settings.theme ?? "midnight",
+        defaultHarnessId,
+        harnessSettings: nextHarnessSettings,
         envVars,
         defaultProjectDirectory: draft.settings.defaultProjectDirectory?.trim() ?? "",
         autoRenameThreadTitles: draft.settings.autoRenameThreadTitles ?? true,
@@ -6966,16 +7050,16 @@ const stopActiveRun = async () => {
         condenseActivityTimeline: draft.settings.condenseActivityTimeline ?? true,
         projectTerminalSwitchBehaviorDefault: draft.settings.projectTerminalSwitchBehaviorDefault ?? "start_stop",
         preferredSystemTerminalId: draft.settings.preferredSystemTerminalId?.trim() ?? "",
-        codexDefaults: draft.composerOptions
+        codexDefaults: defaultHarnessId === "codex" ? draft.composerOptions : settings.codexDefaults
       });
 
       await api.permissions.setMode({ mode });
 
       setSettings(saved);
-      setComposerOptions(saved.codexDefaults);
+      setComposerOptions(getHarnessOptionsFromSettings(saved, activeThread?.harnessId ?? saved.defaultHarnessId ?? "codex"));
       setAppSettingsInitialDraft({
         settings: saved,
-        composerOptions: saved.codexDefaults,
+        composerOptions: getHarnessOptionsFromSettings(saved, saved.defaultHarnessId ?? "codex"),
         settingsEnvText: envVarsToText(saved.envVars),
         settingsTab: "general"
       });
@@ -7170,11 +7254,17 @@ TODO: Describe what this skill does.
     }
   };
 
-  const setupBlocked = Boolean(
+  const missingRequiredCoreDependencies = Boolean(
     installStatus &&
-      installStatus.details.some((detail) => SETUP_BLOCKING_KEYS.has(detail.key) && !detail.ok)
+      installStatus.details.some((detail) => REQUIRED_SETUP_KEYS.has(detail.key) && !detail.ok)
   );
-  const codexAuthBlocked = Boolean(codexAuthStatus?.requiresOpenaiAuth && !codexAuthStatus?.authenticated);
+  const activeHarnessReady = !installStatus || installStatus.readyHarnessIds.includes(activeHarnessId);
+  const setupBlocked = Boolean(
+    installStatus && (missingRequiredCoreDependencies || !activeHarnessReady)
+  );
+  const codexAuthBlocked = Boolean(
+    activeHarnessId === "codex" && codexAuthStatus?.requiresOpenaiAuth && !codexAuthStatus?.authenticated
+  );
   useEffect(() => {
     if (!setupBlocked) {
       setIsSetupCardDismissed(false);
@@ -7667,7 +7757,7 @@ TODO: Describe what this skill does.
     setShowSettings(false);
     setAppSettingsInitialDraft({
       settings,
-      composerOptions: settings.codexDefaults,
+      composerOptions: getHarnessOptionsFromSettings(settings, settings.defaultHarnessId ?? "codex"),
       settingsEnvText: envVarsToText(settings.envVars),
       settingsTab: "general"
     });
@@ -8507,7 +8597,7 @@ TODO: Describe what this skill does.
                   </div>
                   <div className="mb-3 grid grid-cols-2 gap-2 text-sm">
                     {installStatus.details
-                      .filter((detail) => REQUIRED_SETUP_KEYS.has(detail.key))
+                      .filter((detail) => REQUIRED_SETUP_KEYS.has(detail.key) || SUPPORTED_HARNESSES.some((harness) => harness.id === detail.key))
                       .map((detail) => (
                         <div key={detail.key} className="rounded-lg border border-border bg-black/20 p-2">
                           <div className="font-medium">{INSTALL_DETAIL_LABELS[detail.key] ?? detail.key}</div>
@@ -8520,9 +8610,6 @@ TODO: Describe what this skill does.
                   <div className="flex flex-wrap gap-2">
                     <button className="btn-primary" onClick={() => setShowSetupModal(true)}>
                       Open Setup
-                    </button>
-                    <button className="btn-secondary" onClick={verifyCodexSdk}>
-                      Verify Codex app server
                     </button>
                     <button
                       className="btn-secondary"
@@ -8623,7 +8710,7 @@ TODO: Describe what this skill does.
                           </article>
                         ) : (
                           <article key={item.id} className="timeline-item group relative min-w-0 overflow-hidden rounded-lg bg-zinc-900/80 p-3">
-                            {activeThread && (
+                            {activeThread && activeHarnessSupportsFork && (
                               <button
                                 type="button"
                                 className="btn-ghost absolute right-2 top-2 h-7 w-7 p-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
@@ -8652,7 +8739,7 @@ TODO: Describe what this skill does.
                             onViewPlan={openPlanDrawerFor}
                             onBuildPlan={handleBuildPlan}
                             onCopyPlan={copyPlanToClipboard}
-                            onForkFromUserMessage={handleForkFromUserMessage}
+                            onForkFromUserMessage={activeHarnessSupportsFork ? handleForkFromUserMessage : undefined}
                           />
                         );
                       }
@@ -8670,7 +8757,7 @@ TODO: Describe what this skill does.
                           onViewPlan={openPlanDrawerFor}
                           onBuildPlan={handleBuildPlan}
                           onCopyPlan={copyPlanToClipboard}
-                          onForkFromUserMessage={handleForkFromUserMessage}
+                          onForkFromUserMessage={activeHarnessSupportsFork ? handleForkFromUserMessage : undefined}
                         />
                       );
                     })
@@ -8682,7 +8769,7 @@ TODO: Describe what this skill does.
                       onViewPlan={openPlanDrawerFor}
                       onBuildPlan={handleBuildPlan}
                       onCopyPlan={copyPlanToClipboard}
-                      onForkFromUserMessage={handleForkFromUserMessage}
+                      onForkFromUserMessage={activeHarnessSupportsFork ? handleForkFromUserMessage : undefined}
                     />
                   )}
 
@@ -9231,49 +9318,53 @@ TODO: Describe what this skill does.
                             <FaChevronDown className="text-[10px] text-slate-500" />
                           </button>
                         </span>
-                        <button
-                          className="composer-toggle-btn composer-tooltip-target"
-                          data-composer-tooltip={composerTooltipText("Summarize Context", "Summarize older thread history to reduce context size.")}
-                          aria-label="Summarize thread context"
-                          onClick={() => {
-                            if (!activeThreadId) {
-                              return;
-                            }
-                            api.sessions.compact({ threadId: activeThreadId }).catch((error) => {
-                              setLogs((prev) => [...prev, `Thread compact failed: ${String(error)}`]);
-                            });
-                          }}
-                          disabled={!activeThreadId}
-                        >
-                          <FaSyncAlt className="composer-option-icon" />
-                          Summarize
-                        </button>
-                        <button
-                          className="composer-toggle-btn composer-tooltip-target"
-                          data-composer-tooltip={composerTooltipText("Review Thread", "Run a review on the current chat thread.")}
-                          aria-label="Review current thread"
-                          onClick={() => {
-                            if (!activeThreadId) {
-                              setLogs((prev) => [...prev, "Open or select a thread before starting review."]);
-                              return;
-                            }
-                            api.sessions
-                              .reviewThread({ threadId: activeThreadId })
-                              .then((result) => {
-                                if (!result.ok) {
-                                  setLogs((prev) => [...prev, "Thread review failed to start."]);
-                                }
-                              })
-                              .catch((error) => {
-                                setLogs((prev) => [...prev, `Thread review failed: ${String(error)}`]);
+                        {activeHarnessSupportsCompact && (
+                          <button
+                            className="composer-toggle-btn composer-tooltip-target"
+                            data-composer-tooltip={composerTooltipText("Summarize Context", "Summarize older thread history to reduce context size.")}
+                            aria-label="Summarize thread context"
+                            onClick={() => {
+                              if (!activeThreadId) {
+                                return;
+                              }
+                              api.sessions.compact({ threadId: activeThreadId }).catch((error) => {
+                                setLogs((prev) => [...prev, `Thread compact failed: ${String(error)}`]);
                               });
-                          }}
-                          disabled={!activeThreadId || activeRunState === "running"}
-                          title={activeThreadId ? "Review current thread in the active chat" : "Select a thread to review"}
-                        >
-                          <FaPen className="composer-option-icon" />
-                          Review
-                        </button>
+                            }}
+                            disabled={!activeThreadId}
+                          >
+                            <FaSyncAlt className="composer-option-icon" />
+                            Summarize
+                          </button>
+                        )}
+                        {activeHarnessSupportsReview && (
+                          <button
+                            className="composer-toggle-btn composer-tooltip-target"
+                            data-composer-tooltip={composerTooltipText("Review Thread", "Run a review on the current chat thread.")}
+                            aria-label="Review current thread"
+                            onClick={() => {
+                              if (!activeThreadId) {
+                                setLogs((prev) => [...prev, "Open or select a thread before starting review."]);
+                                return;
+                              }
+                              api.sessions
+                                .reviewThread({ threadId: activeThreadId })
+                                .then((result) => {
+                                  if (!result.ok) {
+                                    setLogs((prev) => [...prev, "Thread review failed to start."]);
+                                  }
+                                })
+                                .catch((error) => {
+                                  setLogs((prev) => [...prev, `Thread review failed: ${String(error)}`]);
+                                });
+                            }}
+                            disabled={!activeThreadId || activeRunState === "running"}
+                            title={activeThreadId ? "Review current thread in the active chat" : "Select a thread to review"}
+                          >
+                            <FaPen className="composer-option-icon" />
+                            Review
+                          </button>
+                        )}
                         <div className="branch-inline" ref={branchTriggerRef}>
                           {showGitInitLoader ? (
                             <div className="branch-init-loader" role="status" aria-live="polite" aria-label="Initializing git repository">
@@ -9804,6 +9895,13 @@ TODO: Describe what this skill does.
         composerDropdown={composerDropdown}
         composerDropdownMenuRef={composerDropdownMenuRef}
         composerOptions={composerOptions}
+        currentHarnessId={activeHarnessId}
+        canSwitchHarnesses={canSwitchActiveThreadHarness}
+        onSelectHarnessModel={(harnessId, model) => {
+          selectHarnessModel(harnessId, model).catch((error) => {
+            setLogs((prev) => [...prev, `Model switch failed: ${String(error)}`]);
+          });
+        }}
         setComposerOptions={setComposerOptions}
         setComposerDropdown={setComposerDropdown}
       />
@@ -9813,6 +9911,8 @@ TODO: Describe what this skill does.
       {showSetupModal && installStatus && (
         <SetupModal
           installStatus={installStatus}
+          setupDescription="Install the shared tooling once, then make at least one harness available. Codex is bundled with the app. OpenCode can be installed separately."
+          requiredSetupKeys={REQUIRED_SETUP_KEYS}
           setupInstalling={setupInstalling}
           setupPermissionGranted={setupPermissionGranted}
           setSetupPermissionGranted={setSetupPermissionGranted}
@@ -9824,6 +9924,7 @@ TODO: Describe what this skill does.
           }}
           onRefreshStatus={loadInstallerStatus}
           onRunAutomaticSetup={runAutomaticSetup}
+          onInstallHarness={installHarnessCli}
           appendLog={appendLog}
         />
       )}
@@ -9831,6 +9932,7 @@ TODO: Describe what this skill does.
       {(showSettings || isSettingsWindow) && (
         <SettingsModal
           initialDraft={appSettingsInitialDraft}
+          currentHarnessId={settings.defaultHarnessId ?? "codex"}
           isSettingsWindow={isSettingsWindow}
           isMacOS={isMacOS}
           isWindows={isWindows}

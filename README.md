@@ -1,16 +1,17 @@
 # Code App
 
-Cross-platform Electron wrapper focused on Codex app server with a Codex-inspired project/thread UI.
+Cross-platform Electron wrapper for multiple agent harnesses with a Codex-inspired project/thread UI.
 
 ## Features
 
 - Project sidebar with grouped thread lists
-- Codex app-server threads with live streaming activity
+- Capability-driven harness support with Codex and OpenCode
+- Grouped model selection by harness
 - One isolated session per thread
 - Local persistence with SQLite + JSONL thread logs
-- Install doctor for Node/npm + Codex app-server health
+- Install doctor for shared tooling plus per-harness readiness
 - Permission modes (`prompt_on_risk`, `always_ask`, `auto_allow`)
-- Environment variable settings for Codex sessions
+- Environment variable settings for harness sessions
 - Electron auto-update integration
 
 ## Workspace Layout
@@ -148,9 +149,10 @@ npm run test
 
 - Node.js 20+
 - npm available on PATH
-- Codex authentication flow
+- At least one configured harness
 
 ## Current Focus
 
-- Gemini is temporarily disabled while the Codex app-server flow is being finalized.
-- The UI now prioritizes Codex-first workflows with a live activity feed (commands, file changes, reasoning, and tool calls).
+- Codex keeps the richest structured integration path.
+- OpenCode is available as an alternative harness and hides unsupported controls automatically.
+- Gemini remains disabled while its runtime path is rebuilt on the harness-capability architecture.

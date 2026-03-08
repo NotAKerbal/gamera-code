@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type {
   CodexAuthStatus,
   CodexLoginResult,
+  HarnessId,
   InstallDependenciesResult,
   InstallDetail,
   InstallDependencyKey,
@@ -14,6 +15,7 @@ import { createCommandRunner, type CommandRunner } from "../utils/commandRunner"
 import { resolveCodexBinaryPath } from "../utils/codexBinary";
 import { resolveBundledRipgrepBinaryPath } from "../utils/ripgrepBinary";
 import { CodexAppServerClient } from "./codexAppServer";
+import { getHarnessDefinition, getPtyHarnessAdapter } from "./harnessDefinitions";
 
 interface InstallCommand {
   label: string;
@@ -21,7 +23,7 @@ interface InstallCommand {
   args: string[];
 }
 
-const DEFAULT_SETUP_TARGETS: InstallDependencyKey[] = ["node", "npm", "git", "rg", "codex"];
+const DEFAULT_SETUP_TARGETS: InstallDependencyKey[] = ["node", "npm", "git", "rg"];
 
 const existsInPath = async (
   runner: CommandRunner,
@@ -67,7 +69,8 @@ export class InstallerManager {
     const npm = await existsInPath(this.runner, "npm", ["--version"]);
     const git = await existsInPath(this.runner, "git", ["--version"]);
     const rg = await existsInPath(this.runner, "rg", ["--version"]);
-    const codex = await this.checkCodexAppServer();
+    const codex = await this.checkHarnessHealth("codex");
+    const opencode = await this.checkHarnessHealth("opencode");
     const bundledRg = resolveBundledRipgrepBinaryPath();
     const rgOk = rg.ok || Boolean(bundledRg);
 
@@ -81,7 +84,8 @@ export class InstallerManager {
         version: rg.version,
         message: rg.ok ? "ok" : bundledRg ? "Bundled with app" : rg.message
       },
-      { key: "codex", ok: codex.ok, version: codex.version, message: codex.message }
+      { key: "codex", ok: codex.ok, version: codex.version, message: codex.message },
+      { key: "opencode", ok: opencode.ok, version: opencode.version, message: opencode.message }
     ];
 
     const status: InstallStatus = {
@@ -90,7 +94,11 @@ export class InstallerManager {
       gitOk: git.ok,
       rgOk,
       codexOk: codex.ok,
+      opencodeOk: opencode.ok,
       geminiOk: true,
+      readyHarnessIds: [codex.ok ? "codex" : null, opencode.ok ? "opencode" : null].filter(
+        (value): value is HarnessId => Boolean(value)
+      ),
       details
     };
 
@@ -173,12 +181,25 @@ export class InstallerManager {
   }
 
   async installCli(provider: Provider): Promise<{ ok: boolean; logs: string[] }> {
-    if (provider === "codex") {
+    const definition = getHarnessDefinition(provider);
+    if (definition.bundled) {
       return {
         ok: true,
         logs: [
           "Codex app server is bundled with the desktop app. No extra Codex CLI installation is required.",
           "If authentication is needed, Codex will prompt during your first Codex thread prompt."
+        ]
+      };
+    }
+
+    const adapter = getPtyHarnessAdapter(provider);
+    if (adapter && provider === "opencode") {
+      const install = adapter.getInstallCommand();
+      return {
+        ok: true,
+        logs: [
+          "OpenCode is not bundled with the desktop app.",
+          `Install it with: ${install.command} ${install.args.join(" ")}`
         ]
       };
     }
@@ -301,8 +322,28 @@ export class InstallerManager {
       if (target === "codex") {
         return !status.codexOk;
       }
+      if (target === "opencode") {
+        return !status.opencodeOk;
+      }
       return false;
     });
+  }
+
+  private async checkHarnessHealth(harnessId: HarnessId): Promise<{ ok: boolean; version?: string; message: string }> {
+    const definition = getHarnessDefinition(harnessId);
+    if (definition.runtimeKind === "codex_app_server") {
+      return this.checkCodexAppServer();
+    }
+
+    const adapter = getPtyHarnessAdapter(harnessId);
+    if (!adapter) {
+      return {
+        ok: false,
+        message: `No adapter registered for ${harnessId}`
+      };
+    }
+
+    return adapter.healthCheck(this.repository.getSettings().harnessSettings[harnessId]?.binaryOverride);
   }
 
   private mapToActionableDependencies(targets: InstallDependencyKey[]): Array<"node" | "git" | "rg"> {

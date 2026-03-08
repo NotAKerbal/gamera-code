@@ -1,9 +1,10 @@
-import type { Provider, ProviderInstallCommand } from "@code-app/shared";
+import type { CodexThreadOptions, Provider, ProviderInstallCommand } from "@code-app/shared";
 import { createCommandRunner, type CommandRunner } from "../utils/commandRunner";
 
 export interface ThreadContext {
   cwd: string;
   binaryOverride?: string;
+  options?: CodexThreadOptions;
 }
 
 export interface ProviderAdapter {
@@ -35,7 +36,8 @@ const buildHealthCheck = async (
 const createAdapter = (
   provider: Provider,
   npmPackage: string,
-  defaultBinary: string
+  defaultBinary: string,
+  getRunCommand?: (context: ThreadContext) => { command: string; args: string[] }
 ): ProviderAdapter => ({
   provider,
   npmPackage,
@@ -45,15 +47,27 @@ const createAdapter = (
     command: "npm",
     args: ["install", "-g", npmPackage]
   }),
-  getRunCommand: (context) => ({
-    command: context.binaryOverride || defaultBinary,
-    args: []
-  }),
+  getRunCommand: (context) =>
+    getRunCommand?.(context) ?? {
+      command: context.binaryOverride || defaultBinary,
+      args: []
+    },
   parseOutputChunk: (chunk) => chunk,
   healthCheck: async (override) => buildHealthCheck(runner, override || defaultBinary)
 });
 
 export const PROVIDER_ADAPTERS: Record<Provider, ProviderAdapter> = {
   codex: createAdapter("codex", "@openai/codex", "codex"),
+  opencode: createAdapter("opencode", "opencode-ai", "opencode", (context) => {
+    const args: string[] = [];
+    const model = context.options?.model?.trim();
+    if (model) {
+      args.push("--model", model);
+    }
+    return {
+      command: context.binaryOverride || "opencode",
+      args
+    };
+  }),
   gemini: createAdapter("gemini", "@google/gemini-cli", "gemini")
 };

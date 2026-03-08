@@ -1,8 +1,11 @@
 import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type Database from "better-sqlite3";
 import type {
   AppSettings,
+  HarnessId,
+  HarnessSettings,
   InstallStatus,
   MessageEvent,
   OrchestrationChild,
@@ -22,6 +25,13 @@ import type {
 } from "@code-app/shared";
 import { getThreadDataPath, type AppPaths } from "./paths";
 
+const SharedHarnesses = require(resolve(__dirname, "../../../shared/dist/harnesses.js")) as {
+  DEFAULT_HARNESS_OPTIONS: Pick<HarnessSettings, "codex" | "opencode"> & {
+    codex: NonNullable<HarnessSettings["codex"]>["defaults"];
+    opencode: NonNullable<HarnessSettings["opencode"]>["defaults"];
+  };
+};
+
 const DEFAULT_DEV_COMMAND: ProjectDevCommand = {
   id: "default",
   name: "Dev Server",
@@ -32,6 +42,15 @@ const DEFAULT_DEV_COMMAND: ProjectDevCommand = {
 const DEFAULT_SETTINGS = {
   permissionMode: "prompt_on_risk",
   theme: "midnight",
+  defaultHarnessId: "codex",
+  harnessSettings: {
+    codex: {
+      defaults: SharedHarnesses.DEFAULT_HARNESS_OPTIONS.codex
+    },
+    opencode: {
+      defaults: SharedHarnesses.DEFAULT_HARNESS_OPTIONS.opencode
+    }
+  },
   binaryOverrides: {},
   envVars: {},
   defaultProjectDirectory: "",
@@ -192,6 +211,7 @@ const mapThread = (row: ThreadRow): Thread => {
     projectId: row.project_id,
     parentThreadId: row.parent_thread_id ?? undefined,
     title: row.title,
+    harnessId: row.provider,
     provider: row.provider,
     status: row.status,
     createdAt: row.created_at,
@@ -205,6 +225,72 @@ const mapThread = (row: ThreadRow): Thread => {
     mapped.pinnedAt = row.pinned_at;
   }
   return mapped as Thread;
+};
+
+const normalizeHarnessSettings = (partial: Partial<AppSettings> | null | undefined): HarnessSettings => {
+  const input = partial ?? {};
+  const next: HarnessSettings = {
+    ...DEFAULT_SETTINGS.harnessSettings,
+    ...input.harnessSettings
+  };
+  const codexCurrent = next.codex ?? {};
+  const opencodeCurrent = next.opencode ?? {};
+
+  next.codex = {
+    ...(input.binaryOverrides?.codex ? { binaryOverride: input.binaryOverrides.codex } : {}),
+    ...codexCurrent,
+    defaults: {
+      ...DEFAULT_SETTINGS.codexDefaults,
+      ...(input.codexDefaults ?? {}),
+      ...(codexCurrent.defaults ?? {})
+    }
+  };
+    next.opencode = {
+      ...(input.binaryOverrides?.opencode ? { binaryOverride: input.binaryOverrides.opencode } : {}),
+      ...opencodeCurrent,
+      defaults: {
+        ...SharedHarnesses.DEFAULT_HARNESS_OPTIONS.opencode,
+        ...(opencodeCurrent.defaults ?? {})
+      }
+    };
+
+  return next;
+};
+
+const deriveLegacyBinaryOverrides = (harnessSettings: HarnessSettings): AppSettings["binaryOverrides"] => ({
+  ...DEFAULT_SETTINGS.binaryOverrides,
+  codex: harnessSettings.codex?.binaryOverride,
+  opencode: harnessSettings.opencode?.binaryOverride
+});
+
+const deriveLegacyCodexDefaults = (harnessSettings: HarnessSettings): AppSettings["codexDefaults"] => ({
+  ...DEFAULT_SETTINGS.codexDefaults,
+  ...(harnessSettings.codex?.defaults ?? {})
+});
+
+const normalizeAppSettings = (partial: Partial<AppSettings> | null | undefined): AppSettings => {
+  const input = partial ?? {};
+  const harnessSettings = normalizeHarnessSettings(input);
+
+  return {
+    ...DEFAULT_SETTINGS,
+    ...input,
+    harnessSettings,
+    binaryOverrides: {
+      ...DEFAULT_SETTINGS.binaryOverrides,
+      ...input.binaryOverrides,
+      ...deriveLegacyBinaryOverrides(harnessSettings)
+    },
+    envVars: {
+      ...DEFAULT_SETTINGS.envVars,
+      ...input.envVars
+    },
+    codexDefaults: {
+      ...DEFAULT_SETTINGS.codexDefaults,
+      ...input.codexDefaults,
+      ...deriveLegacyCodexDefaults(harnessSettings)
+    }
+  };
 };
 
 const mapSession = (row: SessionRow): Session => ({
@@ -783,14 +869,16 @@ export class Repository {
     return row ? mapThread(row) : null;
   }
 
-  createThread(input: { projectId: string; title: string; provider: Provider; parentThreadId?: string }): Thread {
+  createThread(input: { projectId: string; title: string; harnessId?: HarnessId; provider?: Provider; parentThreadId?: string }): Thread {
     const now = new Date().toISOString();
+    const provider = input.harnessId ?? input.provider ?? "codex";
     const thread: Thread = {
       id: randomUUID(),
       projectId: input.projectId,
       parentThreadId: input.parentThreadId,
       title: input.title,
-      provider: input.provider,
+      harnessId: provider,
+      provider,
       status: "created",
       createdAt: now,
       updatedAt: now
@@ -810,6 +898,7 @@ export class Repository {
     id: string;
     title?: string;
     color?: string;
+    harnessId?: HarnessId;
     provider?: Provider;
     status?: ThreadStatus;
     pinned?: boolean;
@@ -829,11 +918,13 @@ export class Repository {
           ? existingWithMetadata.pinnedAt ?? now
           : undefined
         : existingWithMetadata.pinnedAt;
+    const provider = input.harnessId ?? input.provider ?? existing.provider;
     const updated: ThreadWithMetadata = {
       ...existing,
       title: input.title ?? existing.title,
       color: normalizedColor,
-      provider: input.provider ?? existing.provider,
+      harnessId: provider,
+      provider,
       status: input.status ?? existing.status,
       pinnedAt,
       updatedAt: now
@@ -1156,22 +1247,7 @@ export class Repository {
 
     try {
       const parsed = JSON.parse(row.value) as Partial<AppSettings>;
-      return {
-        ...DEFAULT_SETTINGS,
-        ...parsed,
-        binaryOverrides: {
-          ...DEFAULT_SETTINGS.binaryOverrides,
-          ...parsed.binaryOverrides
-        },
-        envVars: {
-          ...DEFAULT_SETTINGS.envVars,
-          ...parsed.envVars
-        },
-        codexDefaults: {
-          ...DEFAULT_SETTINGS.codexDefaults,
-          ...parsed.codexDefaults
-        }
-      };
+      return normalizeAppSettings(parsed);
     } catch {
       return DEFAULT_SETTINGS;
     }
@@ -1179,9 +1255,13 @@ export class Repository {
 
   setSettings(input: Partial<AppSettings>): AppSettings {
     const current = this.getSettings();
-    const merged: AppSettings = {
+    const merged = normalizeAppSettings({
       ...current,
       ...input,
+      harnessSettings: {
+        ...current.harnessSettings,
+        ...input.harnessSettings
+      },
       binaryOverrides: {
         ...current.binaryOverrides,
         ...input.binaryOverrides
@@ -1194,7 +1274,7 @@ export class Repository {
         ...current.codexDefaults,
         ...input.codexDefaults
       }
-    };
+    });
 
     this.db
       .prepare(

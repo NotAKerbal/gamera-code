@@ -128,4 +128,27 @@ describe("sessionManager active project session detection", () => {
     const textItem = items.find((item) => item.type === "text");
     expect(textItem?.text).toContain("Detected preview URL: http://127.0.0.1:4173");
   });
+
+  it("disables compact for harnesses without the thread_compact capability", async () => {
+    const repository = {
+      getThread: vi.fn(() => ({
+        id: "thread-opencode",
+        provider: "opencode",
+        harnessId: "opencode",
+        projectId: "project-a"
+      }))
+    } as unknown as ConstructorParameters<typeof SessionManager>[0]["repository"];
+
+    const permissionEngine = {
+      clearThreadApprovals: vi.fn()
+    } as unknown as ConstructorParameters<typeof SessionManager>[0]["permissionEngine"];
+
+    const manager = new SessionManager({
+      repository,
+      permissionEngine,
+      emit: vi.fn()
+    });
+
+    await expect(manager.compactThread("thread-opencode")).resolves.toBe(false);
+  });
 });

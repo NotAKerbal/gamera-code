@@ -34,6 +34,7 @@ describeRepository("Repository", () => {
     expect(repo.listProjects()).toHaveLength(1);
     expect(repo.listThreads({ projectId: project.id })).toHaveLength(1);
     expect(repo.getThread(thread.id)?.title).toBe("hello");
+    expect(repo.getThread(thread.id)?.harnessId).toBe("codex");
   });
 
   it("stores and returns settings", () => {
@@ -53,6 +54,31 @@ describeRepository("Repository", () => {
     expect(settings.binaryOverrides.codex).toBe("/x/codex");
     expect(settings.envVars.FOO).toBe("bar");
     expect(settings.codexDefaults.sandboxMode).toBe("workspace-write");
+    expect(settings.harnessSettings.codex?.binaryOverride).toBe("/x/codex");
+  });
+
+  it("hydrates legacy and harness settings together", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-harness-settings-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    repo.setSettings({
+      harnessSettings: {
+        codex: {
+          binaryOverride: "/opt/codex",
+          defaults: {
+            model: "gpt-5.3-codex",
+            sandboxMode: "read-only"
+          }
+        }
+      }
+    });
+
+    const settings = repo.getSettings();
+    expect(settings.binaryOverrides.codex).toBe("/opt/codex");
+    expect(settings.codexDefaults.model).toBe("gpt-5.3-codex");
+    expect(settings.codexDefaults.sandboxMode).toBe("read-only");
   });
 
   it("persists provider thread ids", () => {

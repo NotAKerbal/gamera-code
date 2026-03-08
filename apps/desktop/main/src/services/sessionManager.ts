@@ -5,6 +5,7 @@ import path from "node:path";
 import * as pty from "node-pty";
 import type {
   CodexThreadOptions,
+  HarnessId,
   OrchestrationChild,
   OrchestrationRun,
   OrchestrationStatus,
@@ -17,7 +18,6 @@ import type {
   Thread,
   ThreadMetadataSuggestion
 } from "@code-app/shared";
-import { PROVIDER_ADAPTERS } from "./providerAdapters";
 import { Repository } from "./repository";
 import { PermissionEngine } from "./permissionEngine";
 import { CodexAppServerClient } from "./codexAppServer";
@@ -26,6 +26,7 @@ import { createCommandRunner } from "../utils/commandRunner";
 import { withRuntimePath } from "../utils/runtimeEnv";
 import { resolveCodexBinaryPath } from "../utils/codexBinary";
 import { withBundledRipgrepInPath } from "../utils/ripgrepBinary";
+import { getHarnessDefinition, getPtyHarnessAdapter, harnessHasCapability, resolveHarnessId } from "./harnessDefinitions";
 
 type UnknownRecord = Record<string, unknown>;
 const commandRunner = createCommandRunner();
@@ -682,6 +683,14 @@ export class SessionManager {
 
   constructor(private readonly deps: SessionManagerDeps) {}
 
+  private getThreadHarnessId(thread: Pick<Thread, "harnessId" | "provider">): HarnessId {
+    return resolveHarnessId(thread);
+  }
+
+  private threadSupports(thread: Pick<Thread, "harnessId" | "provider">, capability: Parameters<typeof harnessHasCapability>[1]) {
+    return harnessHasCapability(this.getThreadHarnessId(thread), capability);
+  }
+
   hasActiveAgentSessionInProject(projectId: string): boolean {
     for (const [threadId] of this.sessions) {
       const thread = this.deps.repository.getThread(threadId);
@@ -695,8 +704,9 @@ export class SessionManager {
   async start(thread: Thread, projectPath: string, options?: CodexThreadOptions): Promise<Session> {
     const existing = this.deps.repository.getSession(thread.id);
     const existingRuntime = this.sessions.get(thread.id);
+    const harness = getHarnessDefinition(this.getThreadHarnessId(thread));
     if (existing && existingRuntime) {
-      if (thread.provider !== "codex") {
+      if (harness.runtimeKind !== "codex_app_server") {
         return existing;
       }
 
@@ -714,7 +724,7 @@ export class SessionManager {
       this.sessions.delete(thread.id);
     }
 
-    if (thread.provider === "codex") {
+    if (harness.runtimeKind === "codex_app_server") {
       const settings = this.deps.repository.getSettings();
       const mergedOptions: CodexThreadOptions = {
         ...settings.codexDefaults,
@@ -723,7 +733,12 @@ export class SessionManager {
       return this.startCodexSession(thread, projectPath, mergedOptions);
     }
 
-    return this.startPtySession(thread, projectPath);
+    const settings = this.deps.repository.getSettings();
+    const mergedOptions: CodexThreadOptions = {
+      ...(settings.harnessSettings[harness.id]?.defaults ?? {}),
+      ...options
+    };
+    return this.startPtySession(thread, projectPath, mergedOptions);
   }
 
   stop(threadId: string): boolean {
@@ -793,7 +808,7 @@ export class SessionManager {
 
     let running = this.sessions.get(threadId);
     const effectiveOptions = this.applySkillRuntimeOverrides(threadId, options, skills ?? []);
-    if (thread.provider === "codex") {
+    if (getHarnessDefinition(this.getThreadHarnessId(thread)).runtimeKind === "codex_app_server") {
       await this.start(thread, cwd, effectiveOptions);
       running = this.sessions.get(threadId);
     } else {
@@ -848,7 +863,7 @@ export class SessionManager {
     skills?: Array<{ name: string; path: string }>
   ): Promise<boolean> {
     const thread = this.deps.repository.getThread(threadId);
-    if (!thread || thread.provider !== "codex") {
+    if (!thread || !this.threadSupports(thread, "steer")) {
       return false;
     }
 
@@ -898,11 +913,12 @@ export class SessionManager {
 
   async compactThread(threadId: string): Promise<boolean> {
     const thread = this.deps.repository.getThread(threadId);
-    if (!thread || thread.provider !== "codex") {
+    if (!thread || !this.threadSupports(thread, "thread_compact")) {
       return false;
     }
 
-    const providerThreadId = this.deps.repository.getProviderThreadId(threadId, "codex");
+    const harnessId = this.getThreadHarnessId(thread);
+    const providerThreadId = this.deps.repository.getProviderThreadId(threadId, harnessId);
     if (!providerThreadId) {
       return false;
     }
@@ -911,7 +927,7 @@ export class SessionManager {
     if (running && running.kind === "codex_app_server") {
       await running.appServer.compactThread(providerThreadId);
     } else {
-      const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
+      const { env } = this.buildThreadEnv(thread.id, thread.projectId, this.getThreadHarnessId(thread));
       const appServer = new CodexAppServerClient({
         executablePath: resolveCodexBinaryPath(),
         env,
@@ -938,6 +954,7 @@ export class SessionManager {
     if (!sourceThread) {
       return null;
     }
+    const harnessId = this.getThreadHarnessId(sourceThread);
 
     const forkSourceMessages = this.deps.repository.listMessagesForFork({
       threadId: sourceThread.id,
@@ -967,11 +984,11 @@ export class SessionManager {
       });
     });
 
-    if (sourceThread.provider !== "codex") {
+    if (!this.threadSupports(sourceThread, "thread_fork")) {
       return forked;
     }
 
-    const sourceProviderThreadId = this.deps.repository.getProviderThreadId(sourceThread.id, "codex");
+    const sourceProviderThreadId = this.deps.repository.getProviderThreadId(sourceThread.id, harnessId);
     if (!sourceProviderThreadId) {
       return forked;
     }
@@ -982,7 +999,7 @@ export class SessionManager {
     }
 
     const options = normalizeCodexThreadOptions(project.path, this.deps.repository.getSettings().codexDefaults);
-    const { env } = this.buildThreadEnv(forked.id, sourceThread.projectId, sourceThread.provider);
+    const { env } = this.buildThreadEnv(forked.id, sourceThread.projectId, harnessId);
     const appServer = new CodexAppServerClient({
       executablePath: resolveCodexBinaryPath(),
       env,
@@ -994,7 +1011,7 @@ export class SessionManager {
       if (userTurnsAfterCutoff > 0) {
         await appServer.rollbackThread(forkedProviderThreadId, userTurnsAfterCutoff);
       }
-      this.deps.repository.setProviderThreadId(forked.id, "codex", forkedProviderThreadId);
+      this.deps.repository.setProviderThreadId(forked.id, harnessId, forkedProviderThreadId);
     } finally {
       await appServer.close();
     }
@@ -1088,7 +1105,7 @@ export class SessionManager {
 
   async reviewCommit(threadId: string, sha: string, title?: string): Promise<boolean> {
     const thread = this.deps.repository.getThread(threadId);
-    if (!thread || thread.provider !== "codex") {
+    if (!thread || !this.threadSupports(thread, "review")) {
       return false;
     }
 
@@ -1129,7 +1146,7 @@ export class SessionManager {
 
   async reviewThread(threadId: string, instructions?: string): Promise<boolean> {
     const thread = this.deps.repository.getThread(threadId);
-    if (!thread || thread.provider !== "codex") {
+    if (!thread || !this.threadSupports(thread, "review")) {
       return false;
     }
 
@@ -1272,7 +1289,7 @@ export class SessionManager {
     }
 
     const thread = this.deps.repository.getThread(threadId);
-    if (!thread || thread.provider !== "codex") {
+    if (!thread || getHarnessDefinition(this.getThreadHarnessId(thread)).runtimeKind !== "codex_app_server") {
       return null;
     }
 
@@ -1281,7 +1298,7 @@ export class SessionManager {
       return null;
     }
 
-    const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
+    const { env } = this.buildThreadEnv(thread.id, thread.projectId, this.getThreadHarnessId(thread));
     const codexPathOverride = resolveCodexBinaryPath();
     const mergedOptions: CodexThreadOptions = {
       ...this.deps.repository.getSettings().codexDefaults,
@@ -1462,13 +1479,7 @@ export class SessionManager {
     cwd: string,
     options?: CodexThreadOptions
   ): Promise<RunningSession | null> {
-    if (thread.provider === "codex") {
-      await this.start(thread, cwd, options);
-      const runtime = this.sessions.get(thread.id);
-      return runtime ?? null;
-    }
-
-    await this.start(thread, cwd);
+    await this.start(thread, cwd, options);
     const runtime = this.sessions.get(thread.id);
     return runtime ?? null;
   }
@@ -1864,7 +1875,7 @@ export class SessionManager {
     };
   }
 
-  private buildThreadEnv(threadId: string, projectId: string, provider: Thread["provider"]) {
+  private buildThreadEnv(threadId: string, projectId: string, harnessId: HarnessId) {
     const settings = this.deps.repository.getSettings();
     const projectSettings = this.deps.repository.getProjectSettings(projectId);
     const previewUrl = projectSettings.lastDetectedPreviewUrl?.trim() ?? "";
@@ -1877,7 +1888,7 @@ export class SessionManager {
         CLICOLOR: "0",
         TERM: "dumb",
         CODE_APP_THREAD_ID: threadId,
-        CODE_APP_PROVIDER: provider,
+        CODE_APP_PROVIDER: harnessId,
         CODE_APP_PROJECT_ID: projectId,
         ...(previewUrl ? { CODE_APP_PREVIEW_URL: previewUrl } : {})
       })
@@ -1889,11 +1900,15 @@ export class SessionManager {
     return { settings, env };
   }
 
-  private startPtySession(thread: Thread, projectPath: string): Session {
-    const { settings, env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
-    const adapter = PROVIDER_ADAPTERS[thread.provider];
-    const binaryOverride = settings.binaryOverrides[thread.provider];
-    const run = adapter.getRunCommand({ cwd: projectPath, binaryOverride });
+  private startPtySession(thread: Thread, projectPath: string, options?: CodexThreadOptions): Session {
+    const harnessId = this.getThreadHarnessId(thread);
+    const { settings, env } = this.buildThreadEnv(thread.id, thread.projectId, harnessId);
+    const adapter = getPtyHarnessAdapter(harnessId);
+    if (!adapter) {
+      throw new Error(`No PTY adapter registered for harness ${harnessId}`);
+    }
+    const binaryOverride = settings.harnessSettings[harnessId]?.binaryOverride ?? settings.binaryOverrides[harnessId];
+    const run = adapter.getRunCommand({ cwd: projectPath, binaryOverride, options });
 
     const ptyProcess = pty.spawn(run.command, run.args, {
       name: "xterm-256color",
@@ -1948,7 +1963,8 @@ export class SessionManager {
     projectPath: string,
     options?: CodexThreadOptions
   ): Promise<Session> {
-    const { env } = this.buildThreadEnv(thread.id, thread.projectId, thread.provider);
+    const harnessId = this.getThreadHarnessId(thread);
+    const { env } = this.buildThreadEnv(thread.id, thread.projectId, harnessId);
     const codexPathOverride = resolveCodexBinaryPath();
     const appServer = new CodexAppServerClient({
       executablePath: codexPathOverride,
@@ -1957,7 +1973,7 @@ export class SessionManager {
     });
     await appServer.connect();
 
-    const existingProviderThreadId = this.deps.repository.getProviderThreadId(thread.id, "codex");
+    const existingProviderThreadId = this.deps.repository.getProviderThreadId(thread.id, harnessId);
     const threadOptions = normalizeCodexThreadOptions(projectPath, options);
     const optionsKey = codexThreadOptionsKey(threadOptions);
     let providerThreadId: string;
@@ -1968,10 +1984,10 @@ export class SessionManager {
       if (!resumeFailed) {
         throw error;
       }
-      this.deps.repository.clearProviderThreadId(thread.id, "codex");
+      this.deps.repository.clearProviderThreadId(thread.id, harnessId);
       providerThreadId = await appServer.startOrResumeThread(null, threadOptions);
     }
-    this.deps.repository.setProviderThreadId(thread.id, "codex", providerThreadId);
+    this.deps.repository.setProviderThreadId(thread.id, harnessId, providerThreadId);
 
     const envHash = createHash("sha1").update(JSON.stringify(env)).digest("hex");
     const session = this.deps.repository.startSession({
@@ -2558,7 +2574,7 @@ export class SessionManager {
 
   private async maybeCreateSubthreadOrchestration(parentThreadId: string, assistantMessage: string): Promise<void> {
     const thread = this.deps.repository.getThread(parentThreadId);
-    if (!thread || thread.provider !== "codex") {
+    if (!thread || !this.threadSupports(thread, "subthreads")) {
       return;
     }
     await this.maybeProcessSubthreadFeedback(parentThreadId, assistantMessage);

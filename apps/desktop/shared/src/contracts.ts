@@ -16,6 +16,7 @@ import type {
   InstallStatus,
   CodexAuthStatus,
   CodexLoginResult,
+  HarnessId,
   MessageEvent,
   OrchestrationChild,
   OrchestrationRun,
@@ -116,11 +117,12 @@ export interface DesktopApi {
   };
   threads: {
     list: (input?: { projectId?: string; includeArchived?: boolean }) => Promise<Thread[]>;
-    create: (input: { projectId: string; title: string; provider: Provider }) => Promise<Thread>;
+    create: (input: { projectId: string; title: string; harnessId?: HarnessId; provider?: Provider }) => Promise<Thread>;
     update: (input: {
       id: string;
       title?: string;
       color?: string;
+      harnessId?: HarnessId;
       provider?: Provider;
       status?: Thread["status"];
       pinned?: boolean;
@@ -184,7 +186,7 @@ export interface DesktopApi {
   };
   installer: {
     doctor: () => Promise<InstallStatus>;
-    installCli: (input: { provider: Provider }) => Promise<{ ok: boolean; logs: string[] }>;
+    installCli: (input: { harnessId?: HarnessId; provider?: Provider }) => Promise<{ ok: boolean; logs: string[] }>;
     installDependencies: (input?: { targets?: InstallDependencyKey[] }) => Promise<InstallDependenciesResult>;
     getCodexAuthStatus: () => Promise<CodexAuthStatus>;
     loginCodex: () => Promise<CodexLoginResult>;

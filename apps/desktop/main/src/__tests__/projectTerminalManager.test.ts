@@ -34,7 +34,8 @@ describe("projectTerminalManager utils", () => {
 });
 
 describe("projectTerminalManager switching", () => {
-  it("stops previous and starts next project for start_stop behavior", () => {
+  it("stops previous and starts next project for start_stop behavior", async () => {
+    vi.useFakeTimers();
     const repository = {
       getProjectSettings: vi.fn((projectId: string) => ({
         ...baseSettings,
@@ -60,14 +61,18 @@ describe("projectTerminalManager switching", () => {
     }));
 
     manager.setActiveProject("p1");
+    await vi.runAllTimersAsync();
     manager.setActiveProject("p2");
+    await vi.runAllTimersAsync();
 
     expect(startSpy).toHaveBeenCalledWith("p1", undefined, true);
-    expect(stopSpy).toHaveBeenCalledWith("p1");
+    expect(stopSpy).toHaveBeenCalledWith("p1", "default");
     expect(startSpy).toHaveBeenCalledWith("p2", undefined, true);
+    vi.useRealTimers();
   });
 
-  it("does not auto-start on project enter when project auto-start flag is false", () => {
+  it("does not auto-start on project enter when project auto-start flag is false", async () => {
+    vi.useFakeTimers();
     const repository = {
       getProjectSettings: vi.fn((projectId: string) => ({
         ...baseSettings,
@@ -93,11 +98,14 @@ describe("projectTerminalManager switching", () => {
     }));
 
     manager.setActiveProject("p1");
+    await vi.runAllTimersAsync();
 
     expect(startSpy).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
-  it("skips stopping previous project when an agent session is active there", () => {
+  it("skips stopping previous project when an agent session is active there", async () => {
+    vi.useFakeTimers();
     const repository = {
       getProjectSettings: vi.fn((projectId: string) => ({
         ...baseSettings,
@@ -124,11 +132,14 @@ describe("projectTerminalManager switching", () => {
     }));
 
     manager.setActiveProject("p1");
+    await vi.runAllTimersAsync();
     manager.setActiveProject("p2");
+    await vi.runAllTimersAsync();
 
     expect(startSpy).toHaveBeenCalledWith("p1", undefined, true);
     expect(stopSpy).not.toHaveBeenCalledWith("p1");
     expect(startSpy).toHaveBeenCalledWith("p2", undefined, true);
+    vi.useRealTimers();
   });
 
   it("does not restart already-running terminals during auto-start-only start", () => {
@@ -183,7 +194,8 @@ describe("projectTerminalManager switching", () => {
     expect(stopSpy).not.toHaveBeenCalled();
   });
 
-  it("does not call start on project enter when no commands are auto-start", () => {
+  it("does not call start on project enter when no commands are auto-start", async () => {
+    vi.useFakeTimers();
     const repository = {
       getProjectSettings: vi.fn((projectId: string) => ({
         ...baseSettings,
@@ -209,7 +221,9 @@ describe("projectTerminalManager switching", () => {
     }));
 
     manager.setActiveProject("p1");
+    await vi.runAllTimersAsync();
 
     expect(startSpy).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

@@ -1,15 +1,16 @@
 import { createPortal } from "react-dom";
 import { memo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
-import type { CodexSandboxMode, CodexThreadOptions } from "@code-app/shared";
+import type { CodexSandboxMode, CodexThreadOptions, HarnessId } from "@code-app/shared";
 import {
   APPROVAL_OPTIONS,
   COLLABORATION_OPTIONS,
   formatModelDisplayName,
+  harnessSupports,
   acknowledgeDangerFullAccessWarning,
   hasDangerFullAccessWarningAcknowledged,
-  MODEL_SUGGESTIONS,
   REASONING_OPTIONS,
   SANDBOX_OPTIONS,
+  SUPPORTED_HARNESSES,
   WEB_SEARCH_OPTIONS,
   type ComposerDropdownKind
 } from "./appCore";
@@ -25,6 +26,9 @@ type ComposerDropdownPortalProps = {
   composerDropdown: ComposerDropdownState | null;
   composerDropdownMenuRef: RefObject<HTMLDivElement | null>;
   composerOptions: CodexThreadOptions;
+  currentHarnessId: HarnessId;
+  canSwitchHarnesses: boolean;
+  onSelectHarnessModel: (harnessId: HarnessId, model: string) => void;
   setComposerOptions: Dispatch<SetStateAction<CodexThreadOptions>>;
   setComposerDropdown: Dispatch<SetStateAction<ComposerDropdownState | null>>;
 };
@@ -33,6 +37,9 @@ const ComposerDropdownPortalComponent = ({
   composerDropdown,
   composerDropdownMenuRef,
   composerOptions,
+  currentHarnessId,
+  canSwitchHarnesses,
+  onSelectHarnessModel,
   setComposerOptions,
   setComposerDropdown
 }: ComposerDropdownPortalProps) => {
@@ -55,7 +62,7 @@ const ComposerDropdownPortalComponent = ({
       {composerDropdown && (
         <div
           ref={composerDropdownMenuRef}
-          className="branch-dropdown-pop"
+          className={composerDropdown.kind === "model" ? "branch-dropdown-pop composer-model-dropdown-pop" : "branch-dropdown-pop"}
           style={{
             position: "fixed",
             bottom: `${composerDropdown.bottom}px`,
@@ -64,27 +71,69 @@ const ComposerDropdownPortalComponent = ({
             zIndex: 90
           }}
         >
-          <div className="branch-dropdown-list">
+          <div className={composerDropdown.kind === "model" ? "composer-model-dropdown-list" : "branch-dropdown-list"}>
             {composerDropdown.kind === "model" && (
-              <>
-                {MODEL_SUGGESTIONS.map((model) => (
-                  <button
-                    key={model}
-                    className={(composerOptions.model ?? "").trim() === model ? "branch-dropdown-row branch-dropdown-row-current" : "branch-dropdown-row"}
-                    onClick={() => {
-                      setComposerOptions((prev) => ({
-                        ...prev,
-                        model
-                      }));
-                      setComposerDropdown(null);
-                    }}
-                  >
-                    <span className="truncate">{formatModelDisplayName(model)}</span>
-                  </button>
-                ))}
-              </>
+              <div className="composer-model-harnesses">
+                {SUPPORTED_HARNESSES.filter((harness) => harness.modelGroups.length > 0).map((harness) => {
+                  const harnessIsActive = harness.id === currentHarnessId;
+                  const harnessClassName =
+                    harness.id === "codex"
+                      ? "composer-model-harness composer-model-harness-codex"
+                      : "composer-model-harness composer-model-harness-open";
+                  return (
+                    <section key={harness.id} className={harnessClassName}>
+                      <div className="composer-model-harness-header">
+                        <div className="composer-model-harness-title">{harness.label}</div>
+                        {!harnessIsActive && !canSwitchHarnesses ? (
+                          <div className="composer-model-harness-meta">Create a new thread to switch</div>
+                        ) : (
+                          <div className="composer-model-harness-meta">{harness.modelGroups.length} sections</div>
+                        )}
+                      </div>
+                      <div
+                        className={
+                          harness.id === "codex"
+                            ? "composer-model-harness-columns composer-model-harness-columns-codex"
+                            : "composer-model-harness-columns"
+                        }
+                      >
+                        {harness.modelGroups.map((group) => (
+                          <section key={`${harness.id}:${group.id}`} className="composer-model-column">
+                            <div className="composer-model-column-header">
+                              <div className="composer-model-column-title">{group.label}</div>
+                            </div>
+                            <div className="composer-model-column-items">
+                              {group.models.map((model) => {
+                                const selected = harnessIsActive && (composerOptions.model ?? "").trim() === model;
+                                const disabled = !harnessIsActive && !canSwitchHarnesses;
+                                return (
+                                  <button
+                                    key={`${harness.id}:${model}`}
+                                    className={
+                                      selected ? "composer-model-option composer-model-option-current" : "composer-model-option"
+                                    }
+                                    disabled={disabled}
+                                    title={model}
+                                    onClick={() => {
+                                      onSelectHarnessModel(harness.id, model);
+                                      setComposerDropdown(null);
+                                    }}
+                                  >
+                                    <span className="composer-model-option-name">{formatModelDisplayName(model)}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
             )}
             {composerDropdown.kind === "effort" &&
+              harnessSupports(currentHarnessId, "reasoning_effort") &&
               REASONING_OPTIONS.map((option) => (
                 <button
                   key={option.value}
@@ -105,6 +154,7 @@ const ComposerDropdownPortalComponent = ({
                 </button>
               ))}
             {composerDropdown.kind === "mode" &&
+              harnessSupports(currentHarnessId, "collaboration_mode") &&
               COLLABORATION_OPTIONS.map((option) => (
                 <button
                   key={option.value}
@@ -125,6 +175,7 @@ const ComposerDropdownPortalComponent = ({
                 </button>
               ))}
             {composerDropdown.kind === "sandbox" &&
+              harnessSupports(currentHarnessId, "sandbox") &&
               SANDBOX_OPTIONS.map((option) => (
                 <button
                   key={option.value}
@@ -146,6 +197,7 @@ const ComposerDropdownPortalComponent = ({
                 </button>
               ))}
             {composerDropdown.kind === "approval" &&
+              harnessSupports(currentHarnessId, "approval_policy") &&
               APPROVAL_OPTIONS.map((option) => (
                 <button
                   key={option.value}
@@ -166,6 +218,7 @@ const ComposerDropdownPortalComponent = ({
                 </button>
               ))}
             {composerDropdown.kind === "websearch" &&
+              harnessSupports(currentHarnessId, "web_search") &&
               WEB_SEARCH_OPTIONS.map((option) => (
                 <button
                   key={option.value}

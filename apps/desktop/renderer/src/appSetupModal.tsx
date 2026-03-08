@@ -1,9 +1,11 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import type { InstallStatus } from "@code-app/shared";
-import { INSTALL_DETAIL_LABELS, REQUIRED_SETUP_KEYS } from "./appCore";
+import type { HarnessId, InstallStatus } from "@code-app/shared";
+import { INSTALL_DETAIL_LABELS, REQUIRED_SETUP_KEYS, SUPPORTED_HARNESSES } from "./appCore";
 
 type SetupModalProps = {
   installStatus: InstallStatus;
+  setupDescription: string;
+  requiredSetupKeys: Set<string>;
   setupInstalling: boolean;
   setupPermissionGranted: boolean;
   setSetupPermissionGranted: Dispatch<SetStateAction<boolean>>;
@@ -12,11 +14,14 @@ type SetupModalProps = {
   onClose: () => void;
   onRefreshStatus: () => Promise<void>;
   onRunAutomaticSetup: () => Promise<void>;
+  onInstallHarness: (harnessId: HarnessId) => Promise<void>;
   appendLog: (line: string) => void;
 };
 
 export const SetupModal = ({
   installStatus,
+  setupDescription,
+  requiredSetupKeys,
   setupInstalling,
   setupPermissionGranted,
   setSetupPermissionGranted,
@@ -25,6 +30,7 @@ export const SetupModal = ({
   onClose,
   onRefreshStatus,
   onRunAutomaticSetup,
+  onInstallHarness,
   appendLog
 }: SetupModalProps) => (
   <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
@@ -45,12 +51,13 @@ export const SetupModal = ({
       </div>
 
       <p className="mb-3 text-sm text-slate-300">
-        This guided setup can automatically install missing dependencies for this app: Node.js/npm, Git, and ripgrep. Codex app server is bundled with the app.
+        {setupDescription}
       </p>
 
+      <div className="mb-2 text-xs uppercase tracking-wide text-muted">Core Dependencies</div>
       <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
         {installStatus.details
-          .filter((detail) => REQUIRED_SETUP_KEYS.has(detail.key))
+          .filter((detail) => requiredSetupKeys.has(detail.key) || REQUIRED_SETUP_KEYS.has(detail.key))
           .map((detail) => (
             <div key={detail.key} className="rounded-lg border border-border bg-black/20 p-2">
               <div className="font-medium">{INSTALL_DETAIL_LABELS[detail.key] ?? detail.key}</div>
@@ -59,6 +66,36 @@ export const SetupModal = ({
               </div>
             </div>
           ))}
+      </div>
+
+      <div className="mb-2 text-xs uppercase tracking-wide text-muted">Harnesses</div>
+      <div className="mb-4 grid gap-2 text-sm">
+        {SUPPORTED_HARNESSES.map((harness) => {
+          const detail = installStatus.details.find((entry) => entry.key === harness.id);
+          return (
+            <div key={harness.id} className="rounded-lg border border-border bg-black/20 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">{harness.label}</div>
+                  <div className={detail?.ok ? "text-slate-100" : "text-slate-300"}>
+                    {detail?.ok ? `Ready${detail.version ? ` (${detail.version})` : ""}` : detail?.message ?? "Not configured"}
+                  </div>
+                </div>
+                <button
+                  className="btn-secondary h-8 px-2 py-0 text-xs"
+                  onClick={() => {
+                    onInstallHarness(harness.id).catch((error) => {
+                      appendLog(`${harness.label} setup failed: ${String(error)}`);
+                    });
+                  }}
+                  disabled={setupInstalling}
+                >
+                  {detail?.ok ? "Verify" : "Setup"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {setupLiveLines.length > 0 && (
