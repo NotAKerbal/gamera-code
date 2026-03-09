@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+- Dynamic model picker
+- Auth for harnesses
+
 ## 0.6.0
 - OpenCode integration
 
