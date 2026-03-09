@@ -50,7 +50,6 @@ import type {
   CodexModelReasoningEffort,
   CodexSandboxMode,
   CodexThreadOptions,
-  HarnessAvailableModels,
   HarnessId,
   GitHistoryCommit,
   GitRepositoryCandidate,
@@ -535,7 +534,6 @@ export const App = () => {
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
   const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus | null>(null);
   const [openCodeAuthStatus, setOpenCodeAuthStatus] = useState<OpenCodeAuthStatus | null>(null);
-  const [availableModelsByHarness, setAvailableModelsByHarness] = useState<HarnessAvailableModels>({});
   const [isCodexAuthCardDismissed, setIsCodexAuthCardDismissed] = useState(false);
   const [codexLoginInFlight, setCodexLoginInFlight] = useState(false);
   const [codexLogoutInFlight, setCodexLogoutInFlight] = useState(false);
@@ -1768,12 +1766,6 @@ export const App = () => {
     return status;
   };
 
-  const loadHarnessAvailableModels = async (opencodeBinaryOverride = settings.harnessSettings.opencode?.binaryOverride) => {
-    const available = await api.installer.getAvailableModels({ opencodeBinaryOverride });
-    setAvailableModelsByHarness(available);
-    return available;
-  };
-
   const isCodexUnauthenticatedError = (payload: string) => {
     const text = payload.toLowerCase();
     return (
@@ -2496,7 +2488,6 @@ export const App = () => {
       await loadInstallerStatus();
       await loadCodexAuthStatus();
       await loadOpenCodeAuthStatus();
-      await loadHarnessAvailableModels();
       await checkUpdatesOnLaunch();
     };
 
@@ -2519,12 +2510,6 @@ export const App = () => {
   useEffect(() => {
     loadOpenCodeAuthStatus().catch((error) => {
       setLogs((prev) => [...prev, `OpenCode auth status refresh failed: ${String(error)}`]);
-    });
-  }, [settings.harnessSettings.opencode?.binaryOverride]);
-
-  useEffect(() => {
-    loadHarnessAvailableModels().catch((error) => {
-      setLogs((prev) => [...prev, `Model availability refresh failed: ${String(error)}`]);
     });
   }, [settings.harnessSettings.opencode?.binaryOverride]);
 
@@ -6957,18 +6942,18 @@ const stopActiveRun = async () => {
     try {
       const result = await api.installer.loginCodex();
       setLogs((prev) => [...prev, result.message]);
+      await loadInstallerStatus();
       await loadCodexAuthStatus();
-      await loadHarnessAvailableModels();
       if (!result.ok) {
         return;
       }
 
       window.setTimeout(() => {
+        loadInstallerStatus().catch((error) => {
+          setLogs((prev) => [...prev, `Harness refresh failed: ${String(error)}`]);
+        });
         loadCodexAuthStatus().catch((error) => {
           setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
-        });
-        loadHarnessAvailableModels().catch((error) => {
-          setLogs((prev) => [...prev, `Model availability refresh failed: ${String(error)}`]);
         });
       }, 3000);
     } catch (error) {
@@ -6987,8 +6972,8 @@ const stopActiveRun = async () => {
     try {
       const result = await api.installer.logoutCodex();
       setLogs((prev) => [...prev, result.message]);
+      await loadInstallerStatus();
       await loadCodexAuthStatus();
-      await loadHarnessAvailableModels();
     } catch (error) {
       setLogs((prev) => [...prev, `Codex logout failed: ${String(error)}`]);
     } finally {
@@ -7025,10 +7010,11 @@ const stopActiveRun = async () => {
       });
       setLogs((prev) => [...prev, result.message]);
       if (!result.ok) {
+        await loadInstallerStatus();
         return;
       }
       await pollOpenCodeAuthStatus((status) => status.credentialMethods.length > previousCredentialCount);
-      await loadHarnessAvailableModels();
+      await loadInstallerStatus();
     } catch (error) {
       setLogs((prev) => [...prev, `OpenCode login failed: ${String(error)}`]);
     } finally {
@@ -7051,12 +7037,12 @@ const stopActiveRun = async () => {
       });
       setLogs((prev) => [...prev, result.message]);
       if (!result.ok || !result.launched) {
+        await loadInstallerStatus();
         await loadOpenCodeAuthStatus();
-        await loadHarnessAvailableModels();
         return;
       }
       await pollOpenCodeAuthStatus((status) => status.credentialMethods.length < previousCredentialCount);
-      await loadHarnessAvailableModels();
+      await loadInstallerStatus();
     } catch (error) {
       setLogs((prev) => [...prev, `OpenCode logout failed: ${String(error)}`]);
     } finally {
@@ -7395,19 +7381,15 @@ TODO: Describe what this skill does.
     activeHarnessId === "codex" && codexAuthStatus?.requiresOpenaiAuth && !codexAuthStatus?.authenticated
   );
   const visibleHarnesses: Partial<Record<HarnessId, boolean>> = {
-    codex: Boolean(codexAuthStatus && (!codexAuthStatus.requiresOpenaiAuth || codexAuthStatus.authenticated)),
-    opencode: Boolean(openCodeAuthStatus?.authenticated)
+    codex: installStatus ? installStatus.readyHarnessIds.includes("codex") : true,
+    opencode: installStatus ? installStatus.readyHarnessIds.includes("opencode") : true
   };
   const visibleHarnessCount = SUPPORTED_HARNESSES.filter((harness) => visibleHarnesses[harness.id] !== false).length;
   const visibleModelHarnesses = SUPPORTED_HARNESSES.map((harness) => {
     if (visibleHarnesses[harness.id] === false) {
       return null;
     }
-    const availableModels = availableModelsByHarness[harness.id];
-    const modelGroupCount = harness.modelGroups.filter((group) => {
-      const models = availableModels ? group.models.filter((model) => availableModels.includes(model)) : group.models;
-      return models.length > 0;
-    }).length;
+    const modelGroupCount = harness.modelGroups.length;
     if (modelGroupCount === 0) {
       return null;
     }
@@ -10044,7 +10026,6 @@ TODO: Describe what this skill does.
         composerDropdownMenuRef={composerDropdownMenuRef}
         composerOptions={composerOptions}
         currentHarnessId={activeHarnessId}
-        availableModelsByHarness={availableModelsByHarness}
         visibleHarnesses={visibleHarnesses}
         visibleHarnessCount={visibleHarnessCount}
         canSwitchHarnesses={canSwitchActiveThreadHarness}
