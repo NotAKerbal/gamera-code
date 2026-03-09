@@ -94,6 +94,16 @@ interface WorkspaceModel {
 type ProjectModel = Project & { workspaceId: string };
 type ThreadWithMetadata = Thread & { color?: string; pinnedAt?: string };
 
+const normalizeStoredProvider = (value: string): Provider => {
+  if (value === "codex" || value === "opencode") {
+    return value;
+  }
+  if (value === "gemini") {
+    return "opencode";
+  }
+  return "codex";
+};
+
 const asProjectModel = (project: Project): ProjectModel => project as ProjectModel;
 
 interface ThreadRow {
@@ -199,13 +209,14 @@ const mapWorkspace = (row: WorkspaceRow): WorkspaceModel => ({
 });
 
 const mapThread = (row: ThreadRow): Thread => {
+  const provider = normalizeStoredProvider(row.provider);
   const mapped: ThreadWithMetadata = {
     id: row.id,
     projectId: row.project_id,
     parentThreadId: row.parent_thread_id ?? undefined,
     title: row.title,
-    harnessId: row.provider,
-    provider: row.provider,
+    harnessId: provider,
+    provider,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.last_message_ts ?? row.updated_at,

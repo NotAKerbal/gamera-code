@@ -189,20 +189,6 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
         "This guided setup can automatically install missing dependencies for this app: Node.js/npm, Git, ripgrep, and the OpenCode CLI.",
       verifyLabel: "Verify OpenCode CLI"
     }
-  },
-  {
-    id: "gemini",
-    label: "Gemini",
-    capabilities: ["streaming"],
-    modelGroups: [],
-    setup: {
-      requiredKeys: ["node", "npm", "git", "rg", "gemini"],
-      blockingKeys: ["gemini"],
-      installTargets: ["node", "npm", "git", "rg"],
-      description:
-        "This guided setup can automatically install missing dependencies for this app: Node.js/npm, Git, and ripgrep.",
-      verifyLabel: "Verify Gemini CLI"
-    }
   }
 ];
 
@@ -210,8 +196,7 @@ export const ENABLED_HARNESS_IDS = HARNESS_DESCRIPTORS.map((harness) => harness.
 
 export const DEFAULT_HARNESS_OPTIONS: Record<HarnessId, CodexThreadOptions | Record<string, never>> = {
   codex: DEFAULT_CODEX_OPTIONS,
-  opencode: DEFAULT_OPENCODE_OPTIONS,
-  gemini: {}
+  opencode: DEFAULT_OPENCODE_OPTIONS
 };
 
 export const getHarnessDescriptor = (harnessId: HarnessId) =>

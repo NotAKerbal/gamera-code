@@ -68,6 +68,5 @@ export const PROVIDER_ADAPTERS: Record<Provider, ProviderAdapter> = {
       command: context.binaryOverride || "opencode",
       args
     };
-  }),
-  gemini: createAdapter("gemini", "@google/gemini-cli", "gemini")
+  })
 };

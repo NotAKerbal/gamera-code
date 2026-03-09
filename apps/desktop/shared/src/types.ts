@@ -1,7 +1,6 @@
 export interface HarnessDefaultsById {
   codex: CodexThreadOptions;
   opencode: CodexThreadOptions;
-  gemini: Record<string, never>;
 }
 
 export interface HarnessCapabilityMap {
@@ -27,13 +26,11 @@ export interface HarnessCapabilityMap {
     | "web_search"
     | "approval_policy"
     | "collaboration_mode";
-  gemini: "streaming";
 }
 
 export interface HarnessModelGroupMap {
   codex: "flagship" | "codex" | "spark";
   opencode: "openai" | "anthropic" | "google" | "xai" | "deepseek" | "glm" | "kimi" | "vertex_oss" | "minimax";
-  gemini: never;
 }
 
 export type HarnessId = keyof HarnessDefaultsById;

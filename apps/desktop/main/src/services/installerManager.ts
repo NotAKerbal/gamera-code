@@ -511,16 +511,6 @@ export class InstallerManager {
       };
     }
 
-    if (provider === "gemini") {
-      return {
-        ok: false,
-        logs: [
-          "Gemini support is temporarily disabled while Codex app-server flow is being finalized.",
-          "Gemini will return as an SDK-backed provider in a follow-up update."
-        ]
-      };
-    }
-
     return {
       ok: false,
       logs: [`Unsupported provider: ${provider}`]
