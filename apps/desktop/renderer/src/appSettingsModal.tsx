@@ -259,10 +259,8 @@ export const SettingsModal = memo(({
   const [settingsEnvText, setSettingsEnvText] = useState(initialDraft.settingsEnvText);
   const [pendingDangerSandboxMode, setPendingDangerSandboxMode] = useState<{
     mode: CodexSandboxMode;
-    harnessId?: HarnessId;
   } | null>(null);
   const [skillEditorNotice, setSkillEditorNotice] = useState("");
-  const [selectedHarnessSettingsId, setSelectedHarnessSettingsId] = useState<HarnessId>(initialDraft.settings.defaultHarnessId ?? currentHarnessId);
   const selectedHarnessId = settings.defaultHarnessId ?? currentHarnessId;
   const currentHarness = getSupportedHarness(selectedHarnessId);
   const modelSuggestions = currentHarness?.modelGroups.flatMap((group) => group.models) ?? [];
@@ -272,39 +270,11 @@ export const SettingsModal = memo(({
     setSettings(initialDraft.settings);
     setComposerOptions(initialDraft.composerOptions);
     setSettingsEnvText(initialDraft.settingsEnvText);
-    setSelectedHarnessSettingsId(initialDraft.settings.defaultHarnessId ?? currentHarnessId);
   }, [initialDraft]);
 
   useEffect(() => {
     setComposerOptions(getHarnessOptionsFromSettings(settings, selectedHarnessId));
-  }, [selectedHarnessId, settings.harnessSettings, settings.codexDefaults]);
-
-  const selectedHarnessSettings = getSupportedHarness(selectedHarnessSettingsId) ?? getSupportedHarness("codex");
-  const selectedHarnessSettingsOptions = getHarnessOptionsFromSettings(settings, selectedHarnessSettingsId);
-  const updateHarnessSettingsEntry = (
-    harnessId: HarnessId,
-    updater: (current: NonNullable<AppSettings["harnessSettings"][HarnessId]>) => NonNullable<AppSettings["harnessSettings"][HarnessId]>
-  ) => {
-    setSettings((prev) => {
-      const current = prev.harnessSettings[harnessId] ?? {};
-      return {
-        ...prev,
-        harnessSettings: {
-          ...prev.harnessSettings,
-          [harnessId]: updater(current)
-        }
-      };
-    });
-  };
-  const updateHarnessDefaults = (harnessId: HarnessId, patch: Partial<CodexThreadOptions>) => {
-    updateHarnessSettingsEntry(harnessId, (current) => ({
-      ...current,
-      defaults: {
-        ...(current.defaults ?? {}),
-        ...patch
-      }
-    }));
-  };
+  }, [selectedHarnessId, settings.codexDefaults]);
 
   const useWindowsStyleHeader = isWindows || !isMacOS;
   return (
@@ -581,63 +551,30 @@ export const SettingsModal = memo(({
 
           {settingsTab === "harnesses" && (
             <div className="space-y-3">
-              <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Connected Harnesses</div>
-                <div className="mx-2 space-y-2 px-2 py-3">
-                  {SUPPORTED_HARNESSES.map((harness) => {
-                    const isActive = selectedHarnessSettingsId === harness.id;
-                    const isReady = installStatus?.readyHarnessIds.includes(harness.id) ?? false;
-                    const statusDetail = installStatus?.details.find((detail) => detail.key === harness.id);
-                    return (
-                      <button
-                        key={harness.id}
-                        type="button"
-                        className={`w-full rounded-xl border px-3 py-3 text-left transition ${
-                          isActive ? "border-accent bg-accent/10" : "border-border/70 bg-black/20 hover:border-border"
-                        }`}
-                        onClick={() => setSelectedHarnessSettingsId(harness.id)}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-medium text-slate-100">{harness.label}</div>
-                            <div className="mt-1 text-xs text-slate-400">
-                              {statusDetail?.message ?? (isReady ? "Ready" : "Not connected")}
-                            </div>
-                          </div>
-                          <span
-                            className={`rounded-full px-2 py-1 text-[11px] font-medium ${
-                              isReady ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-500/15 text-slate-300"
-                            }`}
-                          >
-                            {isReady ? "Connected" : "Unavailable"}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
+              {SUPPORTED_HARNESSES.map((harness) => {
+                const isReady = installStatus?.readyHarnessIds.includes(harness.id) ?? false;
+                const statusDetail = installStatus?.details.find((detail) => detail.key === harness.id);
 
-              {selectedHarnessSettings && (
-                <>
-                  <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                    <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">{selectedHarnessSettings.label} Runtime</div>
+                return (
+                  <section key={harness.id} className="rounded-xl border border-border/80 bg-black/20 py-2">
+                    <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">{harness.label}</div>
                     <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                      <div className="text-sm text-muted">Binary override</div>
-                      <input
-                        className="input text-xs"
-                        value={settings.harnessSettings[selectedHarnessSettingsId]?.binaryOverride ?? ""}
-                        placeholder="Use bundled/default binary"
-                        onChange={(event) =>
-                          updateHarnessSettingsEntry(selectedHarnessSettingsId, (current) => ({
-                            ...current,
-                            binaryOverride: event.target.value.trim() || undefined
-                          }))
-                        }
-                      />
+                      <div className="text-sm text-muted">Status</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-xs text-slate-300">
+                          {statusDetail?.message ?? (isReady ? "Ready" : "Not connected")}
+                        </div>
+                        <span
+                          className={`rounded-full px-2 py-1 text-[11px] font-medium ${
+                            isReady ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-500/15 text-slate-300"
+                          }`}
+                        >
+                          {isReady ? "Connected" : "Unavailable"}
+                        </span>
+                      </div>
                     </div>
 
-                    {selectedHarnessSettingsId === "codex" && (
+                    {harness.id === "codex" && (
                       <>
                         <div className="mx-2 border-t border-border/70" />
                         <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -678,7 +615,7 @@ export const SettingsModal = memo(({
                       </>
                     )}
 
-                    {selectedHarnessSettingsId === "opencode" && (
+                    {harness.id === "opencode" && (
                       <>
                         <div className="mx-2 border-t border-border/70" />
                         <div className="mx-2 grid gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -747,142 +684,8 @@ export const SettingsModal = memo(({
                       </>
                     )}
                   </section>
-
-                  <section className="rounded-xl border border-border/80 bg-black/20 py-2">
-                    <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">{selectedHarnessSettings.label} Defaults</div>
-                    <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                      <div className="text-sm text-muted">Model</div>
-                      <input
-                        list={`model-suggestions-${selectedHarnessSettingsId}`}
-                        className="input text-xs"
-                        value={selectedHarnessSettingsOptions.model ?? ""}
-                        placeholder="Default model"
-                        onChange={(event) =>
-                          updateHarnessDefaults(selectedHarnessSettingsId, {
-                            model: event.target.value.trim() || undefined
-                          })
-                        }
-                      />
-                    </div>
-
-                    {harnessSupports(selectedHarnessSettingsId, "reasoning_effort") && (
-                      <>
-                        <div className="mx-2 border-t border-border/70" />
-                        <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                          <div className="text-sm text-muted">Reasoning effort</div>
-                          <CustomSelect
-                            value={selectedHarnessSettingsOptions.modelReasoningEffort ?? "medium"}
-                            options={REASONING_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                            onChange={(value) =>
-                              updateHarnessDefaults(selectedHarnessSettingsId, {
-                                modelReasoningEffort: value as CodexModelReasoningEffort
-                              })
-                            }
-                          />
-                        </div>
-                      </>
-                    )}
-
-                    {harnessSupports(selectedHarnessSettingsId, "sandbox") && (
-                      <>
-                        <div className="mx-2 border-t border-border/70" />
-                        <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                          <div className="text-sm text-muted">Sandbox mode</div>
-                          <CustomSelect
-                            value={selectedHarnessSettingsOptions.sandboxMode ?? "workspace-write"}
-                            options={SANDBOX_OPTIONS.map((option) => ({
-                              value: option.value,
-                              label: option.dropdownLabel ?? option.label,
-                              triggerLabel: option.label
-                            }))}
-                            onChange={(value) => {
-                              if (value === "danger-full-access" && !hasDangerFullAccessWarningAcknowledged()) {
-                                setPendingDangerSandboxMode({ mode: "danger-full-access", harnessId: selectedHarnessSettingsId });
-                                return;
-                              }
-                              updateHarnessDefaults(selectedHarnessSettingsId, {
-                                sandboxMode: value as CodexSandboxMode
-                              });
-                            }}
-                          />
-                        </div>
-                      </>
-                    )}
-
-                    {harnessSupports(selectedHarnessSettingsId, "approval_policy") && (
-                      <>
-                        <div className="mx-2 border-t border-border/70" />
-                        <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                          <div className="text-sm text-muted">Approval policy</div>
-                          <CustomSelect
-                            value={selectedHarnessSettingsOptions.approvalPolicy ?? "on-request"}
-                            options={APPROVAL_OPTIONS.map((option) => ({
-                              value: option.value,
-                              label: option.dropdownLabel ?? option.label,
-                              triggerLabel: option.label
-                            }))}
-                            onChange={(value) =>
-                              updateHarnessDefaults(selectedHarnessSettingsId, {
-                                approvalPolicy: value as CodexApprovalMode
-                              })
-                            }
-                          />
-                        </div>
-                      </>
-                    )}
-
-                    {harnessSupports(selectedHarnessSettingsId, "web_search") && (
-                      <>
-                        <div className="mx-2 border-t border-border/70" />
-                        <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                          <div className="text-sm text-muted">Web search mode</div>
-                          <CustomSelect
-                            value={selectedHarnessSettingsOptions.webSearchMode ?? "cached"}
-                            options={WEB_SEARCH_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                            onChange={(value) =>
-                              updateHarnessDefaults(selectedHarnessSettingsId, {
-                                webSearchMode: value as CodexWebSearchMode
-                              })
-                            }
-                          />
-                        </div>
-                      </>
-                    )}
-
-                    {harnessSupports(selectedHarnessSettingsId, "collaboration_mode") && (
-                      <>
-                        <div className="mx-2 border-t border-border/70" />
-                        <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                          <div className="text-sm text-muted">Collaboration mode</div>
-                          <CustomSelect
-                            value={selectedHarnessSettingsOptions.collaborationMode ?? "plan"}
-                            options={COLLABORATION_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-                            onChange={(value) =>
-                              updateHarnessDefaults(selectedHarnessSettingsId, {
-                                collaborationMode: value as CodexCollaborationMode
-                              })
-                            }
-                          />
-                        </div>
-                      </>
-                    )}
-
-                    <div className="mx-2 border-t border-border/70" />
-                    <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
-                      <div className="text-sm text-muted">Network access</div>
-                      <ToggleButton
-                        enabled={selectedHarnessSettingsOptions.networkAccessEnabled ?? true}
-                        className="md:justify-self-end"
-                        onToggle={(enabled) =>
-                          updateHarnessDefaults(selectedHarnessSettingsId, {
-                            networkAccessEnabled: enabled
-                          })
-                        }
-                      />
-                    </div>
-                  </section>
-                </>
-              )}
+                );
+              })}
             </div>
           )}
 
@@ -1194,16 +997,10 @@ export const SettingsModal = memo(({
                 className="btn-primary"
                 onClick={() => {
                   acknowledgeDangerFullAccessWarning();
-                  if (pendingDangerSandboxMode.harnessId) {
-                    updateHarnessDefaults(pendingDangerSandboxMode.harnessId, {
-                      sandboxMode: pendingDangerSandboxMode.mode
-                    });
-                  } else {
-                    setComposerOptions((prev) => ({
-                      ...prev,
-                      sandboxMode: pendingDangerSandboxMode.mode
-                    }));
-                  }
+                  setComposerOptions((prev) => ({
+                    ...prev,
+                    sandboxMode: pendingDangerSandboxMode.mode
+                  }));
                   setPendingDangerSandboxMode(null);
                 }}
               >

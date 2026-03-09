@@ -24,6 +24,7 @@ import {
   FaCodeBranch,
   FaCog,
   FaEye,
+  FaFolder,
   FaMicrophone,
   FaNetworkWired,
   FaPen,
@@ -148,6 +149,7 @@ import {
   pendingQuestionEquals,
   readStoredActiveProjectId,
   readStoredActiveWorkspaceId,
+  readStoredProjectListOpenById,
   readStoredThreadSummaries,
   safeHref,
   sanitizeForDisplay,
@@ -164,6 +166,7 @@ import {
   todosToMarkdown,
   writeStoredActiveProjectId,
   writeStoredActiveWorkspaceId,
+  writeStoredProjectListOpenById,
   type ActivityEntry,
   type ComposerAttachment,
   type ComposerDropdownKind,
@@ -529,6 +532,8 @@ export const App = () => {
   const [composerHasText, setComposerHasText] = useState(false);
   const [threadMenuProjectId, setThreadMenuProjectId] = useState<string | null>(null);
   const [showArchivedByProjectId, setShowArchivedByProjectId] = useState<Record<string, boolean>>({});
+  const [projectListOpenById, setProjectListOpenById] = useState<Record<string, boolean>>(() => readStoredProjectListOpenById());
+  const [hasLoadedProjectsOnce, setHasLoadedProjectsOnce] = useState(false);
   const [threadDraftTitle, setThreadDraftTitle] = useState("New thread");
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
@@ -1625,6 +1630,7 @@ export const App = () => {
   const loadProjects = async (workspaceIdOverride?: string | null) => {
     const allProjects = await api.projects.list();
     setProjects(allProjects);
+    setHasLoadedProjectsOnce(true);
 
     const activeStillExists = activeProjectId ? allProjects.some((project) => project.id === activeProjectId) : false;
     if (activeStillExists) {
@@ -2558,6 +2564,28 @@ export const App = () => {
   useEffect(() => {
     writeStoredActiveWorkspaceId(activeWorkspaceId);
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!hasLoadedProjectsOnce) {
+      return;
+    }
+    writeStoredProjectListOpenById(projectListOpenById);
+  }, [hasLoadedProjectsOnce, projectListOpenById]);
+
+  useEffect(() => {
+    if (!hasLoadedProjectsOnce) {
+      return;
+    }
+    const validProjectIds = new Set(projects.map((project) => project.id));
+    setProjectListOpenById((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([projectId]) => validProjectIds.has(projectId)));
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      const unchanged =
+        prevKeys.length === nextKeys.length && prevKeys.every((projectId) => Object.is(prev[projectId], next[projectId]));
+      return unchanged ? prev : next;
+    });
+  }, [hasLoadedProjectsOnce, projects]);
 
   useEffect(() => {
     if (!activeProjectId) {
@@ -7144,12 +7172,7 @@ const stopActiveRun = async () => {
       const defaultHarnessId = draft.settings.defaultHarnessId ?? settings.defaultHarnessId ?? "codex";
       const nextHarnessSettings = {
         ...settings.harnessSettings,
-        ...draft.settings.harnessSettings,
-        [defaultHarnessId]: {
-          ...settings.harnessSettings[defaultHarnessId],
-          ...draft.settings.harnessSettings?.[defaultHarnessId],
-          defaults: draft.composerOptions
-        }
+        ...draft.settings.harnessSettings
       };
 
       const saved = await api.settings.set({
@@ -7165,7 +7188,7 @@ const stopActiveRun = async () => {
         condenseActivityTimeline: draft.settings.condenseActivityTimeline ?? true,
         projectTerminalSwitchBehaviorDefault: draft.settings.projectTerminalSwitchBehaviorDefault ?? "start_stop",
         preferredSystemTerminalId: draft.settings.preferredSystemTerminalId?.trim() ?? "",
-        codexDefaults: defaultHarnessId === "codex" ? draft.composerOptions : settings.codexDefaults
+        codexDefaults: draft.composerOptions
       });
 
       await api.permissions.setMode({ mode });
@@ -8123,10 +8146,12 @@ TODO: Describe what this skill does.
                   const visibleRows = threadRows?.active ?? [];
                   const archivedRows = threadRows?.archived ?? [];
                   const showArchived = Boolean(showArchivedByProjectId[project.id]);
+                  const projectListOpen = projectListOpenById[project.id] ?? true;
                   const active = activeProjectId === project.id;
                   const menuOpen = threadMenuProjectId === project.id;
                   const setupState = projectSetupById[project.id];
                   const setupRunning = setupState?.status === "running";
+                  const FolderIcon = projectListOpen ? FaFolderOpen : FaFolder;
 
                   return (
                     <section key={project.id} className={active ? "project-section active" : "project-section"}>
@@ -8158,35 +8183,52 @@ TODO: Describe what this skill does.
                             autoFocus
                           />
                         ) : (
-                          <button
-                            className={active ? "project-row active" : "project-row"}
-                            onClick={() => {
-                              focusProjectFromSidebar(project.id).catch((error) => {
-                                setLogs((prev) => [...prev, `Project focus failed: ${String(error)}`]);
-                              });
-                            }}
-                            onDoubleClick={() => beginProjectInlineRename(project)}
-                            title="Double-click to rename project"
-                          >
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate">{project.name}</span>
-                              {setupState && (
-                                <span
-                                  className={`mt-0.5 block truncate text-[10px] leading-4 ${
-                                    setupState.status === "failed" ? "text-red-300" : "text-slate-400"
-                                  }`}
-                                >
-                                  {setupState.message}
-                                </span>
+                          <>
+                            <button
+                              type="button"
+                              className={projectListOpen ? "project-folder-toggle open" : "project-folder-toggle"}
+                              onClick={() =>
+                                setProjectListOpenById((prev) => ({
+                                  ...prev,
+                                  [project.id]: !projectListOpen
+                                }))
+                              }
+                              aria-expanded={projectListOpen}
+                              aria-label={projectListOpen ? `Collapse ${project.name}` : `Expand ${project.name}`}
+                              title={projectListOpen ? "Collapse project" : "Expand project"}
+                            >
+                              <FolderIcon className="project-folder-icon" aria-hidden="true" />
+                            </button>
+                            <button
+                              className={active ? "project-row active" : "project-row"}
+                              onClick={() => {
+                                focusProjectFromSidebar(project.id).catch((error) => {
+                                  setLogs((prev) => [...prev, `Project focus failed: ${String(error)}`]);
+                                });
+                              }}
+                              onDoubleClick={() => beginProjectInlineRename(project)}
+                              title="Double-click to rename project"
+                            >
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate">{project.name}</span>
+                                {setupState && (
+                                  <span
+                                    className={`mt-0.5 block truncate text-[10px] leading-4 ${
+                                      setupState.status === "failed" ? "text-red-300" : "text-slate-400"
+                                    }`}
+                                  >
+                                    {setupState.message}
+                                  </span>
+                                )}
+                              </span>
+                              {setupState?.status === "running" && (
+                                <FaSyncAlt className="ml-2 shrink-0 animate-spin text-[10px] text-slate-400" />
                               )}
-                            </span>
-                            {setupState?.status === "running" && (
-                              <FaSyncAlt className="ml-2 shrink-0 animate-spin text-[10px] text-slate-400" />
-                            )}
-                            {setupState?.status === "failed" && (
-                              <span className="ml-2 shrink-0 text-xs text-red-300">!</span>
-                            )}
-                          </button>
+                              {setupState?.status === "failed" && (
+                                <span className="ml-2 shrink-0 text-xs text-red-300">!</span>
+                              )}
+                            </button>
+                          </>
                         )}
                         <button
                           className={`project-action-btn transition-all duration-300 ${
@@ -8214,6 +8256,7 @@ TODO: Describe what this skill does.
                           )}
                           onClick={() => {
                             setActiveProjectId(project.id);
+                            setProjectListOpenById((prev) => ({ ...prev, [project.id]: true }));
                             setThreadMenuProjectId((prev) => {
                               const next = prev === project.id ? null : project.id;
                               if (next === null) {
@@ -8232,37 +8275,39 @@ TODO: Describe what this skill does.
                         </button>
                       </div>
 
-                      {menuOpen && (
-                        <div ref={threadCreateMenuRef} className="thread-create-pop">
-                          <input
-                            ref={threadCreateInputRef}
-                            value={threadDraftTitle}
-                            onChange={(event) => setThreadDraftTitle(event.target.value)}
-                            className="input h-8 text-xs"
-                            placeholder="New thread"
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                createThread(project.id, threadDraftTitle).catch((error) => {
-                                  setLogs((prev) => [...prev, `Create thread failed: ${String(error)}`]);
-                                });
-                              }
-                            }}
-                          />
-                          <button
-                            className="btn-primary h-8 px-2 py-0 text-xs"
-                            onClick={() => {
-                              createThread(project.id, threadDraftTitle).catch((error) => {
-                                setLogs((prev) => [...prev, `Create thread failed: ${String(error)}`]);
-                              });
-                            }}
-                          >
-                            Create
-                          </button>
-                        </div>
-                      )}
+                      <div className={projectListOpen ? "project-collapse open" : "project-collapse"} aria-hidden={!projectListOpen}>
+                        <div>
+                          {menuOpen && (
+                            <div ref={threadCreateMenuRef} className="thread-create-pop">
+                              <input
+                                ref={threadCreateInputRef}
+                                value={threadDraftTitle}
+                                onChange={(event) => setThreadDraftTitle(event.target.value)}
+                                className="input h-8 text-xs"
+                                placeholder="New thread"
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    createThread(project.id, threadDraftTitle).catch((error) => {
+                                      setLogs((prev) => [...prev, `Create thread failed: ${String(error)}`]);
+                                    });
+                                  }
+                                }}
+                              />
+                              <button
+                                className="btn-primary h-8 px-2 py-0 text-xs"
+                                onClick={() => {
+                                  createThread(project.id, threadDraftTitle).catch((error) => {
+                                    setLogs((prev) => [...prev, `Create thread failed: ${String(error)}`]);
+                                  });
+                                }}
+                              >
+                                Create
+                              </button>
+                            </div>
+                          )}
 
-                      <div className="thread-list">
+                          <div className="thread-list">
                         {visibleRows.length === 0 && (
                           <div
                             className={`thread-empty transition-all duration-300 ${
@@ -8613,7 +8658,9 @@ TODO: Describe what this skill does.
                             ))}
                           </div>
                         </div>
+                          </div>
                       </div>
+                    </div>
                     </section>
                   );
                 })}

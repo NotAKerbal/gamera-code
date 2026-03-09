@@ -748,7 +748,7 @@ export class SessionManager {
 
     const settings = this.deps.repository.getSettings();
     const mergedOptions: CodexThreadOptions = {
-      ...(settings.harnessSettings[harness.id]?.defaults ?? {}),
+      ...settings.codexDefaults,
       ...options
     };
     return this.startPtySession(thread, projectPath, mergedOptions);

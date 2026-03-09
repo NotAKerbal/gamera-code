@@ -1154,6 +1154,46 @@ webview {
   @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-panel/85 text-sm text-muted transition hover:border-border/80 hover:bg-panel hover:text-accent focus-visible:border-border/80 focus-visible:bg-panel focus-visible:text-accent;
 }
 
+.project-folder-toggle {
+  @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-slate-400 transition hover:bg-panel/75 hover:text-accent focus-visible:bg-panel/75 focus-visible:text-accent;
+}
+
+.project-folder-icon {
+  font-size: 14px;
+  filter: drop-shadow(0 1px 0 rgba(15, 23, 42, 0.22));
+  transform-origin: center;
+  transition: transform 180ms ease, color 180ms ease, filter 220ms ease;
+}
+
+.project-folder-toggle:hover .project-folder-icon,
+.project-folder-toggle:focus-visible .project-folder-icon {
+  transform: translateY(-1px) scale(1.06);
+}
+
+.project-folder-toggle.open .project-folder-icon {
+  filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.16));
+  transform: scale(1.03);
+}
+
+.project-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: grid-template-rows 0.26s ease, opacity 0.2s ease, transform 0.26s ease;
+}
+
+.project-collapse > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.project-collapse.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .sidebar-settings-btn {
   @apply rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-sm text-muted transition hover:bg-panel/85 hover:text-accent;
 }
