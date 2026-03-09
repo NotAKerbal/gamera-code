@@ -65,8 +65,18 @@ const audioTranscribeChannel =
   (IPC_CHANNELS as Record<string, string>).audioTranscribe ?? "audio:transcribe";
 const installerGetCodexAuthStatusChannel =
   (IPC_CHANNELS as Record<string, string>).installerGetCodexAuthStatus ?? "installer:getCodexAuthStatus";
+const installerGetAvailableModelsChannel =
+  (IPC_CHANNELS as Record<string, string>).installerGetAvailableModels ?? "installer:getAvailableModels";
 const installerLoginCodexChannel =
   (IPC_CHANNELS as Record<string, string>).installerLoginCodex ?? "installer:loginCodex";
+const installerLogoutCodexChannel =
+  (IPC_CHANNELS as Record<string, string>).installerLogoutCodex ?? "installer:logoutCodex";
+const installerGetOpenCodeAuthStatusChannel =
+  (IPC_CHANNELS as Record<string, string>).installerGetOpenCodeAuthStatus ?? "installer:getOpenCodeAuthStatus";
+const installerLoginOpenCodeChannel =
+  (IPC_CHANNELS as Record<string, string>).installerLoginOpenCode ?? "installer:loginOpenCode";
+const installerLogoutOpenCodeChannel =
+  (IPC_CHANNELS as Record<string, string>).installerLogoutOpenCode ?? "installer:logoutOpenCode";
 const skillsListChannel =
   (IPC_CHANNELS as Record<string, string>).skillsList ?? "skills:list";
 const skillsSetEnabledChannel =
@@ -277,7 +287,13 @@ const api: DesktopApiWithGitExtras = {
     installCli: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallCli, input),
     installDependencies: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallDependencies, input),
     getCodexAuthStatus: () => ipcRenderer.invoke(installerGetCodexAuthStatusChannel),
+    getAvailableModels: (input?: { opencodeBinaryOverride?: string }) => ipcRenderer.invoke(installerGetAvailableModelsChannel, input),
     loginCodex: () => ipcRenderer.invoke(installerLoginCodexChannel),
+    logoutCodex: () => ipcRenderer.invoke(installerLogoutCodexChannel),
+    getOpenCodeAuthStatus: (input?: { binaryOverride?: string }) => ipcRenderer.invoke(installerGetOpenCodeAuthStatusChannel, input),
+    loginOpenCode: (input?: { cwd?: string; binaryOverride?: string }) => ipcRenderer.invoke(installerLoginOpenCodeChannel, input),
+    logoutOpenCode: (input?: { cwd?: string; binaryOverride?: string; providerLabel?: string }) =>
+      ipcRenderer.invoke(installerLogoutOpenCodeChannel, input),
     verify: () => ipcRenderer.invoke(IPC_CHANNELS.installerVerify),
     onInstallLog: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, line: string) => listener(line);

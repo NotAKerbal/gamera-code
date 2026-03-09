@@ -40,6 +40,7 @@ export type HarnessId = keyof HarnessDefaultsById;
 export type Provider = HarnessId;
 export type HarnessCapability<T extends HarnessId = HarnessId> = HarnessCapabilityMap[T];
 export type HarnessModelGroupId<T extends HarnessId = HarnessId> = HarnessModelGroupMap[T];
+export type HarnessAvailableModels = Partial<Record<HarnessId, string[]>>;
 
 export interface HarnessSettingsEntry<TDefaults = Record<string, never>> {
   binaryOverride?: string;
@@ -342,6 +343,39 @@ export interface CodexLoginResult {
   ok: boolean;
   authUrl?: string;
   alreadyAuthenticated?: boolean;
+  message: string;
+}
+
+export interface CodexLogoutResult {
+  ok: boolean;
+  alreadyLoggedOut?: boolean;
+  message: string;
+}
+
+export interface OpenCodeAuthMethod {
+  id: string;
+  source: "credential" | "environment";
+  providerLabel: string;
+  authKind?: string;
+  envVarName?: string;
+  removable: boolean;
+  rawLabel: string;
+}
+
+export interface OpenCodeAuthStatus {
+  authenticated: boolean;
+  hasStoredCredentials: boolean;
+  methods: OpenCodeAuthMethod[];
+  credentialMethods: OpenCodeAuthMethod[];
+  environmentMethods: OpenCodeAuthMethod[];
+  credentialProviders: string[];
+  environmentProviders: string[];
+  message?: string;
+}
+
+export interface OpenCodeAuthCommandResult {
+  ok: boolean;
+  launched?: boolean;
   message: string;
 }
 

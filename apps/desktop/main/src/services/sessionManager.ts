@@ -387,11 +387,18 @@ const extractCommandText = (item: UnknownRecord): string => {
 
 const stripOuterQuotes = (value: string) => {
   const trimmed = value.trim();
-  if (
-    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
-    (trimmed.startsWith("\"") && trimmed.endsWith("\""))
-  ) {
-    return trimmed.slice(1, -1).trim();
+  const quote = trimmed[0];
+  if ((quote === "'" || quote === "\"") && trimmed.endsWith(quote)) {
+    let hasInnerMatchingQuote = false;
+    for (let index = 1; index < trimmed.length - 1; index += 1) {
+      if (trimmed[index] === quote && trimmed[index - 1] !== "\\") {
+        hasInnerMatchingQuote = true;
+        break;
+      }
+    }
+    if (!hasInnerMatchingQuote) {
+      return trimmed.slice(1, -1).trim();
+    }
   }
 
   return trimmed;
@@ -404,7 +411,9 @@ const unwrapShellCommand = (command: string): string => {
     /^\/bin\/(?:bash|zsh|sh)\s+-lc\s+([\s\S]+)$/i,
     /^(?:bash|zsh|sh)\s+-lc\s+([\s\S]+)$/i,
     /^cmd(?:\.exe)?\s+\/d\s+\/s\s+\/c\s+([\s\S]+)$/i,
-    /^powershell(?:\.exe)?\s+-command\s+([\s\S]+)$/i
+    /^"[^"]*(?:powershell|pwsh)(?:\.exe)?"\s+-command\s+([\s\S]+)$/i,
+    /^(?:(?:[a-z]:)?[^"' \t\r\n]*[\\/])?powershell(?:\.exe)?\s+-command\s+([\s\S]+)$/i,
+    /^(?:(?:[a-z]:)?[^"' \t\r\n]*[\\/])?pwsh(?:\.exe)?\s+-command\s+([\s\S]+)$/i
   ];
 
   while (current !== previous) {
@@ -438,9 +447,13 @@ const classifyCommandIntent = (command: string): "read" | "write" | "other" => {
     /^head\s+/,
     /^tail\s+/,
     /^rg\s+/,
+    /^(?:get-content|gc|type)(?:\s|$)/,
     /^grep\s+/,
+    /^(?:select-string|sls)(?:\s|$)/,
     /^find\s+/,
     /^ls(?:\s|$)/,
+    /^(?:get-childitem|gci|dir)(?:\s|$)/,
+    /^get-location(?:\s|$)/,
     /^tree(?:\s|$)/,
     /^pwd(?:\s|$)/,
     /^stat\s+/,

@@ -50,6 +50,7 @@ import type {
   CodexModelReasoningEffort,
   CodexSandboxMode,
   CodexThreadOptions,
+  HarnessAvailableModels,
   HarnessId,
   GitHistoryCommit,
   GitRepositoryCandidate,
@@ -58,6 +59,7 @@ import type {
   InstallStatus,
   CodexAuthStatus,
   MessageEvent,
+  OpenCodeAuthStatus,
   OrchestrationChild,
   OrchestrationRun,
   PermissionMode,
@@ -532,8 +534,13 @@ export const App = () => {
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
   const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus | null>(null);
+  const [openCodeAuthStatus, setOpenCodeAuthStatus] = useState<OpenCodeAuthStatus | null>(null);
+  const [availableModelsByHarness, setAvailableModelsByHarness] = useState<HarnessAvailableModels>({});
   const [isCodexAuthCardDismissed, setIsCodexAuthCardDismissed] = useState(false);
   const [codexLoginInFlight, setCodexLoginInFlight] = useState(false);
+  const [codexLogoutInFlight, setCodexLogoutInFlight] = useState(false);
+  const [openCodeLoginInFlight, setOpenCodeLoginInFlight] = useState(false);
+  const [openCodeLogoutInFlight, setOpenCodeLogoutInFlight] = useState(false);
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [setupPermissionGranted, setSetupPermissionGranted] = useState(false);
   const [setupInstalling, setSetupInstalling] = useState(false);
@@ -1755,6 +1762,18 @@ export const App = () => {
     return status;
   };
 
+  const loadOpenCodeAuthStatus = async (binaryOverride = settings.harnessSettings.opencode?.binaryOverride) => {
+    const status = await api.installer.getOpenCodeAuthStatus({ binaryOverride });
+    setOpenCodeAuthStatus(status);
+    return status;
+  };
+
+  const loadHarnessAvailableModels = async (opencodeBinaryOverride = settings.harnessSettings.opencode?.binaryOverride) => {
+    const available = await api.installer.getAvailableModels({ opencodeBinaryOverride });
+    setAvailableModelsByHarness(available);
+    return available;
+  };
+
   const isCodexUnauthenticatedError = (payload: string) => {
     const text = payload.toLowerCase();
     return (
@@ -2476,6 +2495,8 @@ export const App = () => {
       await loadSystemTerminals();
       await loadInstallerStatus();
       await loadCodexAuthStatus();
+      await loadOpenCodeAuthStatus();
+      await loadHarnessAvailableModels();
       await checkUpdatesOnLaunch();
     };
 
@@ -2494,6 +2515,18 @@ export const App = () => {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    loadOpenCodeAuthStatus().catch((error) => {
+      setLogs((prev) => [...prev, `OpenCode auth status refresh failed: ${String(error)}`]);
+    });
+  }, [settings.harnessSettings.opencode?.binaryOverride]);
+
+  useEffect(() => {
+    loadHarnessAvailableModels().catch((error) => {
+      setLogs((prev) => [...prev, `Model availability refresh failed: ${String(error)}`]);
+    });
+  }, [settings.harnessSettings.opencode?.binaryOverride]);
 
   useEffect(() => {
     const unsubscribe = api.projects.onSetupEvent((event) => {
@@ -5040,7 +5073,13 @@ export const App = () => {
       return;
     }
     const rect = trigger.getBoundingClientRect();
-    const width = kind === "model" ? Math.min(window.innerWidth - 16, 860) : Math.max(180, rect.width);
+    const modelDropdownWidth =
+      visibleModelHarnesses.length <= 1
+        ? visibleModelHarnesses[0]?.id === "opencode"
+          ? 560
+          : 300
+        : 860;
+    const width = kind === "model" ? Math.min(window.innerWidth - 16, modelDropdownWidth) : Math.max(180, rect.width);
     const left =
       kind === "model"
         ? Math.min(Math.max(8, rect.right - width), Math.max(8, window.innerWidth - width - 8))
@@ -6919,6 +6958,7 @@ const stopActiveRun = async () => {
       const result = await api.installer.loginCodex();
       setLogs((prev) => [...prev, result.message]);
       await loadCodexAuthStatus();
+      await loadHarnessAvailableModels();
       if (!result.ok) {
         return;
       }
@@ -6927,11 +6967,100 @@ const stopActiveRun = async () => {
         loadCodexAuthStatus().catch((error) => {
           setLogs((prev) => [...prev, `Codex auth status refresh failed: ${String(error)}`]);
         });
+        loadHarnessAvailableModels().catch((error) => {
+          setLogs((prev) => [...prev, `Model availability refresh failed: ${String(error)}`]);
+        });
       }, 3000);
     } catch (error) {
       setLogs((prev) => [...prev, `Codex login failed: ${String(error)}`]);
     } finally {
       setCodexLoginInFlight(false);
+    }
+  };
+
+  const logoutCodex = async () => {
+    if (codexLogoutInFlight) {
+      return;
+    }
+
+    setCodexLogoutInFlight(true);
+    try {
+      const result = await api.installer.logoutCodex();
+      setLogs((prev) => [...prev, result.message]);
+      await loadCodexAuthStatus();
+      await loadHarnessAvailableModels();
+    } catch (error) {
+      setLogs((prev) => [...prev, `Codex logout failed: ${String(error)}`]);
+    } finally {
+      setCodexLogoutInFlight(false);
+    }
+  };
+
+  const pollOpenCodeAuthStatus = async (
+    predicate: (status: OpenCodeAuthStatus) => boolean,
+    attempts = 20,
+    intervalMs = 3_000
+  ) => {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+      const status = await loadOpenCodeAuthStatus();
+      if (predicate(status)) {
+        return status;
+      }
+    }
+    return null;
+  };
+
+  const startOpenCodeLogin = async () => {
+    if (openCodeLoginInFlight) {
+      return;
+    }
+
+    const previousCredentialCount = openCodeAuthStatus?.credentialMethods.length ?? 0;
+    setOpenCodeLoginInFlight(true);
+    try {
+      const result = await api.installer.loginOpenCode({
+        cwd: activeProject?.path,
+        binaryOverride: settings.harnessSettings.opencode?.binaryOverride
+      });
+      setLogs((prev) => [...prev, result.message]);
+      if (!result.ok) {
+        return;
+      }
+      await pollOpenCodeAuthStatus((status) => status.credentialMethods.length > previousCredentialCount);
+      await loadHarnessAvailableModels();
+    } catch (error) {
+      setLogs((prev) => [...prev, `OpenCode login failed: ${String(error)}`]);
+    } finally {
+      setOpenCodeLoginInFlight(false);
+    }
+  };
+
+  const logoutOpenCode = async (providerLabel?: string) => {
+    if (openCodeLogoutInFlight) {
+      return;
+    }
+
+    const previousCredentialCount = openCodeAuthStatus?.credentialMethods.length ?? 0;
+    setOpenCodeLogoutInFlight(true);
+    try {
+      const result = await api.installer.logoutOpenCode({
+        cwd: activeProject?.path,
+        binaryOverride: settings.harnessSettings.opencode?.binaryOverride,
+        providerLabel
+      });
+      setLogs((prev) => [...prev, result.message]);
+      if (!result.ok || !result.launched) {
+        await loadOpenCodeAuthStatus();
+        await loadHarnessAvailableModels();
+        return;
+      }
+      await pollOpenCodeAuthStatus((status) => status.credentialMethods.length < previousCredentialCount);
+      await loadHarnessAvailableModels();
+    } catch (error) {
+      setLogs((prev) => [...prev, `OpenCode logout failed: ${String(error)}`]);
+    } finally {
+      setOpenCodeLogoutInFlight(false);
     }
   };
 
@@ -7265,6 +7394,25 @@ TODO: Describe what this skill does.
   const codexAuthBlocked = Boolean(
     activeHarnessId === "codex" && codexAuthStatus?.requiresOpenaiAuth && !codexAuthStatus?.authenticated
   );
+  const visibleHarnesses: Partial<Record<HarnessId, boolean>> = {
+    codex: Boolean(codexAuthStatus && (!codexAuthStatus.requiresOpenaiAuth || codexAuthStatus.authenticated)),
+    opencode: Boolean(openCodeAuthStatus?.authenticated)
+  };
+  const visibleHarnessCount = SUPPORTED_HARNESSES.filter((harness) => visibleHarnesses[harness.id] !== false).length;
+  const visibleModelHarnesses = SUPPORTED_HARNESSES.map((harness) => {
+    if (visibleHarnesses[harness.id] === false) {
+      return null;
+    }
+    const availableModels = availableModelsByHarness[harness.id];
+    const modelGroupCount = harness.modelGroups.filter((group) => {
+      const models = availableModels ? group.models.filter((model) => availableModels.includes(model)) : group.models;
+      return models.length > 0;
+    }).length;
+    if (modelGroupCount === 0) {
+      return null;
+    }
+    return { id: harness.id, modelGroupCount };
+  }).filter((value): value is { id: HarnessId; modelGroupCount: number } => Boolean(value));
   useEffect(() => {
     if (!setupBlocked) {
       setIsSetupCardDismissed(false);
@@ -9896,6 +10044,9 @@ TODO: Describe what this skill does.
         composerDropdownMenuRef={composerDropdownMenuRef}
         composerOptions={composerOptions}
         currentHarnessId={activeHarnessId}
+        availableModelsByHarness={availableModelsByHarness}
+        visibleHarnesses={visibleHarnesses}
+        visibleHarnessCount={visibleHarnessCount}
         canSwitchHarnesses={canSwitchActiveThreadHarness}
         onSelectHarnessModel={(harnessId, model) => {
           selectHarnessModel(harnessId, model).catch((error) => {
@@ -9945,8 +10096,18 @@ TODO: Describe what this skill does.
           setSkillEditorContent={setSkillEditorContent}
           skillEditorSaving={skillEditorSaving}
           settingsSaving={settingsSaving}
+          codexAuthStatus={codexAuthStatus}
+          codexLoginInFlight={codexLoginInFlight}
+          codexLogoutInFlight={codexLogoutInFlight}
+          openCodeAuthStatus={openCodeAuthStatus}
+          openCodeLoginInFlight={openCodeLoginInFlight}
+          openCodeLogoutInFlight={openCodeLogoutInFlight}
           onClose={closeSettingsModal}
           onCloseWindow={closeWindow}
+          onStartCodexLogin={startCodexLogin}
+          onLogoutCodex={logoutCodex}
+          onStartOpenCodeLogin={startOpenCodeLogin}
+          onLogoutOpenCode={logoutOpenCode}
           onSaveSettings={saveSettings}
           onSaveSkillEditor={saveSkillEditor}
           onToggleAppSkillEnabled={toggleAppSkillEnabled}

@@ -534,7 +534,6 @@ webview {
 }
 
 .composer-model-dropdown-pop {
-  width: min(54rem, calc(100vw - 1rem)) !important;
   max-height: calc(100vh - 2rem);
   overflow: visible;
 }
@@ -747,6 +746,10 @@ webview {
   display: grid;
   grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr);
   gap: 0.5rem;
+}
+
+.composer-model-harnesses-single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .composer-model-harness {

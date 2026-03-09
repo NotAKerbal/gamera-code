@@ -15,8 +15,12 @@ import type {
   InstallDependencyKey,
   InstallStatus,
   CodexAuthStatus,
+  HarnessAvailableModels,
   CodexLoginResult,
+  CodexLogoutResult,
   HarnessId,
+  OpenCodeAuthCommandResult,
+  OpenCodeAuthStatus,
   MessageEvent,
   OrchestrationChild,
   OrchestrationRun,
@@ -189,7 +193,12 @@ export interface DesktopApi {
     installCli: (input: { harnessId?: HarnessId; provider?: Provider }) => Promise<{ ok: boolean; logs: string[] }>;
     installDependencies: (input?: { targets?: InstallDependencyKey[] }) => Promise<InstallDependenciesResult>;
     getCodexAuthStatus: () => Promise<CodexAuthStatus>;
+    getAvailableModels: (input?: { opencodeBinaryOverride?: string }) => Promise<HarnessAvailableModels>;
     loginCodex: () => Promise<CodexLoginResult>;
+    logoutCodex: () => Promise<CodexLogoutResult>;
+    getOpenCodeAuthStatus: (input?: { binaryOverride?: string }) => Promise<OpenCodeAuthStatus>;
+    loginOpenCode: (input?: { cwd?: string; binaryOverride?: string }) => Promise<OpenCodeAuthCommandResult>;
+    logoutOpenCode: (input?: { cwd?: string; binaryOverride?: string; providerLabel?: string }) => Promise<OpenCodeAuthCommandResult>;
     verify: () => Promise<InstallStatus>;
     onInstallLog: (listener: (line: string) => void) => () => void;
   };

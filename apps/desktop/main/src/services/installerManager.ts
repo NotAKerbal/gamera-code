@@ -3,19 +3,26 @@ import { readFileSync } from "node:fs";
 import type {
   CodexAuthStatus,
   CodexLoginResult,
+  CodexLogoutResult,
+  HarnessAvailableModels,
   HarnessId,
   InstallDependenciesResult,
   InstallDetail,
   InstallDependencyKey,
   InstallStatus,
+  OpenCodeAuthCommandResult,
+  OpenCodeAuthMethod,
+  OpenCodeAuthStatus,
   Provider
 } from "@code-app/shared";
+import { getHarnessModelSuggestions } from "@code-app/shared";
 import { Repository } from "./repository";
 import { createCommandRunner, type CommandRunner } from "../utils/commandRunner";
 import { resolveCodexBinaryPath } from "../utils/codexBinary";
 import { resolveBundledRipgrepBinaryPath } from "../utils/ripgrepBinary";
 import { CodexAppServerClient } from "./codexAppServer";
 import { getHarnessDefinition, getPtyHarnessAdapter } from "./harnessDefinitions";
+import { stripAnsi } from "../utils/stripAnsi";
 
 interface InstallCommand {
   label: string;
@@ -57,6 +64,173 @@ const linesFromChunk = (chunk: string) =>
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+
+const OPENCODE_TREE_PREFIX_PATTERN = /^[\s|│┃┆╎├└┌┐╭╰─┬┴┼]+/u;
+
+export const parseOpenCodeAuthListOutput = (output: string): OpenCodeAuthStatus => {
+  const lines = stripAnsi(output)
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(OPENCODE_TREE_PREFIX_PATTERN, "").trim())
+    .filter(Boolean);
+
+  const credentialProviders: string[] = [];
+  const environmentProviders: string[] = [];
+  let section: "credentials" | "environment" | null = null;
+
+  for (const line of lines) {
+    if (/^credentials\b/i.test(line)) {
+      section = "credentials";
+      continue;
+    }
+    if (/^environment\b/i.test(line)) {
+      section = "environment";
+      continue;
+    }
+    if (!section) {
+      continue;
+    }
+    if (/configured/i.test(line)) {
+      continue;
+    }
+
+    if (section === "credentials") {
+      credentialProviders.push(line);
+    } else {
+      environmentProviders.push(line);
+    }
+  }
+
+  const authenticated = credentialProviders.length > 0 || environmentProviders.length > 0;
+  const parts: string[] = [];
+  if (credentialProviders.length > 0) {
+    parts.push(`Stored credentials: ${credentialProviders.join(", ")}`);
+  }
+  if (environmentProviders.length > 0) {
+    parts.push(`Environment auth: ${environmentProviders.join(", ")}`);
+  }
+
+  return {
+    authenticated,
+    hasStoredCredentials: credentialProviders.length > 0,
+    methods: [],
+    credentialMethods: [],
+    environmentMethods: [],
+    credentialProviders,
+    environmentProviders,
+    message: authenticated ? parts.join(" | ") : "No OpenCode providers configured."
+  };
+};
+
+const OPEN_CODE_AUTH_TREE_PREFIX_PATTERN = /^[\s|\u25cf\u2502\u2503\u2506\u254e\u251c\u2514\u250c\u2510\u256d\u2570\u2500\u252c\u2534\u253c]+/u;
+const OPEN_CODE_CREDENTIAL_SUMMARY_PATTERN = /^\d+\s+credentials?$/i;
+const OPEN_CODE_ENVIRONMENT_SUMMARY_PATTERN = /^\d+\s+environment variables?$/i;
+
+const pickKnownModelsFromText = (knownModels: string[], output: string): string[] => {
+  const normalizedOutput = stripAnsi(output).toLowerCase();
+  const matches: string[] = [];
+  const seen = new Set<string>();
+
+  for (const model of knownModels) {
+    const candidates = [model.toLowerCase()];
+    if (model.startsWith("opencode/")) {
+      candidates.push(model.slice("opencode/".length).toLowerCase());
+    }
+
+    if (!candidates.some((candidate) => normalizedOutput.includes(candidate))) {
+      continue;
+    }
+    if (seen.has(model)) {
+      continue;
+    }
+    seen.add(model);
+    matches.push(model);
+  }
+
+  return matches;
+};
+
+const buildOpenCodeMethodId = (source: OpenCodeAuthMethod["source"], providerLabel: string, qualifier?: string) =>
+  `${source}:${providerLabel.toLowerCase()}:${qualifier?.toLowerCase() ?? ""}`;
+
+const parseOpenCodeAuthListOutputV2 = (output: string): OpenCodeAuthStatus => {
+  const lines = stripAnsi(output)
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(OPEN_CODE_AUTH_TREE_PREFIX_PATTERN, "").trim())
+    .filter(Boolean);
+
+  const credentialMethods: OpenCodeAuthMethod[] = [];
+  const environmentMethods: OpenCodeAuthMethod[] = [];
+  let section: "credentials" | "environment" | null = null;
+
+  for (const line of lines) {
+    if (/^credentials\b/i.test(line)) {
+      section = "credentials";
+      continue;
+    }
+    if (/^environment\b/i.test(line)) {
+      section = "environment";
+      continue;
+    }
+    if (!section) {
+      continue;
+    }
+    if (OPEN_CODE_CREDENTIAL_SUMMARY_PATTERN.test(line) || OPEN_CODE_ENVIRONMENT_SUMMARY_PATTERN.test(line)) {
+      continue;
+    }
+
+    if (section === "credentials") {
+      const match = /^(?<provider>.+?)\s+(?<authKind>oauth|api)$/i.exec(line);
+      const providerLabel = match?.groups?.provider?.trim() ?? line;
+      const authKind = match?.groups?.authKind?.trim().toLowerCase();
+      credentialMethods.push({
+        id: buildOpenCodeMethodId("credential", providerLabel, authKind),
+        source: "credential",
+        providerLabel,
+        authKind,
+        removable: true,
+        rawLabel: line
+      });
+      continue;
+    }
+
+    const match = /^(?<provider>.+?)\s+(?<envVar>[A-Z][A-Z0-9_]+)$/i.exec(line);
+    const providerLabel = match?.groups?.provider?.trim() ?? line;
+    const envVarName = match?.groups?.envVar?.trim();
+    environmentMethods.push({
+      id: buildOpenCodeMethodId("environment", providerLabel, envVarName),
+      source: "environment",
+      providerLabel,
+      envVarName,
+      removable: false,
+      rawLabel: line
+    });
+  }
+
+  const methods = [...credentialMethods, ...environmentMethods];
+  const credentialProviders = credentialMethods.map((method) => method.providerLabel);
+  const environmentProviders = environmentMethods.map((method) => method.providerLabel);
+  const authenticated = methods.length > 0;
+  const parts: string[] = [];
+  if (credentialMethods.length > 0) {
+    parts.push(`Stored credentials: ${credentialMethods.map((method) => method.rawLabel).join(", ")}`);
+  }
+  if (environmentMethods.length > 0) {
+    parts.push(`Environment auth: ${environmentMethods.map((method) => method.rawLabel).join(", ")}`);
+  }
+
+  return {
+    authenticated,
+    hasStoredCredentials: credentialMethods.length > 0,
+    methods,
+    credentialMethods,
+    environmentMethods,
+    credentialProviders,
+    environmentProviders,
+    message: authenticated ? parts.join(" | ") : "No OpenCode providers configured."
+  };
+};
 
 export class InstallerManager {
   constructor(
@@ -178,6 +352,139 @@ export class InstallerManager {
     } finally {
       await appServer.close();
     }
+  }
+
+  async logoutCodex(): Promise<CodexLogoutResult> {
+    const appServer = this.createCodexAppServerClient();
+    try {
+      await appServer.connect();
+      const status = await appServer.getAccountStatus(true);
+      if (!status.authenticated) {
+        return {
+          ok: true,
+          alreadyLoggedOut: true,
+          message: "Codex is already signed out."
+        };
+      }
+
+      await appServer.logoutAccount();
+      const finalStatus = await appServer.getAccountStatus(false);
+      return {
+        ok: !finalStatus.authenticated,
+        message: finalStatus.authenticated ? "Codex sign-out did not complete." : "Signed out of Codex."
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error)
+      };
+    } finally {
+      await appServer.close();
+    }
+  }
+
+  async getOpenCodeAuthStatus(binaryOverride?: string): Promise<OpenCodeAuthStatus> {
+    const adapter = getPtyHarnessAdapter("opencode");
+    const binary = adapter?.getBinaryName(binaryOverride) ?? binaryOverride ?? "opencode";
+    const result = await this.runner.run(binary, ["auth", "list"]);
+    if (result.code !== 0) {
+      return {
+        authenticated: false,
+        hasStoredCredentials: false,
+        methods: [],
+        credentialMethods: [],
+        environmentMethods: [],
+        credentialProviders: [],
+        environmentProviders: [],
+        message: result.stderr || result.stdout || "OpenCode auth status is unavailable."
+      };
+    }
+
+    return parseOpenCodeAuthListOutputV2(result.stdout || result.stderr);
+  }
+
+  async getAvailableModels(input?: { opencodeBinaryOverride?: string }): Promise<HarnessAvailableModels> {
+    const available: HarnessAvailableModels = {};
+
+    const codexModels = await this.getCodexAvailableModels();
+    if (codexModels && codexModels.length > 0) {
+      available.codex = codexModels;
+    }
+
+    const opencodeModels = await this.getOpenCodeAvailableModels(input?.opencodeBinaryOverride);
+    if (opencodeModels && opencodeModels.length > 0) {
+      available.opencode = opencodeModels;
+    }
+
+    return available;
+  }
+
+  async loginOpenCode(input: {
+    cwd?: string;
+    binaryOverride?: string;
+    launchCommand: (command: string, args: string[], cwd?: string) => Promise<void>;
+  }): Promise<OpenCodeAuthCommandResult> {
+    const adapter = getPtyHarnessAdapter("opencode");
+    const command = adapter?.getBinaryName(input.binaryOverride) ?? input.binaryOverride ?? "opencode";
+    await input.launchCommand(command, ["auth", "login"], input.cwd);
+    return {
+      ok: true,
+      launched: true,
+      message: "Opened OpenCode auth login in your terminal."
+    };
+  }
+
+  async logoutOpenCode(input: {
+    cwd?: string;
+    binaryOverride?: string;
+    providerLabel?: string;
+    launchCommand: (command: string, args: string[], cwd?: string) => Promise<void>;
+  }): Promise<OpenCodeAuthCommandResult> {
+    const status = await this.getOpenCodeAuthStatus(input.binaryOverride);
+    if (!status.hasStoredCredentials) {
+      return {
+        ok: true,
+        message: status.environmentProviders.length > 0
+          ? "OpenCode is configured via environment variables. Remove those variables to sign out."
+          : "No saved OpenCode credentials were found."
+      };
+    }
+
+    const adapter = getPtyHarnessAdapter("opencode");
+    const command = adapter?.getBinaryName(input.binaryOverride) ?? input.binaryOverride ?? "opencode";
+    await input.launchCommand(command, ["auth", "logout"], input.cwd);
+    return {
+      ok: true,
+      launched: true,
+      message: input.providerLabel
+        ? `Opened OpenCode auth logout in your terminal. Select ${input.providerLabel} if prompted.`
+        : "Opened OpenCode auth logout in your terminal."
+    };
+  }
+
+  private async getCodexAvailableModels(): Promise<string[] | null> {
+    const appServer = this.createCodexAppServerClient();
+    try {
+      await appServer.connect();
+      return await appServer.listAvailableModels();
+    } catch {
+      return null;
+    } finally {
+      await appServer.close();
+    }
+  }
+
+  private async getOpenCodeAvailableModels(binaryOverride?: string): Promise<string[] | null> {
+    const adapter = getPtyHarnessAdapter("opencode");
+    const binary = adapter?.getBinaryName(binaryOverride) ?? binaryOverride ?? "opencode";
+    const result = await this.runner.run(binary, ["models"]);
+    if (result.code !== 0) {
+      return null;
+    }
+
+    const knownModels = getHarnessModelSuggestions("opencode");
+    const matches = pickKnownModelsFromText(knownModels, result.stdout || result.stderr);
+    return matches.length > 0 ? matches : null;
   }
 
   async installCli(provider: Provider): Promise<{ ok: boolean; logs: string[] }> {

@@ -4,6 +4,7 @@ import type {
   AppTheme,
   AppSettings,
   CodexApprovalMode,
+  CodexAuthStatus,
   CodexCollaborationMode,
   CodexModelReasoningEffort,
   CodexSandboxMode,
@@ -11,6 +12,7 @@ import type {
   CodexWebSearchMode,
   HarnessId,
   InstallStatus,
+  OpenCodeAuthStatus,
   PermissionMode,
   ProjectTerminalSwitchBehavior,
   SystemTerminalOption,
@@ -53,8 +55,18 @@ type SettingsModalProps = {
   setSkillEditorContent: Dispatch<SetStateAction<string>>;
   skillEditorSaving: boolean;
   settingsSaving: boolean;
+  codexAuthStatus: CodexAuthStatus | null;
+  codexLoginInFlight: boolean;
+  codexLogoutInFlight: boolean;
+  openCodeAuthStatus: OpenCodeAuthStatus | null;
+  openCodeLoginInFlight: boolean;
+  openCodeLogoutInFlight: boolean;
   onClose: () => void;
   onCloseWindow: () => void | Promise<void>;
+  onStartCodexLogin: () => Promise<void>;
+  onLogoutCodex: () => Promise<void>;
+  onStartOpenCodeLogin: () => Promise<void>;
+  onLogoutOpenCode: (providerLabel?: string) => Promise<void>;
   onSaveSettings: (draft: { settings: AppSettings; composerOptions: CodexThreadOptions; settingsEnvText: string }) => void | Promise<void>;
   onSaveSkillEditor: () => Promise<boolean>;
   onToggleAppSkillEnabled: (path: string, enabled: boolean) => Promise<void>;
@@ -222,8 +234,18 @@ export const SettingsModal = memo(({
   setSkillEditorContent,
   skillEditorSaving,
   settingsSaving,
+  codexAuthStatus,
+  codexLoginInFlight,
+  codexLogoutInFlight,
+  openCodeAuthStatus,
+  openCodeLoginInFlight,
+  openCodeLogoutInFlight,
   onClose,
   onCloseWindow,
+  onStartCodexLogin,
+  onLogoutCodex,
+  onStartOpenCodeLogin,
+  onLogoutOpenCode,
   onSaveSettings,
   onSaveSkillEditor,
   onToggleAppSkillEnabled,
@@ -614,6 +636,116 @@ export const SettingsModal = memo(({
                         }
                       />
                     </div>
+
+                    {selectedHarnessSettingsId === "codex" && (
+                      <>
+                        <div className="mx-2 border-t border-border/70" />
+                        <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                          <div className="text-sm text-muted">Account session</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="text-xs text-slate-300">
+                              {codexAuthStatus?.authenticated
+                                ? codexAuthStatus.email
+                                  ? `Signed in as ${codexAuthStatus.email}`
+                                  : "Signed in to Codex"
+                                : "Signed out"}
+                            </div>
+                            {codexAuthStatus?.authenticated ? (
+                              <button
+                                type="button"
+                                className="btn-secondary h-8 px-2 py-0 text-xs"
+                                onClick={() => {
+                                  onLogoutCodex().catch(() => undefined);
+                                }}
+                                disabled={codexLoginInFlight || codexLogoutInFlight}
+                              >
+                                {codexLogoutInFlight ? "Signing Out..." : "Logout"}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn-secondary h-8 px-2 py-0 text-xs"
+                                onClick={() => {
+                                  onStartCodexLogin().catch(() => undefined);
+                                }}
+                                disabled={codexLoginInFlight || codexLogoutInFlight}
+                              >
+                                {codexLoginInFlight ? "Opening Sign-In..." : "Sign In"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {selectedHarnessSettingsId === "opencode" && (
+                      <>
+                        <div className="mx-2 border-t border-border/70" />
+                        <div className="mx-2 grid gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                          <div className="text-sm text-muted">Authentication methods</div>
+                          <div className="space-y-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                className="btn-secondary h-8 px-2 py-0 text-xs"
+                                onClick={() => {
+                                  onStartOpenCodeLogin().catch(() => undefined);
+                                }}
+                                disabled={openCodeLoginInFlight || openCodeLogoutInFlight}
+                              >
+                                {openCodeLoginInFlight ? "Opening..." : "Add Authentication Method"}
+                              </button>
+                            </div>
+                            {openCodeAuthStatus?.methods.length ? (
+                              <div className="space-y-2">
+                                {openCodeAuthStatus.methods.map((method) => (
+                                  <div
+                                    key={method.id}
+                                    className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-black/20 px-3 py-2"
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="text-sm font-medium text-slate-100">{method.providerLabel}</span>
+                                        <span className="rounded-full bg-slate-500/15 px-2 py-0.5 text-[11px] uppercase tracking-wide text-slate-300">
+                                          {method.source === "credential" ? "Stored" : "Environment"}
+                                        </span>
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-400">
+                                        {method.source === "credential"
+                                          ? method.authKind
+                                            ? `${method.authKind.toUpperCase()} credential`
+                                            : method.rawLabel
+                                          : method.envVarName
+                                            ? `Managed by ${method.envVarName}`
+                                            : method.rawLabel}
+                                      </div>
+                                    </div>
+                                    {method.removable ? (
+                                      <button
+                                        type="button"
+                                        className="btn-secondary h-8 px-2 py-0 text-xs"
+                                        onClick={() => {
+                                          onLogoutOpenCode(method.providerLabel).catch(() => undefined);
+                                        }}
+                                        disabled={openCodeLoginInFlight || openCodeLogoutInFlight}
+                                      >
+                                        {openCodeLogoutInFlight ? "Opening..." : "Logout"}
+                                      </button>
+                                    ) : (
+                                      <div className="text-[11px] text-slate-500">Set via env</div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="rounded-lg border border-dashed border-border/70 bg-black/10 px-3 py-3 text-xs text-slate-400">
+                                No authentication methods configured.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </section>
 
                   <section className="rounded-xl border border-border/80 bg-black/20 py-2">

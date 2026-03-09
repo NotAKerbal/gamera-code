@@ -611,6 +611,29 @@ export class CodexAppServerClient {
     };
   }
 
+  async logoutAccount(): Promise<void> {
+    await this.request("account/logout", undefined);
+  }
+
+  async listAvailableModels(): Promise<string[]> {
+    const response = asRecord(await this.request("model/list", { includeHidden: false }));
+    const data = Array.isArray(response?.data) ? response.data : [];
+    const models: string[] = [];
+    const seen = new Set<string>();
+
+    for (const entry of data) {
+      const row = asRecord(entry);
+      const candidate = asString(row?.id) ?? asString(row?.model) ?? asString(row?.name);
+      if (!candidate || seen.has(candidate)) {
+        continue;
+      }
+      seen.add(candidate);
+      models.push(candidate);
+    }
+
+    return models;
+  }
+
   async waitForLoginCompletion(loginId: string | null, timeoutMs = 180_000): Promise<{ success: boolean; error?: string | null }> {
     if (this.pendingAccountLogin) {
       throw new Error("Account login is already in progress.");

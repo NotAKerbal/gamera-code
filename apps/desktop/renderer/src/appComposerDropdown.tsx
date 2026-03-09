@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { memo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
-import type { CodexSandboxMode, CodexThreadOptions, HarnessId } from "@code-app/shared";
+import type { CodexSandboxMode, CodexThreadOptions, HarnessAvailableModels, HarnessId } from "@code-app/shared";
 import { getModelTooltip } from "../../shared/src/modelTooltips";
 import {
   APPROVAL_OPTIONS,
@@ -28,6 +28,9 @@ type ComposerDropdownPortalProps = {
   composerDropdownMenuRef: RefObject<HTMLDivElement | null>;
   composerOptions: CodexThreadOptions;
   currentHarnessId: HarnessId;
+  availableModelsByHarness: HarnessAvailableModels;
+  visibleHarnesses: Partial<Record<HarnessId, boolean>>;
+  visibleHarnessCount: number;
   canSwitchHarnesses: boolean;
   onSelectHarnessModel: (harnessId: HarnessId, model: string) => void;
   setComposerOptions: Dispatch<SetStateAction<CodexThreadOptions>>;
@@ -39,6 +42,9 @@ const ComposerDropdownPortalComponent = ({
   composerDropdownMenuRef,
   composerOptions,
   currentHarnessId,
+  availableModelsByHarness,
+  visibleHarnesses,
+  visibleHarnessCount,
   canSwitchHarnesses,
   onSelectHarnessModel,
   setComposerOptions,
@@ -74,8 +80,27 @@ const ComposerDropdownPortalComponent = ({
         >
           <div className={composerDropdown.kind === "model" ? "composer-model-dropdown-list" : "branch-dropdown-list"}>
             {composerDropdown.kind === "model" && (
-              <div className="composer-model-harnesses">
-                {SUPPORTED_HARNESSES.filter((harness) => harness.modelGroups.length > 0).map((harness) => {
+              <div
+                className={
+                  visibleHarnessCount <= 1
+                    ? "composer-model-harnesses composer-model-harnesses-single"
+                    : "composer-model-harnesses"
+                }
+              >
+                {SUPPORTED_HARNESSES.map((harness) => {
+                  if (visibleHarnesses[harness.id] === false) {
+                    return null;
+                  }
+                  const availableModels = availableModelsByHarness[harness.id];
+                  const modelGroups = harness.modelGroups
+                    .map((group) => ({
+                      ...group,
+                      models: availableModels ? group.models.filter((model) => availableModels.includes(model)) : group.models
+                    }))
+                    .filter((group) => group.models.length > 0);
+                  if (modelGroups.length === 0) {
+                    return null;
+                  }
                   const harnessIsActive = harness.id === currentHarnessId;
                   const harnessClassName =
                     harness.id === "codex"
@@ -88,7 +113,7 @@ const ComposerDropdownPortalComponent = ({
                         {!harnessIsActive && !canSwitchHarnesses ? (
                           <div className="composer-model-harness-meta">Create a new thread to switch</div>
                         ) : (
-                          <div className="composer-model-harness-meta">{harness.modelGroups.length} sections</div>
+                          <div className="composer-model-harness-meta">{modelGroups.length} sections</div>
                         )}
                       </div>
                       <div
@@ -98,7 +123,7 @@ const ComposerDropdownPortalComponent = ({
                             : "composer-model-harness-columns"
                         }
                       >
-                        {harness.modelGroups.map((group) => (
+                        {modelGroups.map((group) => (
                           <section key={`${harness.id}:${group.id}`} className="composer-model-column">
                             <div className="composer-model-column-header">
                               <div className="composer-model-column-title">{group.label}</div>

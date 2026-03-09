@@ -151,4 +151,57 @@ describe("sessionManager active project session detection", () => {
 
     await expect(manager.compactThread("thread-opencode")).resolves.toBe(false);
   });
+
+  it("classifies quoted PowerShell Get-Content commands as file reads", async () => {
+    const emit = vi.fn();
+    const repository = {
+      getThread: vi.fn(() => null),
+      getSession: vi.fn(() => null),
+      appendMessage: vi.fn()
+    } as unknown as ConstructorParameters<typeof SessionManager>[0]["repository"];
+
+    const permissionEngine = {
+      clearThreadApprovals: vi.fn()
+    } as unknown as ConstructorParameters<typeof SessionManager>[0]["permissionEngine"];
+
+    const manager = new SessionManager({
+      repository,
+      permissionEngine,
+      emit
+    });
+
+    await (
+      manager as unknown as {
+        handleCodexItemEvent: (
+          threadId: string,
+          eventType: "item.started" | "item.updated" | "item.completed",
+          item: Record<string, unknown>,
+          agentDrafts: Map<string, string>
+        ) => Promise<void>;
+      }
+    ).handleCodexItemEvent(
+      "thread-a",
+      "item.completed",
+      {
+        id: "cmd-1",
+        type: "command_execution",
+        status: "completed",
+        command: "\"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command \"Get-Content 'apps/desktop/shared/src/contracts.ts' | Select-Object -First 220\"",
+        aggregated_output: "export interface DesktopApi {}"
+      },
+      new Map()
+    );
+
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-a",
+        type: "progress",
+        data: expect.objectContaining({
+          category: "file_read",
+          commandIntent: "read",
+          command: "Get-Content 'apps/desktop/shared/src/contracts.ts' | Select-Object -First 220"
+        })
+      })
+    );
+  });
 });
