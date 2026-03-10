@@ -379,6 +379,9 @@ const parseDevCommands = (value: unknown): ProjectDevCommand[] => {
   if (!Array.isArray(value)) {
     return [DEFAULT_DEV_COMMAND];
   }
+  if (value.length === 0) {
+    return [];
+  }
 
   const parsed: ProjectDevCommand[] = [];
   for (const [index, item] of value.entries()) {

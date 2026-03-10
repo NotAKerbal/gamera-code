@@ -202,6 +202,24 @@ describeRepository("Repository", () => {
     expect(updated.lastDetectedPreviewUrl).toBe("http://127.0.0.1:5173");
   });
 
+  it("preserves an explicitly empty action list", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-empty-actions-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-empty-actions" });
+    const updated = repo.setProjectSettings({
+      projectId: project.id,
+      devCommands: [],
+      autoStartDevTerminal: false
+    });
+
+    expect(updated.devCommands).toEqual([]);
+    expect(updated.defaultDevCommandId).toBeUndefined();
+    expect(repo.getProjectSettings(project.id).devCommands).toEqual([]);
+  });
+
   it("stores orchestration runs and child records", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-app-orchestration-"));
     const paths = createAppPaths(dir);

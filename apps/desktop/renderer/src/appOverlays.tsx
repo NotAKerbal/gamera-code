@@ -565,6 +565,12 @@ export const ProjectActionsSettingsModal = memo(({
       return next;
     });
   };
+  const removeCommand = (commandId: string) => {
+    setProjectSettingsCommands((prev) => prev.filter((item) => item.id !== commandId));
+    if (capturingHotkeyCommandId === commandId) {
+      setCapturingHotkeyCommandId(null);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
@@ -666,10 +672,25 @@ export const ProjectActionsSettingsModal = memo(({
                     {focusedCommand.stayRunning ? "Stay running" : "Stop on idle"}
                   </button>
                 </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => removeCommand(focusedCommand.id)}
+                    title="Remove action"
+                  >
+                    <span className="inline-flex items-center gap-1"><FaTrashAlt className="text-[12px]" />Delete action</span>
+                  </button>
+                </div>
               </div>
             ) : null}
             {!focusedCommand ? (
             <>
+            {filteredCommands.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/70 bg-black/10 px-4 py-6 text-sm text-slate-400">
+                No actions configured for this project.
+              </div>
+            ) : null}
             {filteredCommands.map((command) => {
               const index = projectSettingsCommands.findIndex((item) => item.id === command.id);
               const isDropTarget = draggedCommandIndex !== null && dropTargetIndex === index && draggedCommandIndex !== index;
@@ -802,8 +823,8 @@ export const ProjectActionsSettingsModal = memo(({
                 </div>
                 <button
                   className="btn-secondary h-9 w-9 px-0"
-                  onClick={() => setProjectSettingsCommands((prev) => prev.filter((_, idx) => idx !== index))}
-                  disabled={projectSettingsCommands.length <= 1 || Boolean(initialDraft.focusCommandId)}
+                  onClick={() => removeCommand(command.id)}
+                  disabled={Boolean(initialDraft.focusCommandId)}
                   title="Remove command"
                 >
                   <FaTrashAlt className="mx-auto text-[12px]" />

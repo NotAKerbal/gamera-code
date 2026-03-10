@@ -106,10 +106,6 @@ export const detectPreviewUrlFromOutput = (output: string): string | undefined =
 };
 
 const normalizeDevCommands = (settings: ProjectSettings): ProjectDevCommand[] => {
-  if (settings.devCommands.length === 0) {
-    return [{ id: "default", name: "Dev Server", command: "npm run dev", autoStart: true }];
-  }
-
   const normalized = settings.devCommands.map((command, index) => ({
     ...command,
     autoStart: command.autoStart ?? index === 0,
@@ -119,7 +115,7 @@ const normalizeDevCommands = (settings: ProjectSettings): ProjectDevCommand[] =>
   return normalized;
 };
 
-const pickCommand = (settings: ProjectSettings, commandId?: string): ProjectDevCommand => {
+const pickCommand = (settings: ProjectSettings, commandId?: string): ProjectDevCommand | undefined => {
   const devCommands = normalizeDevCommands(settings);
 
   if (commandId) {
@@ -136,7 +132,7 @@ const pickCommand = (settings: ProjectSettings, commandId?: string): ProjectDevC
     }
   }
 
-  return devCommands[0] ?? { id: "default", name: "Dev Server", command: "npm run dev", autoStart: true };
+  return devCommands[0];
 };
 
 const pickAutoStartCommands = (settings: ProjectSettings): ProjectDevCommand[] => {
@@ -207,6 +203,7 @@ export class ProjectTerminalManager {
 
   getState(projectId: string): ProjectTerminalState {
     const settings = this.deps.repository.getProjectSettings(projectId);
+    this.stopRemovedCommands(projectId, normalizeDevCommands(settings).map((command) => command.id));
     const previous = this.states.get(projectId);
     const previousByCommandId = new Map(previous?.terminals.map((terminal) => [terminal.commandId, terminal]) ?? []);
     const commands = normalizeDevCommands(settings);
@@ -224,13 +221,13 @@ export class ProjectTerminalManager {
     });
 
     const aggregate = pickCommand(settings);
-    const aggregateTerminal = terminals.find((terminal) => terminal.commandId === aggregate.id);
+    const aggregateTerminal = aggregate ? terminals.find((terminal) => terminal.commandId === aggregate.id) : undefined;
     const next: ProjectTerminalState = {
       projectId,
       running: terminals.some((terminal) => terminal.running),
       terminals,
-      commandId: aggregate.id,
-      command: aggregate.command,
+      commandId: aggregate?.id,
+      command: aggregate?.command,
       outputTail: aggregateTerminal?.outputTail ?? "",
       pid: aggregateTerminal?.pid,
       lastExitCode: aggregateTerminal?.lastExitCode,
@@ -244,11 +241,16 @@ export class ProjectTerminalManager {
   start(projectId: string, commandId?: string, autoStartOnly = false): ProjectTerminalState {
     const project = this.requireProject(projectId);
     const settings = this.deps.repository.getProjectSettings(projectId);
-    const targets = commandId
-      ? [pickCommand(settings, commandId)]
-      : autoStartOnly
-      ? pickAutoStartCommands(settings)
-      : normalizeDevCommands(settings);
+    let targets: ProjectDevCommand[] = [];
+    if (commandId) {
+      const target = pickCommand(settings, commandId);
+      if (!target) {
+        throw new Error(`Action not found: ${commandId}`);
+      }
+      targets = [target];
+    } else {
+      targets = autoStartOnly ? pickAutoStartCommands(settings) : normalizeDevCommands(settings);
+    }
 
     const commandsToStart = autoStartOnly
       ? targets.filter((command) => !this.running.has(toRunningKey(projectId, command.id)))
@@ -426,12 +428,12 @@ export class ProjectTerminalManager {
     const settings = this.deps.repository.getProjectSettings(projectId);
     const state = this.getState(projectId);
     const commands = normalizeDevCommands(settings);
-    const command = commands.find((item) => item.id === commandId) ?? pickCommand(settings, commandId);
+    const command = commands.find((item) => item.id === commandId);
 
     const nextTerminals = state.terminals.map((terminal) =>
       terminal.commandId === commandId ? { ...terminal, ...patch, updatedAt: patch.updatedAt ?? nowIso() } : terminal
     );
-    if (!nextTerminals.some((terminal) => terminal.commandId === commandId)) {
+    if (command && !nextTerminals.some((terminal) => terminal.commandId === commandId)) {
       nextTerminals.push(
         buildTerminal(command, {
           ...patch,
@@ -441,19 +443,34 @@ export class ProjectTerminalManager {
     }
 
     const aggregate = pickCommand(settings);
-    const aggregateTerminal = nextTerminals.find((terminal) => terminal.commandId === aggregate.id);
+    const aggregateTerminal = aggregate ? nextTerminals.find((terminal) => terminal.commandId === aggregate.id) : undefined;
 
     this.states.set(projectId, {
       projectId,
       running: nextTerminals.some((terminal) => terminal.running),
       terminals: nextTerminals,
-      commandId: aggregate.id,
-      command: aggregate.command,
+      commandId: aggregate?.id,
+      command: aggregate?.command,
       outputTail: aggregateTerminal?.outputTail ?? "",
       pid: aggregateTerminal?.pid,
       lastExitCode: aggregateTerminal?.lastExitCode,
       updatedAt: nowIso()
     });
+  }
+
+  private stopRemovedCommands(projectId: string, commandIds: string[]) {
+    const allowed = new Set(commandIds);
+    const staleRunning = Array.from(this.running.values()).filter(
+      (running) => running.projectId === projectId && !allowed.has(running.commandId)
+    );
+    for (const running of staleRunning) {
+      try {
+        running.ptyProcess.kill();
+      } catch {
+        // Ignore cleanup failures while reconciling removed actions.
+      }
+      this.running.delete(toRunningKey(projectId, running.commandId));
+    }
   }
 
   private requireProject(projectId: string): Project {

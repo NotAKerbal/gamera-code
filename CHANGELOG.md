@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.2
+- UI fixes for the modal picker and project folders
+
 ## 0.6.1
 - Dynamic model picker
 - Auth for harnesses

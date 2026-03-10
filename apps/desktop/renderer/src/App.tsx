@@ -3994,11 +3994,6 @@ export const App = () => {
       }))
       .filter((command) => command.id && command.name && command.command);
 
-    if (sanitizedCommands.length === 0) {
-      setLogs((prev) => [...prev, "Action settings save failed: at least one action is required."]);
-      return;
-    }
-
     const saved = await api.projectSettings.set({
       projectId: activeProjectId,
       devCommands: sanitizedCommands,
