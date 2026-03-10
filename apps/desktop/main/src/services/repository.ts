@@ -402,7 +402,7 @@ const parseDevCommands = (value: unknown): ProjectDevCommand[] => {
   }
 
   if (parsed.length === 0) {
-    return [DEFAULT_DEV_COMMAND];
+    return [];
   }
 
   return parsed.slice(0, 10);

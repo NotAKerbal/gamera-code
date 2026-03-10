@@ -677,7 +677,9 @@ const MainHeaderComponent = ({
             );
           })}
           <button
-            className="workspace-segment workspace-segment-add app-tooltip-target"
+            className={`workspace-segment app-tooltip-target ${
+              activeProjectTerminals.length > 0 ? "workspace-segment-add is-icon-only" : "workspace-segment-add"
+            }`}
             type="button"
             data-app-tooltip={
               activeProjectTerminals.length > 0

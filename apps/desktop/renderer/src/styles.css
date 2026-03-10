@@ -1310,13 +1310,17 @@ webview {
 }
 
 .workspace-segment-add {
-  @apply w-8 justify-center px-0;
+  @apply px-2;
 }
 
 .workspace-segment-add:hover,
 .workspace-segment-add:focus-visible,
 .workspace-segment-add:focus-within {
   padding-right: 0;
+}
+
+.workspace-segment-add.is-icon-only {
+  @apply w-8 px-0 justify-center;
 }
 
 [data-theme="dawn"] .workspace-segmented-control,
