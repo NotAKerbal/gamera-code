@@ -30,6 +30,7 @@ const PREVIEW_WINDOW_TITLE_BASE = "Project Preview";
 const PREVIEW_AUTOMATION_KIND = "preview-browser";
 const APP_ICON_FILENAME = "icon_rounded.png";
 const MAIN_WINDOW_SPLASH_QUERY_KEY = "bootSplash";
+const CODE_PANEL_PROJECT_ID_QUERY_KEY = "codeProjectId";
 
 const resolveAppIconPath = (): string | undefined => {
   const devPath = resolve(__dirname, "../../resources", APP_ICON_FILENAME);
@@ -1547,8 +1548,13 @@ const formatCodeWindowTitle = (projectName?: string) => {
   return name ? `Code \u2014 ${name}` : "Code";
 };
 
-const ensureCodePanelWindow = async (projectName?: string) => {
+const ensureCodePanelWindow = async (projectId?: string, projectName?: string) => {
   const isMac = process.platform === "darwin";
+  const query: Record<string, string> = { codeWindow: "1" };
+  if (projectId?.trim()) {
+    query[CODE_PANEL_PROJECT_ID_QUERY_KEY] = projectId.trim();
+  }
+  const shouldCreateWindow = !codePanelWindow || codePanelWindow.isDestroyed();
   if (!codePanelWindow || codePanelWindow.isDestroyed()) {
     codePanelWindow = new BrowserWindow({
       width: 1420,
@@ -1580,7 +1586,17 @@ const ensureCodePanelWindow = async (projectName?: string) => {
   }
 
   codePanelWindow.setTitle(formatCodeWindowTitle(projectName));
-  await loadRendererWindow(codePanelWindow, { codeWindow: "1" });
+  if (projectId?.trim() && shouldCreateWindow === false) {
+    codePanelWindow.webContents.send(IPC_CHANNELS.codePanelEvent, {
+      type: "focus_project",
+      projectId: projectId.trim(),
+      projectName
+    });
+  }
+
+  if (shouldCreateWindow) {
+    await loadRendererWindow(codePanelWindow, query);
+  }
   codePanelWindow.show();
   codePanelWindow.focus();
 };
@@ -1702,8 +1718,8 @@ const bootstrap = async () => {
       }
     },
     codePanel: {
-      openPopout: async (projectName?: string) => {
-        await ensureCodePanelWindow(projectName);
+      openPopout: async (projectId?: string, projectName?: string) => {
+        await ensureCodePanelWindow(projectId, projectName);
         return { ok: true };
       },
       closePopout: async () => {

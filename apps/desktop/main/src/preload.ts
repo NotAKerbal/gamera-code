@@ -237,7 +237,7 @@ const api: DesktopApiWithGitExtras = {
     }
   },
   codePanel: {
-    openPopout: (input?: { projectName?: string }) => ipcRenderer.invoke(codePanelOpenPopoutChannel, input),
+    openPopout: (input?: { projectId?: string; projectName?: string }) => ipcRenderer.invoke(codePanelOpenPopoutChannel, input),
     closePopout: () => ipcRenderer.invoke(codePanelClosePopoutChannel),
     onEvent: (listener: (event: CodePanelEvent) => void) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: CodePanelEvent) => listener(payload);

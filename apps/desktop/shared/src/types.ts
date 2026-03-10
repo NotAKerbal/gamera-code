@@ -236,10 +236,12 @@ export interface PreviewEvent {
   type: PreviewEventType;
 }
 
-export type CodePanelEventType = "popout_closed";
+export type CodePanelEventType = "popout_closed" | "focus_project";
 
 export interface CodePanelEvent {
   type: CodePanelEventType;
+  projectId?: string;
+  projectName?: string;
 }
 
 export interface Thread {

@@ -137,6 +137,7 @@ import {
   isExplorationCommand,
   isLikelyGitRepositoryUrl,
   isSettingsWindowContext,
+  formatThreadActivityTimestamp,
   mergeActivityEntry,
   mergePendingQuestions,
   normalizeMessageAttachments,
@@ -285,10 +286,25 @@ const SHOW_VOICE_INPUT_BUTTON = false;
 const RIGHT_PANEL_DEFAULT_WIDTH_PX = 520;
 const RIGHT_PANEL_MIN_WIDTH_PX = 360;
 const RIGHT_PANEL_MAX_WIDTH_PX = 920;
+const CODE_WINDOW_PROJECT_ID_QUERY_KEY = "codeProjectId";
+
+const readCodeWindowProjectId = () => {
+  try {
+    const value = new URLSearchParams(window.location.search).get(CODE_WINDOW_PROJECT_ID_QUERY_KEY);
+    if (!value || !value.trim()) {
+      return null;
+    }
+    return value;
+  } catch {
+    return null;
+  }
+};
 
 type ActivityBundleRowProps = {
   rowId: string;
   chips: string[];
+  tsMs: number;
+  durationMs: number;
   items: TimelineItem[];
   defaultOpen: boolean;
   plansById: Record<string, PlanArtifact>;
@@ -435,6 +451,8 @@ const actionHotkeyFromKeyboardEvent = (event: KeyboardEvent): string => {
 const ActivityBundleRow = ({
   rowId,
   chips,
+  tsMs,
+  durationMs,
   items,
   defaultOpen,
   plansById,
@@ -451,6 +469,24 @@ const ActivityBundleRow = ({
       setGroupOpen(true);
     }
   }, [defaultOpen]);
+
+  const formattedTimestamp = formatThreadActivityTimestamp(tsMs);
+  const formattedDuration = (() => {
+    if (durationMs > 0 && durationMs < 1000) {
+      return `${durationMs}ms`;
+    }
+    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    if (minutes <= 0) {
+      return `${totalSeconds}s`;
+    }
+    if (seconds <= 0) {
+      return `${minutes}m`;
+    }
+    return `${minutes}m ${seconds}s`;
+  })();
 
   return (
     <article className="timeline-item min-w-0 overflow-hidden">
@@ -469,7 +505,11 @@ const ActivityBundleRow = ({
               {chip}
             </span>
           ))}
-          <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
+          <span className="ml-auto flex items-center gap-3">
+            <span className="text-right text-[11px] text-slate-400">{formattedTimestamp}</span>
+            <span className="text-right text-[11px] text-slate-400">{formattedDuration}</span>
+            <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
+          </span>
         </button>
         <div className={`activity-bundle-collapse ${groupOpen ? "open" : ""}`} aria-hidden={!groupOpen}>
           <div className="activity-body">
@@ -481,6 +521,7 @@ const ActivityBundleRow = ({
               onBuildPlan={onBuildPlan}
               onCopyPlan={onCopyPlan}
               onForkFromUserMessage={onForkFromUserMessage}
+              showDurations
             />
           </div>
         </div>
@@ -521,7 +562,13 @@ export const App = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(() => readStoredActiveWorkspaceId());
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => readStoredActiveProjectId());
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
+    const queryProjectId = isCodeWindow ? readCodeWindowProjectId() : null;
+    if (queryProjectId) {
+      return queryProjectId;
+    }
+    return readStoredActiveProjectId();
+  });
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageEvent[]>([]);
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
@@ -1670,6 +1717,10 @@ export const App = () => {
     );
 
     if (activeThreadId && !sortedThreads.some((thread) => thread.id === activeThreadId)) {
+      if (isCodeWindow) {
+        setActiveThreadId(null);
+        return;
+      }
       const fallbackThread = sortedThreads[0] ?? null;
       setActiveThreadId(fallbackThread?.id ?? null);
       if (fallbackThread) {
@@ -1679,6 +1730,11 @@ export const App = () => {
     }
 
     if (!activeThreadId && sortedThreads.length > 0) {
+      if (isCodeWindow && activeProjectId) {
+        const threadForProject = sortedThreads.find((thread) => thread.projectId === activeProjectId);
+        setActiveThreadId(threadForProject?.id ?? null);
+        return;
+      }
       if (activeWorkspaceId) {
         const workspaceProjectIds = new Set(
           projects.filter((project) => project.workspaceId === activeWorkspaceId).map((project) => project.id)
@@ -3277,6 +3333,11 @@ export const App = () => {
     const unsubscribe = api.codePanel.onEvent((event) => {
       if (event.type === "popout_closed") {
         setIsCodePanelPoppedOut(false);
+        return;
+      }
+
+      if (event.type === "focus_project" && event.projectId) {
+        setActiveProjectId(event.projectId);
       }
     });
     return () => {
@@ -7538,7 +7599,7 @@ TODO: Describe what this skill does.
       return;
     }
     api.codePanel
-      .openPopout({ projectName: activeProject?.name })
+      .openPopout({ projectId: activeProjectId ?? undefined, projectName: activeProject?.name })
       .then((result) => {
         if (result.ok) {
           setIsCodePanelPoppedOut(true);
@@ -7551,7 +7612,7 @@ TODO: Describe what this skill does.
       });
     setIsPreviewOpen(false);
     setIsGitPanelOpen(false);
-  }, [activeProject?.name, appendLog, isCodePanelPoppedOut, isCodeWindow]);
+  }, [activeProjectId, activeProject?.name, appendLog, isCodePanelPoppedOut, isCodeWindow]);
 
   const timelineItems = useMemo(() => {
     const messageItems: TimelineMessageItem[] = messages.map((message, idx) => {
@@ -7711,7 +7772,7 @@ TODO: Describe what this skill does.
     const rows: Array<
       | { kind: "message"; id: string; item: TimelineMessageItem }
       | { kind: "plan"; id: string; item: TimelineEventItem }
-      | { kind: "activity-bundle"; id: string; items: TimelineItem[]; chips: string[] }
+      | { kind: "activity-bundle"; id: string; items: TimelineItem[]; chips: string[]; tsMs: number; durationMs: number }
     > = [];
     let pending: TimelineItem[] = [];
 
@@ -7800,11 +7861,15 @@ TODO: Describe what this skill does.
 
       const first = pending[0];
       const last = pending[pending.length - 1];
+      const tsMs = last?.tsMs ?? first?.tsMs ?? Date.now();
+      const durationMs = Math.max(0, (last?.tsMs ?? tsMs) - (first?.tsMs ?? tsMs));
       rows.push({
         kind: "activity-bundle",
         id: `activity-bundle-${first?.id ?? "start"}-${last?.id ?? "end"}`,
         items: pending,
-        chips
+        chips,
+        tsMs,
+        durationMs
       });
       pending = [];
     };
@@ -8918,13 +8983,15 @@ TODO: Describe what this skill does.
 
                       const isLastRow = rowIndex === timelineRows.length - 1;
                       return (
-                        <MemoizedActivityBundleRow
-                          key={row.id}
-                          rowId={row.id}
-                          chips={row.chips}
-                          items={row.items}
-                          defaultOpen={isLastRow}
-                          plansById={plansById}
+                          <MemoizedActivityBundleRow
+                            key={row.id}
+                            rowId={row.id}
+                            chips={row.chips}
+                            tsMs={row.tsMs}
+                            durationMs={row.durationMs}
+                            items={row.items}
+                            defaultOpen={isLastRow}
+                            plansById={plansById}
                           getTodoPlanByActivityId={getTodoPlanByActivityId}
                           onViewPlan={openPlanDrawerFor}
                           onBuildPlan={handleBuildPlan}

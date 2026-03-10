@@ -115,7 +115,7 @@ export interface DesktopApi {
     onEvent: (listener: (event: PreviewEvent) => void) => () => void;
   };
   codePanel: {
-    openPopout: (input?: { projectName?: string }) => Promise<{ ok: boolean }>;
+    openPopout: (input?: { projectId?: string; projectName?: string }) => Promise<{ ok: boolean }>;
     closePopout: () => Promise<{ ok: boolean }>;
     onEvent: (listener: (event: CodePanelEvent) => void) => () => void;
   };

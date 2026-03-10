@@ -276,6 +276,31 @@ const UserMessageContent = ({ content, attachments }: { content: string; attachm
 
 export const MemoizedUserMessageContent = memo(UserMessageContent);
 
+const formatDuration = (ms: number) => {
+  if (ms > 0 && ms < 1000) {
+    return `${ms}ms`;
+  }
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes <= 0) {
+    return `${totalSeconds}s`;
+  }
+  if (seconds <= 0) {
+    return `${minutes}m`;
+  }
+  return `${minutes}m ${seconds}s`;
+};
+
+const TimelineItemDuration = ({ ms, className }: { ms: number; className?: string }) => {
+  const label = formatDuration(ms);
+  if (!label) {
+    return null;
+  }
+  return <div className={`text-right text-[11px] text-slate-400 ${className ?? ""}`}>{label}</div>;
+};
+
 interface TimelineItemsListProps {
   timelineItems: TimelineItem[];
   plansById: Record<string, PlanArtifact>;
@@ -284,6 +309,7 @@ interface TimelineItemsListProps {
   onBuildPlan: (planId: string) => void;
   onCopyPlan: (planId: string) => void;
   onForkFromUserMessage?: (message: MessageEvent) => void;
+  showDurations?: boolean;
 }
 
 const TimelineItemsList = ({
@@ -293,16 +319,25 @@ const TimelineItemsList = ({
   onViewPlan,
   onBuildPlan,
   onCopyPlan,
-  onForkFromUserMessage
+  onForkFromUserMessage,
+  showDurations = false
 }: TimelineItemsListProps) => {
   const [expandedActivityGroups, setExpandedActivityGroups] = useState<Record<string, boolean>>({});
 
   return (
     <>
-      {timelineItems.map((item) => {
+      {timelineItems.map((item, index) => {
+        const previousTs = index > 0 ? timelineItems[index - 1]?.tsMs : item.tsMs;
+        const durationMs = Math.max(0, item.tsMs - previousTs);
+
         if (item.kind === "message") {
           return item.message.role === "assistant" ? (
             <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
+              {showDurations && (
+                <div className="mb-1 flex items-center justify-end">
+                  <TimelineItemDuration ms={durationMs} />
+                </div>
+              )}
               <MemoizedAssistantMarkdown
                 messageId={item.message.id}
                 content={item.message.content}
@@ -314,6 +349,11 @@ const TimelineItemsList = ({
             </article>
           ) : (
             <article key={item.id} className="timeline-item group relative min-w-0 overflow-hidden rounded-lg bg-zinc-900/80 p-3">
+              {showDurations && (
+                <div className="mb-1 flex items-center justify-end">
+                  <TimelineItemDuration ms={durationMs} />
+                </div>
+              )}
               {onForkFromUserMessage && (
                 <button
                   type="button"
@@ -368,7 +408,10 @@ const TimelineItemsList = ({
                   ) : (
                     <span className="summary-chip">{item.runs.length}</span>
                   )}
-                  <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
+                  <span className="ml-auto flex items-center gap-2">
+                    {showDurations && <TimelineItemDuration ms={durationMs} />}
+                    <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
+                  </span>
                 </button>
                 {groupOpen && (
                   <div className="activity-collapse open">
@@ -422,7 +465,10 @@ const TimelineItemsList = ({
                 >
                   {buildFileGroupLabel(item.files)}
                   <span className={`status-pill ${item.status}`}>{item.status.replace("_", " ")}</span>
-                  <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
+                  <span className="ml-auto flex items-center gap-2">
+                    {showDurations && <TimelineItemDuration ms={durationMs} />}
+                    <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
+                  </span>
                 </button>
                 {groupOpen && (
                   <div className="activity-collapse open">
@@ -469,6 +515,11 @@ const TimelineItemsList = ({
           const normalizedUrl = normalizeWebLinkUrl(query);
           return (
             <article key={item.id} className="timeline-item min-w-0 overflow-hidden rounded-lg border border-border/70 bg-zinc-900/60 p-3">
+              {showDurations && (
+                <div className="mb-1 flex items-center justify-end">
+                  <TimelineItemDuration ms={durationMs} />
+                </div>
+              )}
               <div className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.12em] text-slate-400">
                 <FaGlobeAmericas className="text-[11px]" />
                 Web Search
@@ -494,6 +545,11 @@ const TimelineItemsList = ({
           const planId = plan?.id ?? `todo:${item.entry.id}`;
           return (
             <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
+              {showDurations && (
+                <div className="mb-1 flex items-center justify-end">
+                  <TimelineItemDuration ms={durationMs} />
+                </div>
+              )}
               <PlanSummaryCard
                 label="Plan"
                 summary={summary}
@@ -507,6 +563,11 @@ const TimelineItemsList = ({
 
         return (
           <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
+            {showDurations && (
+              <div className="mb-1 flex items-center justify-end">
+                <TimelineItemDuration ms={durationMs} />
+              </div>
+            )}
             {item.entry.category !== "assistant_draft" && (
               <div className="whitespace-pre-wrap break-words text-sm text-slate-400 [overflow-wrap:anywhere]">
                 {item.entry.title}
