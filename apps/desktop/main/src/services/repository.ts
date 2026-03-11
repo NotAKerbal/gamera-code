@@ -1148,7 +1148,7 @@ export class Repository {
 
     const rows = this.db
       .prepare(
-        `SELECT *
+        `SELECT id, thread_id, role, content, attachments_json, ts, stream_seq
          FROM message_events
          WHERE thread_id = @threadId
            AND stream_seq BETWEEN @lowerStreamSeq AND @upperStreamSeq
@@ -1165,16 +1165,7 @@ export class Repository {
     }
 
     const firstLoadedStreamSeq = rows[0]!.stream_seq;
-    const hasMoreRow = this.db
-      .prepare(
-        `SELECT 1 AS has_more
-         FROM message_events
-         WHERE thread_id = @threadId
-           AND stream_seq < @firstLoadedStreamSeq
-         LIMIT 1`
-      )
-      .get({ threadId, firstLoadedStreamSeq }) as { has_more: number } | undefined;
-    const hasMore = Boolean(hasMoreRow);
+    const hasMore = anchorUserRow ? firstLoadedStreamSeq < anchorUserRow.stream_seq : false;
 
     return {
       events: rows.map(mapMessage),

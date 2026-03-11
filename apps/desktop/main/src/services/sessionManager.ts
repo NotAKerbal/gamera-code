@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import os from "node:os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import * as pty from "node-pty";
 import type {
@@ -688,6 +689,8 @@ const extractUserInputQuestions = (item: UnknownRecord): UserInputQuestion[] => 
 export class SessionManager {
   private readonly sessions = new Map<string, RunningSession>();
   private readonly gitRepoCache = new Map<string, boolean>();
+  private readonly fileDiffCache = new Map<string, DiffData>();
+  private readonly fileDiffConcurrencyLimit = 4;
   private readonly childToRunId = new Map<string, string>();
   private readonly runHeartbeatTimerById = new Map<string, ReturnType<typeof setInterval>>();
   private readonly runSpawnQueue = new Map<string, Promise<void>>();
@@ -831,7 +834,7 @@ export class SessionManager {
       return false;
     }
 
-    const savedAttachments = this.persistPromptAttachments(threadId, attachments ?? []);
+    const savedAttachments = await this.persistPromptAttachments(threadId, attachments ?? []);
     const userContent = this.formatUserMessage(input, savedAttachments);
     const now = new Date().toISOString();
     this.deps.repository.appendMessage({
@@ -885,7 +888,7 @@ export class SessionManager {
       return false;
     }
 
-    const savedAttachments = this.persistPromptAttachments(threadId, attachments ?? []);
+    const savedAttachments = await this.persistPromptAttachments(threadId, attachments ?? []);
     const codexInput = this.buildCodexInput(thread.projectId, input, savedAttachments, skills ?? []);
     const inputItems: CodexInputItem[] =
       typeof codexInput === "string" ? [{ type: "text", text: codexInput }] : codexInput;
@@ -1782,7 +1785,7 @@ export class SessionManager {
     }
   }
 
-  private persistPromptAttachments(threadId: string, attachments: PromptAttachment[]): StoredAttachment[] {
+  private async persistPromptAttachments(threadId: string, attachments: PromptAttachment[]): Promise<StoredAttachment[]> {
     if (attachments.length === 0) {
       return [];
     }
@@ -1792,48 +1795,48 @@ export class SessionManager {
     const attachDir = project
       ? path.join(project.path, ".code-app", "attachments", threadId)
       : path.join(this.deps.repository.getThreadStoragePaths(threadId).threadDir, "attachments");
-    mkdirSync(attachDir, { recursive: true });
+    await fsPromises.mkdir(attachDir, { recursive: true });
 
-    const stored: StoredAttachment[] = [];
-    attachments.forEach((attachment, index) => {
+    const storedWriteTasks = attachments.map(async (attachment, index) => {
       const name = asString(attachment.name) ?? `attachment-${index + 1}`;
       const parsed = parseDataUrlPayload(attachment.dataUrl);
       if (!parsed) {
         return;
       }
       const kind = inferAttachmentKind(parsed.mimeType);
+      const safeTimestamp = Date.now();
 
       if (kind === "text") {
         const safeBase = name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const extension = safeBase.includes(".") ? "" : ".txt";
-        const fileName = `${Date.now()}-${index + 1}-${safeBase || "attachment"}${extension}`;
+        const fileName = `${safeTimestamp}-${index + 1}-${safeBase || "attachment"}${extension}`;
         const filePath = path.join(attachDir, fileName);
-        writeFileSync(filePath, parsed.data);
-        stored.push({
+        await fsPromises.writeFile(filePath, parsed.data);
+        return {
           kind: "text",
           name,
           mimeType: parsed.mimeType || DEFAULT_TEXT_ATTACHMENT_MIME,
           size: typeof attachment.size === "number" ? attachment.size : parsed.data.length,
           path: filePath
-        });
-        return;
+        };
       }
 
       const extension = extensionFromMimeType(parsed.mimeType);
       const safeBase = name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/\.[a-zA-Z0-9]+$/, "");
-      const fileName = `${Date.now()}-${index + 1}-${safeBase || "image"}.${extension}`;
+      const fileName = `${safeTimestamp}-${index + 1}-${safeBase || "image"}.${extension}`;
       const filePath = path.join(attachDir, fileName);
-      writeFileSync(filePath, parsed.data);
-      stored.push({
+      await fsPromises.writeFile(filePath, parsed.data);
+      return {
         kind: "image",
         name,
         mimeType: parsed.mimeType,
         size: typeof attachment.size === "number" ? attachment.size : parsed.data.length,
         path: filePath
-      });
+      };
     });
 
-    return stored;
+    const stored = await Promise.all(storedWriteTasks);
+    return stored.filter((entry): entry is StoredAttachment => Boolean(entry));
   }
 
   private normalizePromptAttachmentsForMessage(attachments: PromptAttachment[]): PromptAttachment[] | undefined {
@@ -2395,17 +2398,32 @@ export class SessionManager {
     }
 
     const insideGit = await this.isGitRepo(cwd);
-    const enriched = await Promise.all(
-      changes.map(async (change) => {
-        const diffData = await this.getDiffForChange(cwd, change, insideGit);
-        return {
-          ...change,
-          ...diffData
-        };
-      })
-    );
-
-    return enriched;
+    const enriched: Array<ChangedFile | undefined> = new Array(changes.length);
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < changes.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        const change = changes[currentIndex];
+        if (!change) {
+          continue;
+        }
+        try {
+          const diffData = await this.getDiffForChange(cwd, change, insideGit);
+          enriched[currentIndex] = {
+            ...change,
+            ...diffData
+          };
+        } catch (error) {
+          enriched[currentIndex] = {
+            ...change,
+            diffError: error instanceof Error ? error.message : String(error)
+          };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(this.fileDiffConcurrencyLimit, changes.length) }, () => worker()));
+    return enriched.filter((entry): entry is ChangedFile => Boolean(entry));
   }
 
   private async isGitRepo(cwd: string): Promise<boolean> {
@@ -2424,6 +2442,20 @@ export class SessionManager {
     const normalizedPath = change.path.replace(/\\/g, "/");
     const diffTarget = path.isAbsolute(normalizedPath) ? path.relative(cwd, normalizedPath) : normalizedPath;
     const absolutePath = path.isAbsolute(normalizedPath) ? normalizedPath : path.join(cwd, normalizedPath);
+
+    let fileMtimeMs: number | null = null;
+    try {
+      const fileStats = await fsPromises.stat(absolutePath);
+      fileMtimeMs = Number.isFinite(fileStats.mtimeMs) ? Math.trunc(fileStats.mtimeMs) : null;
+    } catch {
+      fileMtimeMs = null;
+    }
+
+    const diffCacheKey = `${insideGit ? "git" : "fs"}:${change.kind}:${absolutePath}:${fileMtimeMs ?? "missing"}`;
+    const cachedDiff = this.fileDiffCache.get(diffCacheKey);
+    if (cachedDiff) {
+      return cachedDiff;
+    }
 
     if (insideGit) {
       const attempts: Array<{ source: string; args: string[] }> = [
@@ -2446,18 +2478,20 @@ export class SessionManager {
         }
 
         const trimmed = truncateWithFlag(result.stdout, 12000);
-        return {
+        const diffResult = {
           diff: trimmed.text,
           diffSource: attempt.source,
           diffStats: diffStatsFromText(result.stdout),
           diffTruncated: trimmed.truncated
         };
+        this.setCachedFileDiff(diffCacheKey, diffResult);
+        return diffResult;
       }
     }
 
     if (change.kind === "add" && existsSync(absolutePath)) {
       try {
-        const raw = readFileSync(absolutePath, "utf8");
+        const raw = await fsPromises.readFile(absolutePath, "utf8");
         const snippet = raw
           .split("\n")
           .slice(0, 180)
@@ -2465,22 +2499,38 @@ export class SessionManager {
           .join("\n");
         const syntheticDiff = `--- /dev/null\n+++ b/${normalizedPath}\n@@ -0,0 +1,${snippet.split("\n").length} @@\n${snippet}`;
         const trimmed = truncateWithFlag(syntheticDiff, 12000);
-        return {
+        const diffResult = {
           diff: trimmed.text,
           diffSource: "file_snapshot",
           diffStats: diffStatsFromText(syntheticDiff),
           diffTruncated: trimmed.truncated
         };
+        this.setCachedFileDiff(diffCacheKey, diffResult);
+        return diffResult;
       } catch (error) {
-        return {
+        const diffResult = {
           diffError: `Snapshot read failed: ${error instanceof Error ? error.message : String(error)}`
         };
+        this.setCachedFileDiff(diffCacheKey, diffResult);
+        return diffResult;
       }
     }
 
-    return {
+    const diffResult = {
       diffError: insideGit ? "No git diff output for this change." : "Project is not a git repository."
     };
+    this.setCachedFileDiff(diffCacheKey, diffResult);
+    return diffResult;
+  }
+
+  private setCachedFileDiff(key: string, diff: DiffData): void {
+    this.fileDiffCache.set(key, diff);
+    if (this.fileDiffCache.size > 500) {
+      const oldestKey = this.fileDiffCache.keys().next();
+      if (!oldestKey.done) {
+        this.fileDiffCache.delete(oldestKey.value);
+      }
+    }
   }
 
   private parseSubthreadProposal(content: string): SubthreadProposal | null {

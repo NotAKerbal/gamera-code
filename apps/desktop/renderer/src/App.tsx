@@ -909,7 +909,15 @@ export const App = () => {
     [terminalErrorKey]
   );
 
-  const activeThread = useMemo(() => threads.find((thread) => thread.id === activeThreadId) || null, [threads, activeThreadId]);
+  const threadById = useMemo(
+    () => Object.fromEntries(threads.map((thread) => [thread.id, thread])) as Record<string, Thread>,
+    [threads]
+  );
+  const projectById = useMemo(
+    () => Object.fromEntries(projects.map((project) => [project.id, project])) as Record<string, Project>,
+    [projects]
+  );
+  const activeThread = useMemo(() => (activeThreadId ? threadById[activeThreadId] || null : null), [activeThreadId, threadById]);
   const activeHarnessId = (activeThread?.harnessId ?? activeThread?.provider ?? settings.defaultHarnessId ?? "codex") as HarnessId;
   const activeHarness = useMemo(
     () => getSupportedHarness(activeHarnessId) ?? getSupportedHarness("codex")!,
@@ -931,13 +939,10 @@ export const App = () => {
     () => (activeThreadId ? composerDraftByThreadId[activeThreadId] ?? "" : ""),
     [activeThreadId, composerDraftByThreadId]
   );
-  const selectedProject = useMemo(
-    () => (activeProjectId ? projects.find((project) => project.id === activeProjectId) || null : null),
-    [projects, activeProjectId]
-  );
+  const selectedProject = useMemo(() => (activeProjectId ? projectById[activeProjectId] ?? null : null), [projectById, activeProjectId]);
   const activeProject = useMemo(
-    () => (activeThread ? projects.find((project) => project.id === activeThread.projectId) || selectedProject : selectedProject),
-    [projects, activeThread, selectedProject]
+    () => (activeThread ? projectById[activeThread.projectId] || selectedProject : selectedProject),
+    [activeThread, projectById, selectedProject]
   );
   const activeProjectFiles = useMemo(
     () => (activeProjectId ? projectFilesByProjectId[activeProjectId] ?? [] : []),
@@ -1440,36 +1445,50 @@ export const App = () => {
     });
     return next;
   }, [orchestrationRunsByParentId]);
+  const workspaceThreadMetrics = useMemo(() => {
+    const next: Record<string, { runningCount: number; reviewCount: number; finishedCount: number }> = {};
+    threads.forEach((thread) => {
+      const project = projectById[thread.projectId];
+      if (!project?.workspaceId || thread.archivedAt) {
+        return;
+      }
+      const metric = next[project.workspaceId] ?? { runningCount: 0, reviewCount: 0, finishedCount: 0 };
+      if ((runStateByThreadId[thread.id] ?? "idle") === "running") {
+        metric.runningCount += 1;
+      }
+      if (
+        Boolean(threadAwaitingInputById[thread.id]) ||
+        (pendingUserQuestionsByThreadId[thread.id]?.length ?? 0) > 0 ||
+        Boolean(hasPendingSubagentReviewByThreadId[thread.id])
+      ) {
+        metric.reviewCount += 1;
+      }
+      if (Boolean(threadFinishedUnreadById[thread.id])) {
+        metric.finishedCount += 1;
+      }
+      next[project.workspaceId] = metric;
+    });
+    return next;
+  }, [
+    hasPendingSubagentReviewByThreadId,
+    pendingUserQuestionsByThreadId,
+    projectById,
+    runStateByThreadId,
+    threadAwaitingInputById,
+    threadFinishedUnreadById,
+    threads
+  ]);
   const workspaceHeaderItems = useMemo(() => {
     return workspaces.map((workspace) => {
-      const workspaceProjectIds = new Set(
-        projects.filter((project) => project.workspaceId === workspace.id).map((project) => project.id)
-      );
-      const workspaceThreads = threads.filter((thread) => !thread.archivedAt && workspaceProjectIds.has(thread.projectId));
-      const runningCount = workspaceThreads.filter((thread) => (runStateByThreadId[thread.id] ?? "idle") === "running").length;
-      const reviewCount = workspaceThreads.filter(
-        (thread) =>
-          Boolean(threadAwaitingInputById[thread.id]) ||
-          (pendingUserQuestionsByThreadId[thread.id]?.length ?? 0) > 0 ||
-          Boolean(hasPendingSubagentReviewByThreadId[thread.id])
-      ).length;
-      const finishedCount = workspaceThreads.filter((thread) => Boolean(threadFinishedUnreadById[thread.id])).length;
+      const metrics = workspaceThreadMetrics[workspace.id] ?? { runningCount: 0, reviewCount: 0, finishedCount: 0 };
       return {
         ...workspace,
-        runningCount,
-        reviewCount,
-        finishedCount
+        ...metrics
       };
     });
   }, [
     workspaces,
-    projects,
-    threads,
-    runStateByThreadId,
-    threadAwaitingInputById,
-    pendingUserQuestionsByThreadId,
-    hasPendingSubagentReviewByThreadId,
-    threadFinishedUnreadById
+    workspaceThreadMetrics
   ]);
   const hasUserPromptInThread = useMemo(() => messages.some((message) => message.role === "user"), [messages]);
   const getThreadSidebarSummary = (thread: Thread) => threadSummaryById[thread.id] ?? suggestThreadSummary(thread.title);
@@ -1751,6 +1770,20 @@ export const App = () => {
       setActiveThreadId(fallbackThread.id);
     }
   };
+
+  const loadProjectsAndThreadsFlightRef = useRef<Promise<void> | null>(null);
+  const loadProjectsAndThreads = useCallback(() => {
+    if (loadProjectsAndThreadsFlightRef.current) {
+      return loadProjectsAndThreadsFlightRef.current;
+    }
+    const next = (async () => {
+      await Promise.all([loadProjects(), loadThreads()]);
+    })();
+    loadProjectsAndThreadsFlightRef.current = next.finally(() => {
+      loadProjectsAndThreadsFlightRef.current = null;
+    }) as Promise<void>;
+    return loadProjectsAndThreadsFlightRef.current;
+  }, [loadProjects, loadThreads]);
 
   const loadSettings = async () => {
     const current = await api.settings.get();
@@ -2542,15 +2575,11 @@ export const App = () => {
 
   useEffect(() => {
     const initialize = async () => {
-      const { selectedWorkspaceId } = await loadWorkspaces();
-      await loadProjects(selectedWorkspaceId);
-      await loadThreads();
-      await loadSettings();
-      await loadSystemTerminals();
-      await loadInstallerStatus();
-      await loadCodexAuthStatus();
-      await loadOpenCodeAuthStatus();
-      await checkUpdatesOnLaunch();
+      const workspaceLoad = loadWorkspaces();
+      const uiLoad = Promise.all([loadSettings(), loadSystemTerminals(), loadInstallerStatus(), loadCodexAuthStatus(), loadOpenCodeAuthStatus(), checkUpdatesOnLaunch()]);
+      const { selectedWorkspaceId } = await workspaceLoad;
+      const threadsAndProjectsLoad = Promise.all([loadProjects(selectedWorkspaceId), loadThreads()]);
+      await Promise.all([workspaceLoad, uiLoad, threadsAndProjectsLoad]);
     };
 
     initialize().catch((error) => {
@@ -4157,7 +4186,7 @@ export const App = () => {
         return next;
       });
       setLogs((prev) => [...prev, `Project removed: ${projectName}`]);
-      await Promise.all([loadProjects(), loadThreads()]);
+      await loadProjectsAndThreads();
     } catch (error) {
       setLogs((prev) => [...prev, `Project remove failed: ${String(error)}`]);
     } finally {
@@ -5468,7 +5497,7 @@ export const App = () => {
     }
     await api.workspaces.delete({ id: workspace.id });
     setShowWorkspaceModal(false);
-    await Promise.all([loadWorkspaces(), loadProjects(), loadThreads()]);
+    await Promise.all([loadWorkspaces(), loadProjectsAndThreads()]);
   };
 
   const saveWorkspaceFromModal = async (draft: { name: string; color: string; moveProjectIds: string[] }) => {
@@ -5485,7 +5514,7 @@ export const App = () => {
         color,
         moveProjectIds: draft.moveProjectIds
       });
-      await Promise.all([loadWorkspaces(), loadProjects(), loadThreads()]);
+      await Promise.all([loadWorkspaces(), loadProjectsAndThreads()]);
       setShowWorkspaceModal(false);
       await focusWorkspace(created.id);
       return;
@@ -5515,7 +5544,7 @@ export const App = () => {
     }
     await api.workspaces.delete({ id: workspaceEditingId });
     setShowWorkspaceModal(false);
-    await Promise.all([loadWorkspaces(), loadProjects(), loadThreads()]);
+    await Promise.all([loadWorkspaces(), loadProjectsAndThreads()]);
   };
 
   const setThreadArchived = async (thread: Thread, archived: boolean) => {
