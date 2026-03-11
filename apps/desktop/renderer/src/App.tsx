@@ -623,7 +623,15 @@ export const App = () => {
   } | null>(null);
   const [projectActionsSettingsInitialDraft, setProjectActionsSettingsInitialDraft] = useState<{
     focusCommandId?: string;
-    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; stayRunning: boolean; hotkey?: string }>;
+    projectSettingsCommands: Array<{
+      id: string;
+      name: string;
+      command: string;
+      inDropdown: boolean;
+      autoStart: boolean;
+      stayRunning: boolean;
+      hotkey?: string;
+    }>;
   } | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
@@ -762,6 +770,7 @@ export const App = () => {
   const composerDropdownMenuRef = useRef<HTMLDivElement | null>(null);
   const composerMentionRafRef = useRef<number | null>(null);
   const composerResizeRafRef = useRef<number | null>(null);
+  const composerFocusRafRef = useRef<number | null>(null);
   const threadCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const threadCreateInputRef = useRef<HTMLInputElement | null>(null);
   const threadContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2297,6 +2306,26 @@ export const App = () => {
     setComposerMentionedSkills((prev) => (areSkillReferencesEqual(prev, nextSkills) ? prev : nextSkills));
     scheduleComposerResize();
   }, [activeThreadId, activeComposerDraft, activeSkills]);
+
+  useEffect(() => {
+    if (!activeThreadId) {
+      return;
+    }
+    if (composerFocusRafRef.current !== null) {
+      window.cancelAnimationFrame(composerFocusRafRef.current);
+    }
+    composerFocusRafRef.current = window.requestAnimationFrame(() => {
+      composerFocusRafRef.current = null;
+      composerTextareaRef.current?.focus();
+    });
+
+    return () => {
+      if (composerFocusRafRef.current !== null) {
+        window.cancelAnimationFrame(composerFocusRafRef.current);
+        composerFocusRafRef.current = null;
+      }
+    };
+  }, [activeThreadId]);
 
   useEffect(() => {
     const nextSkills = extractSkillsFromInput(composerRef.current, activeSkills).skills;
@@ -3971,10 +4000,12 @@ export const App = () => {
       return;
     }
     const current = projectSettingsById[projectId] ?? (await loadProjectSettings(projectId));
+    const overflowActionCommandIds = new Set(current.overflowActionCommandIds ?? []);
     const nextCommands = current.devCommands.map((command, index) => ({
       id: command.id?.trim() || `cmd-${index + 1}`,
       name: command.name ?? "",
       command: command.command ?? "",
+      inDropdown: overflowActionCommandIds.has(command.id?.trim() || `cmd-${index + 1}`),
       autoStart: command.autoStart ?? index === 0,
       stayRunning: command.stayRunning ?? false,
       hotkey: command.hotkey?.trim() ?? ""
@@ -4068,7 +4099,15 @@ export const App = () => {
   };
 
   const saveProjectActionsSettings = async (draft: {
-    projectSettingsCommands: Array<{ id: string; name: string; command: string; autoStart: boolean; stayRunning: boolean; hotkey?: string }>;
+    projectSettingsCommands: Array<{
+      id: string;
+      name: string;
+      command: string;
+      inDropdown: boolean;
+      autoStart: boolean;
+      stayRunning: boolean;
+      hotkey?: string;
+    }>;
   }) => {
     if (!activeProjectId) {
       return;
@@ -4078,16 +4117,22 @@ export const App = () => {
         id: command.id.trim(),
         name: command.name.trim(),
         command: command.command.trim(),
+        inDropdown: Boolean(command.inDropdown),
         autoStart: Boolean(command.autoStart),
         stayRunning: Boolean(command.stayRunning),
         hotkey: normalizeActionHotkey(command.hotkey ?? "") || undefined
       }))
       .filter((command) => command.id && command.name && command.command);
 
+    const overflowActionCommandIds = sanitizedCommands
+      .filter((command) => command.inDropdown)
+      .map((command) => command.id);
+
     const saved = await api.projectSettings.set({
       projectId: activeProjectId,
       devCommands: sanitizedCommands,
-      autoStartDevTerminal: sanitizedCommands.some((command) => command.autoStart)
+      autoStartDevTerminal: sanitizedCommands.some((command) => command.autoStart),
+      overflowActionCommandIds
     });
 
     setProjectSettingsById((prev) => ({
@@ -8025,6 +8070,21 @@ TODO: Describe what this skill does.
     setProjectActionsSettingsInitialDraft(null);
   }, []);
 
+  const setOverflowActionIds = useCallback(async (overflowActionIds: string[]) => {
+    if (!activeProjectId) {
+      return;
+    }
+    const nextOverflowActionIds = Array.from(new Set(overflowActionIds.filter(Boolean)));
+    const saved = await api.projectSettings.set({
+      projectId: activeProjectId,
+      overflowActionCommandIds: nextOverflowActionIds
+    });
+    setProjectSettingsById((prev) => ({
+      ...prev,
+      [activeProjectId]: saved
+    }));
+  }, [activeProjectId]);
+
   const moveProjectWorkspace = useCallback(
     async (workspaceId: string) => {
       if (!activeProjectId || !workspaceId) {
@@ -8153,6 +8213,8 @@ TODO: Describe what this skill does.
               onOpenTerminalPopout={openTerminalPopout}
               onAcknowledgeTerminalError={acknowledgeActiveProjectTerminalError}
               onOpenProjectSettings={openActiveProjectActionsSettings}
+              overflowActionCommandIds={activeProjectSettings?.overflowActionCommandIds ?? []}
+              onSetOverflowActionIds={setOverflowActionIds}
               onStartTerminal={startActiveProjectTerminal}
               onStopTerminal={stopActiveProjectTerminal}
               onCopyTerminalOutput={copyTerminalOutput}

@@ -166,6 +166,7 @@ export interface ProjectSettings {
   projectId: string;
   envVars: Record<string, string>;
   devCommands: ProjectDevCommand[];
+  overflowActionCommandIds?: string[];
   webLinks: ProjectWebLink[];
   browserEnabled: boolean;
   defaultDevCommandId?: string;

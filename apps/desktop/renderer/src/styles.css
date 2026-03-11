@@ -515,6 +515,12 @@ webview {
   right: 0;
 }
 
+.terminal-action-pop--overflow {
+  top: 0;
+  right: auto;
+  left: calc(100% + 6px);
+}
+
 .changelog-pop {
   @apply absolute left-0 top-7 z-30 w-72 rounded-md border border-border bg-surface/95 p-2 shadow-lg backdrop-blur;
   animation: dropdown-fade 120ms ease-out;

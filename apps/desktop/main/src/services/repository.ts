@@ -152,6 +152,7 @@ interface ProjectSettingsRow {
   env_vars_json: string;
   dev_commands_json: string;
   web_links_json: string;
+  overflow_action_command_ids_json: string;
   browser_enabled: number;
   stay_running_actions: number;
   default_dev_command_id: string | null;
@@ -437,6 +438,24 @@ const parseWebLinks = (value: unknown): ProjectWebLink[] => {
   return parsed.slice(0, 8);
 };
 
+const parseOverflowActionCommandIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const normalized = item.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+  }
+  return Array.from(seen);
+};
+
 const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
   let envVars: Record<string, string> = {};
   let devCommands: ProjectDevCommand[] = [DEFAULT_DEV_COMMAND];
@@ -456,6 +475,12 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
   } catch {
     webLinks = [];
   }
+  let overflowActionCommandIds: string[] = [];
+  try {
+    overflowActionCommandIds = parseOverflowActionCommandIds(JSON.parse(row.overflow_action_command_ids_json));
+  } catch {
+    overflowActionCommandIds = [];
+  }
   const subthreadPolicyOverride = isSubthreadPolicy(row.subthread_policy_override)
     ? row.subthread_policy_override
     : undefined;
@@ -465,6 +490,7 @@ const mapProjectSettings = (row: ProjectSettingsRow): ProjectSettings => {
     envVars,
     devCommands,
     webLinks,
+    overflowActionCommandIds,
     browserEnabled: row.browser_enabled !== 0,
     defaultDevCommandId: row.default_dev_command_id ?? undefined,
     autoStartDevTerminal: row.auto_start_dev_terminal === 1,
@@ -715,6 +741,7 @@ export class Repository {
       env_vars_json: JSON.stringify(this.getSettings().envVars),
       dev_commands_json: JSON.stringify([DEFAULT_DEV_COMMAND]),
       web_links_json: JSON.stringify([]),
+      overflow_action_command_ids_json: JSON.stringify([]),
       browser_enabled: 1,
       stay_running_actions: 0,
       default_dev_command_id: DEFAULT_DEV_COMMAND.id,
@@ -732,6 +759,7 @@ export class Repository {
           env_vars_json,
           dev_commands_json,
           web_links_json,
+          overflow_action_command_ids_json,
           browser_enabled,
           stay_running_actions,
           default_dev_command_id,
@@ -745,6 +773,7 @@ export class Repository {
           @env_vars_json,
           @dev_commands_json,
           @web_links_json,
+          @overflow_action_command_ids_json,
           @browser_enabled,
           @stay_running_actions,
           @default_dev_command_id,
@@ -764,6 +793,7 @@ export class Repository {
     projectId: string;
     envVars?: Record<string, string>;
     devCommands?: ProjectDevCommand[];
+    overflowActionCommandIds?: string[];
     webLinks?: ProjectWebLink[];
     browserEnabled?: boolean;
     defaultDevCommandId?: string;
@@ -775,8 +805,14 @@ export class Repository {
     const nextDevCommands = input.devCommands
       ? parseDevCommands(input.devCommands)
       : current.devCommands;
+    const validCommandIds = new Set(nextDevCommands.map((command) => command.id));
     const envVars = input.envVars ? parseEnvVars(input.envVars) : current.envVars;
     const webLinks = input.webLinks ? parseWebLinks(input.webLinks) : current.webLinks;
+    const nextOverflowActionCommandIds = input.overflowActionCommandIds
+      ? parseOverflowActionCommandIds(input.overflowActionCommandIds).filter((commandId) =>
+          validCommandIds.has(commandId)
+        )
+      : (current.overflowActionCommandIds ?? []).filter((commandId) => validCommandIds.has(commandId));
     const fallbackDefaultCommandId = nextDevCommands[0]?.id;
     const requestedDefaultCommandId = input.defaultDevCommandId ?? current.defaultDevCommandId ?? fallbackDefaultCommandId;
     const validDefaultCommandId = nextDevCommands.some((cmd) => cmd.id === requestedDefaultCommandId)
@@ -792,6 +828,7 @@ export class Repository {
          SET env_vars_json = @env_vars_json,
              dev_commands_json = @dev_commands_json,
              web_links_json = @web_links_json,
+             overflow_action_command_ids_json = @overflow_action_command_ids_json,
              browser_enabled = @browser_enabled,
              default_dev_command_id = @default_dev_command_id,
              auto_start_dev_terminal = @auto_start_dev_terminal,
@@ -805,6 +842,7 @@ export class Repository {
         env_vars_json: JSON.stringify(envVars),
         dev_commands_json: JSON.stringify(nextDevCommands.slice(0, 10)),
         web_links_json: JSON.stringify(webLinks),
+        overflow_action_command_ids_json: JSON.stringify(nextOverflowActionCommandIds),
         browser_enabled: browserEnabled ? 1 : 0,
         default_dev_command_id: validDefaultCommandId ?? null,
         auto_start_dev_terminal: autoStartDevTerminal ? 1 : 0,

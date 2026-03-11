@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { FaGripVertical, FaTimes, FaTrashAlt } from "react-icons/fa";
 import type {
@@ -15,7 +15,7 @@ import {
 
 type ProjectTemplateId = "nextjs" | "electron";
 
-type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; hotkey?: string };
+type ProjectCommand = { id: string; name: string; command: string; autoStart: boolean; hotkey?: string; inDropdown: boolean };
 type ProjectSettingsTab = "general" | "env" | "links" | "skills";
 type ProjectSettingsDraft = {
   projectName: string;
@@ -525,12 +525,19 @@ export const ProjectActionsSettingsModal = memo(({
   onSave,
   appendLog
 }: ProjectActionsSettingsModalProps) => {
+  type DragSection = "action-bar" | "dropdown";
   const [projectSettingsCommands, setProjectSettingsCommands] = useState<Array<ProjectCommand & { stayRunning: boolean }>>(
     initialDraft.projectSettingsCommands
   );
   const [capturingHotkeyCommandId, setCapturingHotkeyCommandId] = useState<string | null>(null);
-  const [draggedCommandIndex, setDraggedCommandIndex] = useState<number | null>(null);
-  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+  const [draggedCommandId, setDraggedCommandId] = useState<string | null>(null);
+  const [draggedCommandSection, setDraggedCommandSection] = useState<DragSection | null>(null);
+  const [dragTarget, setDragTarget] = useState<{
+    section: DragSection;
+    index: number;
+    mode: "before" | "append";
+  } | null>(null);
+  const canReorder = !Boolean(initialDraft.focusCommandId);
   const focusedCommandIndex = initialDraft.focusCommandId
     ? projectSettingsCommands.findIndex((command) => command.id === initialDraft.focusCommandId)
     : -1;
@@ -539,30 +546,72 @@ export const ProjectActionsSettingsModal = memo(({
     ? projectSettingsCommands.filter((command) => command.id === initialDraft.focusCommandId)
     : projectSettingsCommands;
   const filteredCommands = filteredByFocus.length > 0 ? filteredByFocus : projectSettingsCommands;
+  const actionBarCommands = useMemo(
+    () => filteredCommands.filter((command) => !command.inDropdown),
+    [filteredCommands]
+  );
+  const dropdownCommands = useMemo(
+    () => filteredCommands.filter((command) => command.inDropdown),
+    [filteredCommands]
+  );
   const updateCommandHotkey = (commandId: string, hotkey: string) => {
     setProjectSettingsCommands((prev) =>
       prev.map((item) => (item.id === commandId ? { ...item, hotkey } : item))
     );
   };
   const clearDragState = () => {
-    setDraggedCommandIndex(null);
-    setDropTargetIndex(null);
+    setDraggedCommandId(null);
+    setDraggedCommandSection(null);
+    setDragTarget(null);
   };
-  const reorderCommands = (sourceIndex: number, targetIndex: number) => {
-    if (sourceIndex === targetIndex) {
+  const reorderCommands = (
+    sourceCommandId: string,
+    sourceSection: DragSection,
+    sourceIndex: number,
+    targetSection: DragSection,
+    targetIndex: number,
+    targetMode: "before" | "append"
+  ) => {
+    if (!canReorder) {
       return;
     }
+    const sourceIndexFromState = projectSettingsCommands.findIndex((command) => command.id === sourceCommandId);
+    if (sourceIndexFromState < 0 || sourceIndex < 0) {
+      return;
+    }
+    const sourceCommand = projectSettingsCommands[sourceIndexFromState];
+    const shouldShift = targetMode === "before" && sourceSection === targetSection && sourceIndex < targetIndex;
+    const normalizedTargetIndex = shouldShift ? Math.max(0, targetIndex - 1) : targetIndex;
     setProjectSettingsCommands((prev) => {
-      if (sourceIndex < 0 || sourceIndex >= prev.length || targetIndex < 0 || targetIndex >= prev.length) {
+      const nextSource = [...prev];
+      const [movedCommandRaw] = nextSource.splice(sourceIndexFromState, 1);
+      if (!movedCommandRaw) {
         return prev;
       }
-      const next = [...prev];
-      const [moved] = next.splice(sourceIndex, 1);
-      if (!moved) {
-        return prev;
+      const movedCommand: ProjectCommand & { stayRunning: boolean } = {
+        ...movedCommandRaw,
+        inDropdown: targetSection === "dropdown"
+      };
+      const targetInSection = movedCommand.inDropdown;
+      const targetSectionCommands = nextSource.filter((command) => (targetInSection ? command.inDropdown : !command.inDropdown));
+      const clampedTargetIndex = Math.max(0, Math.min(normalizedTargetIndex, targetSectionCommands.length));
+      let insertionIndex = nextSource.length;
+      if (clampedTargetIndex < targetSectionCommands.length) {
+        let seen = 0;
+        for (let i = 0; i < nextSource.length; i += 1) {
+          const command = nextSource[i];
+          if (targetInSection ? command.inDropdown : !command.inDropdown) {
+            if (seen === clampedTargetIndex) {
+              insertionIndex = i;
+              break;
+            }
+            seen += 1;
+          }
+        }
       }
-      next.splice(targetIndex, 0, moved);
-      return next;
+      const nextCommands = [...nextSource];
+      nextCommands.splice(Math.max(0, Math.min(insertionIndex, nextCommands.length)), 0, movedCommand);
+      return nextCommands;
     });
   };
   const removeCommand = (commandId: string) => {
@@ -570,6 +619,231 @@ export const ProjectActionsSettingsModal = memo(({
     if (capturingHotkeyCommandId === commandId) {
       setCapturingHotkeyCommandId(null);
     }
+  };
+
+  const renderActionsSection = ({
+    title,
+    section
+  }: {
+    title: string;
+    section: DragSection;
+  }) => {
+    const commandsInSection = section === "action-bar" ? actionBarCommands : dropdownCommands;
+    return (
+      <section className="rounded-xl border border-border/80 bg-black/20">
+        <div className="mb-1 px-4 py-2 text-xs uppercase tracking-wide text-muted">{title}</div>
+        <div
+          className="space-y-2 px-2 py-2"
+          onDragOver={(event) => {
+            if (!canReorder) {
+              return;
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setDragTarget({
+              section,
+              index: commandsInSection.length,
+              mode: "append"
+            });
+          }}
+          onDrop={(event) => {
+            if (!canReorder || !draggedCommandId || draggedCommandSection === null) {
+              return;
+            }
+            event.preventDefault();
+            const sourceCommandId = event.dataTransfer.getData("text/plain") || draggedCommandId;
+            const sourceSection = draggedCommandSection;
+            const sourceIndex = sourceSection === "action-bar"
+              ? actionBarCommands.findIndex((command) => command.id === sourceCommandId)
+              : dropdownCommands.findIndex((command) => command.id === sourceCommandId);
+            if (sourceCommandId) {
+              reorderCommands(
+                sourceCommandId,
+                sourceSection,
+                sourceIndex,
+                section,
+                commandsInSection.length,
+                "append"
+              );
+            }
+            clearDragState();
+          }}
+        >
+          {commandsInSection.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border/80 bg-black/10 px-4 py-6 text-xs text-slate-400">
+              {section === "action-bar" ? "No actions on action bar." : "No actions in overflow."}
+            </p>
+          ) : null}
+          {commandsInSection.map((command, index) => {
+            const isDropTarget = dragTarget?.section === section && dragTarget.index === index && dragTarget.mode === "before";
+            return (
+              <div
+                key={command.id || index}
+                className={`grid gap-2 md:grid-cols-[28px_120px_1fr_64px_96px_92px_40px_40px] ${isDropTarget ? "rounded-lg border border-border/80 bg-black/20 p-1" : ""}`}
+                onDragOver={(event) => {
+                  if (!canReorder || draggedCommandId === null || draggedCommandSection === null) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setDragTarget({
+                    section,
+                    index,
+                    mode: "before"
+                  });
+                }}
+                onDrop={(event) => {
+                  if (!canReorder || !draggedCommandId || draggedCommandSection === null) {
+                    return;
+                  }
+                  event.preventDefault();
+                  const sourceCommandId = event.dataTransfer.getData("text/plain") || draggedCommandId;
+                  const sourceSection = draggedCommandSection;
+                  const sourceIndex = sourceSection === "action-bar"
+                    ? actionBarCommands.findIndex((command) => command.id === sourceCommandId)
+                    : dropdownCommands.findIndex((command) => command.id === sourceCommandId);
+                  if (sourceCommandId) {
+                    reorderCommands(
+                      sourceCommandId,
+                      sourceSection,
+                      sourceIndex,
+                      section,
+                      index,
+                      "before"
+                    );
+                  }
+                  clearDragState();
+                }}
+              >
+                <button
+                  type="button"
+                  className={`inline-flex h-9 w-7 items-center justify-center rounded-md border border-border/70 bg-black/20 text-slate-400 transition hover:bg-black/35 hover:text-slate-200 ${
+                    canReorder ? "cursor-grab active:cursor-grabbing" : "cursor-default opacity-60"
+                  }`}
+                  title="Drag to reorder"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  draggable={canReorder}
+                  onDragStart={(event) => {
+                    if (!canReorder) {
+                      return;
+                    }
+                    setDraggedCommandId(command.id);
+                    setDraggedCommandSection(section);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", command.id);
+                  }}
+                  onDragEnd={clearDragState}
+                >
+                  <FaGripVertical className="text-[11px]" />
+                </button>
+                <input
+                  className="input text-xs"
+                  value={command.name}
+                  placeholder="Name"
+                  onChange={(event) =>
+                    setProjectSettingsCommands((prev) =>
+                      prev.map((item) => (item.id === command.id ? { ...item, name: event.target.value } : item))
+                    )
+                  }
+                />
+                <input
+                  className="input text-xs"
+                  value={command.command}
+                  placeholder="Command"
+                  onChange={(event) =>
+                    setProjectSettingsCommands((prev) =>
+                      prev.map((item) => (item.id === command.id ? { ...item, command: event.target.value } : item))
+                    )
+                  }
+                />
+                <button
+                  type="button"
+                  className={`input h-9 px-2 py-0 text-left text-[10px] font-mono ${capturingHotkeyCommandId === command.id ? "border-accent/80" : ""}`}
+                  onClick={() => setCapturingHotkeyCommandId(command.id)}
+                  onBlur={() => {
+                    if (capturingHotkeyCommandId === command.id) {
+                      setCapturingHotkeyCommandId(null);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.key === "Backspace" || event.key === "Delete") {
+                      updateCommandHotkey(command.id, "");
+                      setCapturingHotkeyCommandId(null);
+                      return;
+                    }
+                    if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+                      setCapturingHotkeyCommandId(null);
+                      return;
+                    }
+                    const nextHotkey = formatActionHotkeyFromEvent(event.nativeEvent);
+                    if (!nextHotkey) {
+                      return;
+                    }
+                    updateCommandHotkey(command.id, nextHotkey);
+                    setCapturingHotkeyCommandId(null);
+                  }}
+                >
+                  {capturingHotkeyCommandId === command.id
+                    ? "Press..."
+                    : command.hotkey?.trim() || "Set"}
+                </button>
+                <div className="project-settings-toggle-inline">
+                  <button
+                    type="button"
+                    className={`action-auto-btn ${command.autoStart ? "is-enabled" : ""}`}
+                    aria-pressed={command.autoStart}
+                    onClick={() =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item) => (item.id === command.id ? { ...item, autoStart: !item.autoStart } : item))
+                      )
+                    }
+                  >
+                    {command.autoStart ? "Auto on" : "Auto off"}
+                  </button>
+                </div>
+                <div className="project-settings-toggle-inline">
+                  <button
+                    type="button"
+                    className={`action-stay-btn ${command.stayRunning ? "is-enabled" : ""}`}
+                    aria-pressed={command.stayRunning}
+                    onClick={() =>
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item) => (item.id === command.id ? { ...item, stayRunning: !item.stayRunning } : item))
+                      )
+                    }
+                  >
+                    {command.stayRunning ? "Stay running" : "Stop on idle"}
+                  </button>
+                </div>
+                  <button
+                    className="btn-secondary h-9 w-9 px-0"
+                    onClick={() => {
+                      setProjectSettingsCommands((prev) =>
+                        prev.map((item) => (item.id === command.id ? { ...item, inDropdown: !item.inDropdown } : item))
+                      );
+                    }}
+                    title={command.inDropdown ? "Move to action bar" : "Move to dropdown"}
+                    disabled={!canReorder}
+                  >
+                    <FaTimes className="mx-auto text-[12px]" />
+                  </button>
+                  <button
+                    className="btn-secondary h-9 w-9 px-0"
+                    onClick={() => removeCommand(command.id)}
+                    title="Remove command"
+                    disabled={!canReorder}
+                  >
+                    <FaTrashAlt className="mx-auto text-[12px]" />
+                  </button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
   };
 
   return (
@@ -686,152 +960,25 @@ export const ProjectActionsSettingsModal = memo(({
             ) : null}
             {!focusedCommand ? (
             <>
-            {filteredCommands.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border/70 bg-black/10 px-4 py-6 text-sm text-slate-400">
-                No actions configured for this project.
-              </div>
-            ) : null}
-            {filteredCommands.map((command) => {
-              const index = projectSettingsCommands.findIndex((item) => item.id === command.id);
-              const isDropTarget = draggedCommandIndex !== null && dropTargetIndex === index && draggedCommandIndex !== index;
-              return (
-              <div
-                key={command.id || index}
-                className={`grid gap-2 md:grid-cols-[28px_120px_1fr_64px_96px_92px_40px] ${isDropTarget ? "rounded-lg border border-border/80 bg-black/20 p-1" : ""}`}
-                onDragOver={(event) => {
-                  if (initialDraft.focusCommandId || draggedCommandIndex === null) {
-                    return;
-                  }
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  setDropTargetIndex(index);
-                }}
-                onDrop={(event) => {
-                  if (initialDraft.focusCommandId) {
-                    return;
-                  }
-                  event.preventDefault();
-                  const sourceIndexFromState = draggedCommandIndex;
-                  const sourceIndexFromTransfer = Number.parseInt(event.dataTransfer.getData("text/plain"), 10);
-                  const sourceIndex = Number.isFinite(sourceIndexFromTransfer) ? sourceIndexFromTransfer : sourceIndexFromState;
-                  if (typeof sourceIndex === "number") {
-                    reorderCommands(sourceIndex, index);
-                  }
-                  clearDragState();
-                }}
-              >
-                <button
-                  type="button"
-                  className={`inline-flex h-9 w-7 items-center justify-center rounded-md border border-border/70 bg-black/20 text-slate-400 transition hover:bg-black/35 hover:text-slate-200 ${initialDraft.focusCommandId ? "cursor-default opacity-60" : "cursor-grab active:cursor-grabbing"}`}
-                  title="Drag to reorder"
-                  tabIndex={-1}
-                  aria-hidden="true"
-                  draggable={!initialDraft.focusCommandId}
-                  onDragStart={(event) => {
-                    if (initialDraft.focusCommandId) {
-                      return;
-                    }
-                    setDraggedCommandIndex(index);
-                    setDropTargetIndex(index);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", String(index));
-                  }}
-                  onDragEnd={clearDragState}
-                >
-                  <FaGripVertical className="text-[11px]" />
-                </button>
-                <input
-                  className="input text-xs"
-                  value={command.name}
-                  placeholder="Name"
-                  onChange={(event) =>
-                    setProjectSettingsCommands((prev) =>
-                      prev.map((item, idx) => (idx === index ? { ...item, name: event.target.value } : item))
-                    )
-                  }
-                />
-                <input
-                  className="input text-xs"
-                  value={command.command}
-                  placeholder="Command"
-                  onChange={(event) =>
-                    setProjectSettingsCommands((prev) =>
-                      prev.map((item, idx) => (idx === index ? { ...item, command: event.target.value } : item))
-                    )
-                  }
-                />
-                <button
-                  type="button"
-                  className={`input h-9 px-2 py-0 text-left text-[10px] font-mono ${capturingHotkeyCommandId === command.id ? "border-accent/80" : ""}`}
-                  onClick={() => setCapturingHotkeyCommandId(command.id)}
-                  onBlur={() => {
-                    if (capturingHotkeyCommandId === command.id) {
-                      setCapturingHotkeyCommandId(null);
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (event.key === "Backspace" || event.key === "Delete") {
-                      updateCommandHotkey(command.id, "");
-                      setCapturingHotkeyCommandId(null);
-                      return;
-                    }
-                    if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-                      setCapturingHotkeyCommandId(null);
-                      return;
-                    }
-                    const nextHotkey = formatActionHotkeyFromEvent(event.nativeEvent);
-                    if (!nextHotkey) {
-                      return;
-                    }
-                    updateCommandHotkey(command.id, nextHotkey);
-                    setCapturingHotkeyCommandId(null);
-                  }}
-                >
-                  {capturingHotkeyCommandId === command.id
-                    ? "Press..."
-                    : command.hotkey?.trim() || "Set"}
-                </button>
-                <div className="project-settings-toggle-inline">
-                  <button
-                    type="button"
-                    className={`action-auto-btn ${command.autoStart ? "is-enabled" : ""}`}
-                    aria-pressed={command.autoStart}
-                    onClick={() =>
-                      setProjectSettingsCommands((prev) =>
-                        prev.map((item, idx) => (idx === index ? { ...item, autoStart: !item.autoStart } : item))
-                      )
-                    }
-                  >
-                    {command.autoStart ? "Auto on" : "Auto off"}
-                  </button>
+            <div className="space-y-4">
+              {actionBarCommands.length === 0 && dropdownCommands.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border/70 bg-black/10 px-4 py-6 text-sm text-slate-400">
+                  No actions configured for this project.
                 </div>
-                <div className="project-settings-toggle-inline">
-                  <button
-                    type="button"
-                    className={`action-stay-btn ${command.stayRunning ? "is-enabled" : ""}`}
-                    aria-pressed={command.stayRunning}
-                    onClick={() =>
-                      setProjectSettingsCommands((prev) =>
-                        prev.map((item, idx) => (idx === index ? { ...item, stayRunning: !item.stayRunning } : item))
-                      )
-                    }
-                  >
-                    {command.stayRunning ? "Stay running" : "Stop on idle"}
-                  </button>
-                </div>
-                <button
-                  className="btn-secondary h-9 w-9 px-0"
-                  onClick={() => removeCommand(command.id)}
-                  disabled={Boolean(initialDraft.focusCommandId)}
-                  title="Remove command"
-                >
-                  <FaTrashAlt className="mx-auto text-[12px]" />
-                </button>
-              </div>
-            );
-            })}
+              ) : null}
+              {actionBarCommands.length > 0 || dropdownCommands.length > 0 ? (
+                <>
+                  {renderActionsSection({
+                    title: "Action Bar",
+                    section: "action-bar"
+                  })}
+                  {renderActionsSection({
+                    title: "Actions Dropdown",
+                    section: "dropdown"
+                  })}
+                </>
+              ) : null}
+            </div>
             </>
             ) : null}
 
@@ -846,6 +993,7 @@ export const ProjectActionsSettingsModal = memo(({
                       id: `cmd-${crypto.randomUUID()}`,
                       name: `Command ${prev.length + 1}`,
                       command: "",
+                      inDropdown: false,
                       autoStart: false,
                       stayRunning: false,
                       hotkey: ""

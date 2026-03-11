@@ -89,12 +89,13 @@ export interface DesktopApi {
   projectSettings: {
     get: (input: { projectId: string }) => Promise<ProjectSettings>;
     set: (input: {
-      projectId: string;
-      envVars?: Record<string, string>;
-      devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; stayRunning?: boolean; hotkey?: string }>;
-      webLinks?: Array<{ id: string; name: string; url: string }>;
-      browserEnabled?: boolean;
-      defaultDevCommandId?: string;
+        projectId: string;
+        envVars?: Record<string, string>;
+        devCommands?: Array<{ id: string; name: string; command: string; autoStart?: boolean; stayRunning?: boolean; hotkey?: string }>;
+        overflowActionCommandIds?: string[];
+        webLinks?: Array<{ id: string; name: string; url: string }>;
+        browserEnabled?: boolean;
+        defaultDevCommandId?: string;
       autoStartDevTerminal?: boolean;
       subthreadPolicyOverride?: SubthreadPolicy;
       lastDetectedPreviewUrl?: string;

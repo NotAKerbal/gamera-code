@@ -82,6 +82,7 @@ export const initializeDatabase = (dbPath: string) => {
       env_vars_json TEXT NOT NULL,
       dev_commands_json TEXT NOT NULL,
       web_links_json TEXT NOT NULL DEFAULT '[]',
+      overflow_action_command_ids_json TEXT NOT NULL DEFAULT '[]',
       browser_enabled INTEGER NOT NULL DEFAULT 1,
       stay_running_actions INTEGER NOT NULL DEFAULT 0,
       default_dev_command_id TEXT,
@@ -175,6 +176,10 @@ export const initializeDatabase = (dbPath: string) => {
   const hasWebLinksColumn = projectSettingsColumns.some((column) => column.name === "web_links_json");
   if (!hasWebLinksColumn) {
     db.exec("ALTER TABLE project_settings ADD COLUMN web_links_json TEXT NOT NULL DEFAULT '[]';");
+  }
+  const hasOverflowActionCommandIdsColumn = projectSettingsColumns.some((column) => column.name === "overflow_action_command_ids_json");
+  if (!hasOverflowActionCommandIdsColumn) {
+    db.exec("ALTER TABLE project_settings ADD COLUMN overflow_action_command_ids_json TEXT NOT NULL DEFAULT '[]';");
   }
   const hasStayRunningActionsColumn = projectSettingsColumns.some((column) => column.name === "stay_running_actions");
   if (!hasStayRunningActionsColumn) {

@@ -61,6 +61,8 @@ type MainHeaderProps = {
   onOpenTerminalPopout: (terminal: HeaderTerminal) => void;
   onAcknowledgeTerminalError: (commandId: string) => void;
   onOpenProjectSettings: (commandId?: string) => Promise<void>;
+  overflowActionCommandIds: string[];
+  onSetOverflowActionIds: (overflowActionIds: string[]) => Promise<void>;
   onStartTerminal: (commandId: string) => Promise<void>;
   onStopTerminal: (commandId: string) => Promise<void>;
   onCopyTerminalOutput: (name: string, output: string) => void;
@@ -178,6 +180,8 @@ const MainHeaderComponent = ({
   onStartTerminal,
   onStopTerminal,
   onCopyTerminalOutput,
+  overflowActionCommandIds,
+  onSetOverflowActionIds,
   onOpenProjectFiles,
   activeProjectBrowserEnabled,
   isCodePanelOpen,
@@ -198,11 +202,15 @@ const MainHeaderComponent = ({
   onToggleMaximizeWindow,
   onCloseWindow,
   appendLog
-}: MainHeaderProps) => {
+  }: MainHeaderProps) => {
   const useWindowsStyleHeader = isWindows || !isMacOS;
-  const actionMenuRef = useRef<HTMLDivElement | null>(null);
+  const overflowActionMenuRef = useRef<HTMLDivElement | null>(null);
+  const inlineActionMenuRef = useRef<HTMLDivElement | null>(null);
+  const overflowActionSubmenuRef = useRef<HTMLDivElement | null>(null);
   const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
-  const [openTerminalActionMenuId, setOpenTerminalActionMenuId] = useState<string | null>(null);
+  const [isTerminalActionsMenuOpen, setIsTerminalActionsMenuOpen] = useState(false);
+  const [openInlineActionMenuId, setOpenInlineActionMenuId] = useState<string | null>(null);
+  const [openOverflowActionMenuId, setOpenOverflowActionMenuId] = useState<string | null>(null);
   const [workspaceContextMenu, setWorkspaceContextMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   const [runningTerminalActionId, setRunningTerminalActionId] = useState<string | null>(null);
   const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
@@ -268,20 +276,84 @@ const MainHeaderComponent = ({
         setRunningTerminalActionId((current) => (current === actionId ? null : current));
       });
   };
+  const runPrimaryTerminalAction = (terminal: HeaderTerminal) => {
+    if (terminal.running) {
+      toggleProjectTerminal(terminal);
+      return;
+    }
+
+    const hasCompleted = !terminal.running && typeof terminal.lastExitCode === "number";
+    if (hasCompleted) {
+      const commandId = terminal.commandId.trim();
+      if (commandId) {
+        onAcknowledgeTerminalError(commandId);
+      }
+      openTerminalOutput(terminal);
+      return;
+    }
+    toggleProjectTerminal(terminal);
+  };
+  const statusClassForAction = (terminal: HeaderTerminal) => {
+    if (terminal.running) {
+      return "terminal-action-segment-running";
+    }
+    if (typeof terminal.lastExitCode !== "number") {
+      return "";
+    }
+    return terminal.lastExitCode === 0 ? "terminal-action-segment-success" : "terminal-action-segment-error";
+  };
+  const actionKey = (terminal: HeaderTerminal) => terminal.commandId.trim() || terminal.name;
+  const overflowActionIdSet = useMemo(() => new Set(overflowActionCommandIds), [overflowActionCommandIds]);
+  const actionBarTerminals = useMemo(
+    () => activeProjectTerminals.filter((terminal) => !overflowActionIdSet.has(actionKey(terminal))),
+    [activeProjectTerminals, overflowActionIdSet]
+  );
+  const dropdownTerminals = useMemo(
+    () => activeProjectTerminals.filter((terminal) => overflowActionIdSet.has(actionKey(terminal))),
+    [activeProjectTerminals, overflowActionIdSet]
+  );
+  const updateOverflowActionIds = async (nextOverflowActionIds: string[]) => {
+    const next = Array.from(new Set(nextOverflowActionIds.filter(Boolean)));
+    if (!activeProjectId) {
+      return;
+    }
+    try {
+      await onSetOverflowActionIds(next);
+    } catch (error) {
+      appendLog(`Persist action layout failed: ${String(error)}`);
+    }
+  };
+  const moveActionToDropdown = (terminal: HeaderTerminal) => {
+    if (!activeProjectId) {
+      return;
+    }
+    const actionId = actionKey(terminal);
+    if (overflowActionIdSet.has(actionId)) {
+      return;
+    }
+    void updateOverflowActionIds([...overflowActionIdSet, actionId]);
+  };
+  const moveActionToActionBar = (terminal: HeaderTerminal) => {
+    if (!activeProjectId) {
+      return;
+    }
+    const actionId = actionKey(terminal);
+    void updateOverflowActionIds(Array.from(overflowActionIdSet).filter((id) => id !== actionId));
+  };
 
   useEffect(() => {
-    if (!openTerminalActionMenuId) {
+    if (!isTerminalActionsMenuOpen) {
       return;
     }
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (!actionMenuRef.current?.contains(target)) {
-        setOpenTerminalActionMenuId(null);
+      if (!overflowActionMenuRef.current?.contains(target)) {
+        setIsTerminalActionsMenuOpen(false);
       }
     };
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpenTerminalActionMenuId(null);
+        setIsTerminalActionsMenuOpen(false);
       }
     };
     window.addEventListener("mousedown", handlePointerDown);
@@ -290,11 +362,59 @@ const MainHeaderComponent = ({
       window.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [openTerminalActionMenuId]);
+  }, [isTerminalActionsMenuOpen]);
 
   useEffect(() => {
-    setOpenTerminalActionMenuId(null);
+    setIsTerminalActionsMenuOpen(false);
+    setOpenInlineActionMenuId(null);
+    setOpenOverflowActionMenuId(null);
   }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!openInlineActionMenuId) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!inlineActionMenuRef.current?.contains(target)) {
+        setOpenInlineActionMenuId(null);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenInlineActionMenuId(null);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [openInlineActionMenuId]);
+
+  useEffect(() => {
+    if (!openOverflowActionMenuId) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!overflowActionSubmenuRef.current?.contains(target)) {
+        setOpenOverflowActionMenuId(null);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenOverflowActionMenuId(null);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [openOverflowActionMenuId]);
 
   useEffect(() => {
     if (!workspaceContextMenu) {
@@ -544,97 +664,81 @@ const MainHeaderComponent = ({
         </button>
       ))}
       <div className="terminal-header-controls">
-        <div className="workspace-segmented-control terminal-actions-group no-drag">
-            {activeProjectTerminals.map((terminal) => {
-              const isMenuOpen = openTerminalActionMenuId === terminal.commandId;
-              const busyToggleId = `${terminal.commandId}:${terminal.running ? "stop" : "start"}`;
-              const hasCompleted = !terminal.running && typeof terminal.lastExitCode === "number";
-              const isSuccess = hasCompleted && terminal.lastExitCode === 0;
-              const isError = hasCompleted && terminal.lastExitCode !== 0;
-              const actionTooltip = terminal.running
-                ? tooltipText("Stop Action", "This action is running. Click to stop it.")
-                : isError
-                  ? tooltipText("View Error Output", "The last run failed. Click to open output and clear the error state.")
-                  : isSuccess
-                    ? tooltipText("View Final Output", "The last run completed successfully. Click to view the final output.")
-                    : tooltipText("Start Action", "This action is idle. Click to start it.");
-              const statusClass = isSuccess
-                ? "terminal-action-segment-success"
-                : isError
-                  ? "terminal-action-segment-error"
-                  : terminal.running
-                    ? "terminal-action-segment-running"
-                    : "";
-              return (
-                <div
-                  key={`terminal-action-${terminal.commandId}`}
-                  className={`workspace-segment ${statusClass ? `active ${statusClass}` : ""} terminal-action-segment ${hasCompleted ? "terminal-action-segment-has-dismiss" : ""}`}
-                  ref={isMenuOpen ? actionMenuRef : null}
-                >
-                  <button
-                    type="button"
-                    className="terminal-action-main app-tooltip-target"
+        <div className="workspace-segmented-control terminal-actions-group no-drag relative">
+          {actionBarTerminals.map((terminal) => {
+            const actionId = actionKey(terminal);
+            const isMenuOpen = openInlineActionMenuId === actionId;
+            const busyToggleId = `${actionId}:${terminal.running ? "stop" : "start"}`;
+            const hasCompleted = !terminal.running && typeof terminal.lastExitCode === "number";
+            const isSuccess = hasCompleted && terminal.lastExitCode === 0;
+            const isError = hasCompleted && terminal.lastExitCode !== 0;
+            const actionTooltip = terminal.running
+              ? tooltipText("Stop Action", "This action is running. Click to stop it.")
+              : isError
+                ? tooltipText("View Error Output", "The last run failed. Click to open the output and clear the error state.")
+                : isSuccess
+                  ? tooltipText("View Final Output", "The last run completed successfully. Click to view the final output.")
+                  : tooltipText("Start Action", "This action is idle. Click to start it.");
+            const statusClass = isSuccess
+              ? "terminal-action-segment-success"
+              : isError
+                ? "terminal-action-segment-error"
+                : terminal.running
+                  ? "terminal-action-segment-running"
+                  : "";
+            return (
+              <div
+                key={`terminal-action-${actionId}`}
+                className={`workspace-segment ${statusClass ? `active ${statusClass}` : ""} terminal-action-segment ${hasCompleted ? "terminal-action-segment-has-dismiss" : ""}`}
+                ref={isMenuOpen ? inlineActionMenuRef : null}
+              >
+                <button
+                      type="button"
+                      className="terminal-action-main app-tooltip-target"
                     data-app-tooltip={actionTooltip}
-                    onClick={() => {
-                      if (terminal.running) {
-                        toggleProjectTerminal(terminal);
-                        return;
-                      }
-                      if (hasCompleted) {
-                        const commandId = terminal.commandId.trim();
-                        if (commandId) {
-                          onAcknowledgeTerminalError(commandId);
-                        }
-                        openTerminalOutput(terminal);
-                        return;
-                      }
-                      toggleProjectTerminal(terminal);
-                    }}
+                    onClick={() => runPrimaryTerminalAction(terminal)}
                     disabled={runningTerminalActionId === busyToggleId}
                     title={terminal.name}
                   >
-                    <span className="workspace-segment-name truncate">
-                      {terminal.name}
-                    </span>
-                  </button>
-                  <div className={`terminal-action-controls ${isMenuOpen ? "is-open" : ""}`}>
-                    {hasCompleted ? (
-                      <button
-                        type="button"
-                        className="terminal-action-dismiss-error app-tooltip-target"
-                        aria-label={`Dismiss result for ${terminal.name}`}
-                        data-app-tooltip={
-                          isError
-                            ? tooltipText("Dismiss Error", "Clear this error state without opening the output modal.")
-                            : tooltipText("Dismiss Result", "Clear this completed state without opening the output modal.")
-                        }
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          const commandId = terminal.commandId.trim();
-                          if (commandId) {
-                            onAcknowledgeTerminalError(commandId);
-                          }
-                        }}
-                      >
-                        <FaTimes className="text-[10px] text-slate-400" />
-                      </button>
-                    ) : null}
+                      <span className="truncate">{terminal.name}</span>
+                </button>
+                <div className={`terminal-action-controls ${isMenuOpen ? "is-open" : ""}`}>
+                  {hasCompleted ? (
                     <button
                       type="button"
-                      className={`terminal-action-more ${isMenuOpen ? "is-open" : ""}`}
-                      aria-label={`Open actions for ${terminal.name}`}
-                      onClick={() => setOpenTerminalActionMenuId((current) => (current === terminal.commandId ? null : terminal.commandId))}
+                      className="terminal-action-dismiss-error app-tooltip-target"
+                      aria-label={`Dismiss result for ${terminal.name}`}
+                      data-app-tooltip={
+                        isError
+                          ? tooltipText("Dismiss Error", "Clear this error state without opening the output modal.")
+                          : tooltipText("Dismiss Result", "Clear this completed state without opening the output modal.")
+                      }
+                      onClick={() => {
+                        const commandId = actionId;
+                        if (commandId) {
+                          onAcknowledgeTerminalError(commandId);
+                        }
+                      }}
                     >
-                      <FaChevronDown className="text-[10px] text-slate-400" />
+                      <FaTimes className="text-[10px] text-slate-400" />
                     </button>
-                  </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`terminal-action-more ${isMenuOpen ? "is-open" : ""}`}
+                    aria-label={`Open actions for ${terminal.name}`}
+                    onClick={() => setOpenInlineActionMenuId((current) => (current === actionId ? null : actionId))}
+                  >
+                    <FaChevronDown className="text-[10px] text-slate-400" />
+                  </button>
+                </div>
                 {isMenuOpen ? (
                   <div className="project-action-pop terminal-action-pop">
                     <button
                       className="project-action-item"
                       onClick={() => {
                         runNamedTerminalAction(terminal, "view");
-                        setOpenTerminalActionMenuId(null);
+                        setOpenInlineActionMenuId(null);
                       }}
                     >
                       View output
@@ -643,9 +747,9 @@ const MainHeaderComponent = ({
                       className="project-action-item"
                       onClick={() => {
                         runNamedTerminalAction(terminal, "restart");
-                        setOpenTerminalActionMenuId(null);
+                        setOpenInlineActionMenuId(null);
                       }}
-                      disabled={runningTerminalActionId === `${terminal.commandId}:restart`}
+                      disabled={runningTerminalActionId === `${actionId}:restart`}
                     >
                       Restart
                     </button>
@@ -654,7 +758,7 @@ const MainHeaderComponent = ({
                       data-app-tooltip={tooltipText("Add output", "Add output to the current thread.")}
                       onClick={() => {
                         runNamedTerminalAction(terminal, "copy");
-                        setOpenTerminalActionMenuId(null);
+                        setOpenInlineActionMenuId(null);
                       }}
                       disabled={!terminal.outputTail?.trim()}
                     >
@@ -663,44 +767,172 @@ const MainHeaderComponent = ({
                     <button
                       className="project-action-item"
                       onClick={() => {
-                        onOpenProjectSettings(terminal.commandId).catch((error) =>
-                          appendLog(`Open action settings failed: ${String(error)}`)
-                        );
-                        setOpenTerminalActionMenuId(null);
+                        moveActionToDropdown(terminal);
+                        setOpenInlineActionMenuId(null);
                       }}
                     >
-                      Settings
+                      Move to dropdown
                     </button>
                   </div>
                 ) : null}
               </div>
             );
           })}
-          <button
-            className={`workspace-segment app-tooltip-target ${
-              activeProjectTerminals.length > 0 ? "workspace-segment-add is-icon-only" : "workspace-segment-add"
-            }`}
+                <button
+            className="workspace-segment workspace-segment-add app-tooltip-target is-icon-only"
             type="button"
             data-app-tooltip={
               activeProjectTerminals.length > 0
-                ? tooltipText("Action Settings", "Open settings for this project's actions.")
+                ? dropdownTerminals.length > 0
+                  ? tooltipText("More Actions", "Open the overflow action list and action settings.")
+                  : tooltipText("Action Settings", "No actions are in the dropdown. Open action settings.")
                 : tooltipText("Add Action", "Open action settings to add your first action.")
             }
             onClick={() => {
-              onOpenProjectSettings().catch((error) => appendLog(`Open action settings failed: ${String(error)}`));
+              if (activeProjectTerminals.length === 0) {
+                onOpenProjectSettings().catch((error) => appendLog(`Open action settings failed: ${String(error)}`));
+                return;
+              }
+              if (dropdownTerminals.length === 0) {
+                onOpenProjectSettings().catch((error) => appendLog(`Open action settings failed: ${String(error)}`));
+                return;
+              }
+              setIsTerminalActionsMenuOpen((current) => !current);
             }}
-            aria-label={activeProjectTerminals.length > 0 ? "Open action settings" : "Add action"}
+            aria-label={activeProjectTerminals.length > 0 ? (dropdownTerminals.length > 0 ? "Open action dropdown" : "Open action settings") : "Add action"}
+            aria-expanded={activeProjectTerminals.length > 0 && dropdownTerminals.length > 0 ? isTerminalActionsMenuOpen : undefined}
             disabled={!activeProjectId}
           >
-            {activeProjectTerminals.length > 0 ? (
-              <FaCog className="text-[10px]" />
-            ) : (
-              <span className="inline-flex items-center gap-1">
-                <FaPlus className="text-[10px]" />
-                Add Action
-              </span>
-            )}
+            <span className="inline-flex items-center gap-1">
+              {activeProjectTerminals.length > 0 && dropdownTerminals.length > 0 ? (
+                <FaChevronDown className={`text-[10px] transition ${isTerminalActionsMenuOpen ? "rotate-180" : "rotate-0"}`} />
+              ) : (
+                <FaCog className="text-[10px]" />
+              )}
+            </span>
           </button>
+          {isTerminalActionsMenuOpen ? (
+            <div className="project-action-pop terminal-action-pop" ref={overflowActionMenuRef}>
+              {dropdownTerminals.length > 0
+                ? dropdownTerminals.map((terminal) => {
+                    const actionId = actionKey(terminal);
+                    const isMenuOpen = openOverflowActionMenuId === actionId;
+                    const hasCompleted = !terminal.running && typeof terminal.lastExitCode === "number";
+                    const isError = hasCompleted && terminal.lastExitCode !== 0;
+                    const statusClass = statusClassForAction(terminal);
+                    return (
+                      <div
+                        key={`overflow-action-${actionId}`}
+                        className={`workspace-segment ${statusClass ? `active ${statusClass}` : ""} terminal-action-segment ${hasCompleted ? "terminal-action-segment-has-dismiss" : ""}`}
+                        ref={isMenuOpen ? overflowActionSubmenuRef : null}
+                      >
+                        <button
+                          type="button"
+                          className="terminal-action-main app-tooltip-target"
+                          onClick={() => {
+                            runPrimaryTerminalAction(terminal);
+                            setIsTerminalActionsMenuOpen(false);
+                          }}
+                          disabled={runningTerminalActionId === `${actionId}:${terminal.running ? "stop" : "start"}`}
+                          title={terminal.name}
+                        >
+                          <span className="truncate">{terminal.name}</span>
+                        </button>
+                        <div className={`terminal-action-controls ${isMenuOpen ? "is-open" : ""}`}>
+                          <button
+                            type="button"
+                            className={`terminal-action-more ${isMenuOpen ? "is-open" : ""}`}
+                            aria-label={`Open actions for ${terminal.name}`}
+                            onClick={() => setOpenOverflowActionMenuId((current) => (current === actionId ? null : actionId))}
+                          >
+                            <FaChevronDown className="text-[10px] text-slate-400" />
+                          </button>
+                        </div>
+                        {isMenuOpen ? (
+                          <div className="project-action-pop terminal-action-pop terminal-action-pop--overflow">
+                            <button
+                              className="project-action-item"
+                              onClick={() => {
+                                runNamedTerminalAction(terminal, "view");
+                                setIsTerminalActionsMenuOpen(false);
+                                setOpenOverflowActionMenuId(null);
+                              }}
+                            >
+                              View output
+                            </button>
+                            <button
+                              className="project-action-item"
+                              onClick={() => {
+                                runNamedTerminalAction(terminal, "restart");
+                                setIsTerminalActionsMenuOpen(false);
+                                setOpenOverflowActionMenuId(null);
+                              }}
+                              disabled={runningTerminalActionId === `${actionId}:restart`}
+                            >
+                              Restart
+                            </button>
+                            <button
+                              className="project-action-item app-tooltip-target"
+                              data-app-tooltip={tooltipText("Add output", "Add output to the current thread.")}
+                              onClick={() => {
+                                runNamedTerminalAction(terminal, "copy");
+                                setIsTerminalActionsMenuOpen(false);
+                                setOpenOverflowActionMenuId(null);
+                              }}
+                              disabled={!terminal.outputTail?.trim()}
+                            >
+                              Add output
+                            </button>
+                            {hasCompleted ? (
+                              <button
+                                className="project-action-item app-tooltip-target"
+                                aria-label={`Dismiss result for ${terminal.name}`}
+                                data-app-tooltip={
+                                  isError
+                                    ? tooltipText("Dismiss Error", "Clear this error state without opening the output modal.")
+                                    : tooltipText("Dismiss Result", "Clear this completed state without opening the output modal.")
+                                }
+                                onClick={() => {
+                                  if (actionId) {
+                                    onAcknowledgeTerminalError(actionId);
+                                  }
+                                  setIsTerminalActionsMenuOpen(false);
+                                  setOpenOverflowActionMenuId(null);
+                                }}
+                              >
+                                Dismiss
+                              </button>
+                            ) : null}
+                            <button
+                              className="project-action-item"
+                              onClick={() => {
+                                moveActionToActionBar(terminal);
+                                setIsTerminalActionsMenuOpen(false);
+                                setOpenOverflowActionMenuId(null);
+                              }}
+                            >
+                              Move to action bar
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                : null}
+              <div className="my-1 h-px bg-border/60" />
+              <button
+                className="project-action-item app-tooltip-target inline-flex items-center gap-1"
+                data-app-tooltip={tooltipText("Action Settings", "Open settings for this project's actions.")}
+                onClick={() => {
+                  onOpenProjectSettings().catch((error) => appendLog(`Open action settings failed: ${String(error)}`));
+                  setIsTerminalActionsMenuOpen(false);
+                }}
+              >
+                <FaCog className="text-[10px]" />
+                Action Settings
+              </button>
+            </div>
+          ) : null}
         </div>
         <button
           className={`btn-ghost app-tooltip-target inline-flex items-center gap-1 ${launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? "terminal-launching" : ""}`}
