@@ -1,6 +1,6 @@
 {
   "name": "code-app",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "description": "Cross-platform desktop wrapper for multiple agent harnesses",
   "workspaces": [

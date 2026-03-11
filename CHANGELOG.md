@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+- Performance improvements
+- Delete last action
+- Timestamps
+
 ## 0.6.2
 - UI fixes for the modal picker and project folders
 

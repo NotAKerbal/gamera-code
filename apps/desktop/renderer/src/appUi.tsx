@@ -451,6 +451,13 @@ const TimelineItemsList = ({
 
         if (item.kind === "file-group") {
           const groupOpen = expandedActivityGroups[item.id] ?? false;
+          const fileDiffs = item.files.reduce(
+            (acc, file) => ({
+              added: acc.added + (file.diffStats?.added ?? 0),
+              removed: acc.removed + (file.diffStats?.removed ?? 0)
+            }),
+            { added: 0, removed: 0 }
+          );
           return (
             <article key={item.id} className="timeline-item min-w-0 overflow-hidden">
               <section className={`activity-group activity-group-edits ${groupOpen ? "is-open" : ""}`}>
@@ -464,8 +471,12 @@ const TimelineItemsList = ({
                   }}
                 >
                   {buildFileGroupLabel(item.files)}
-                  <span className={`status-pill ${item.status}`}>{item.status.replace("_", " ")}</span>
-                  <span className="ml-auto flex items-center gap-2">
+                  <span className="activity-summary-right">
+                    <span className="git-header-diff-badge header-pill px-1.5 py-0.5 text-[10px]">
+                      <span className="text-emerald-300">+{fileDiffs.added}</span>
+                      <span className="px-1 text-slate-500">/</span>
+                      <span className="text-rose-300">-{fileDiffs.removed}</span>
+                    </span>
                     {showDurations && <TimelineItemDuration ms={durationMs} />}
                     <FaChevronDown className={`accordion-chevron ${groupOpen ? "open" : ""}`} />
                   </span>

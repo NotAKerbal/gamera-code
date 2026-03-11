@@ -8604,7 +8604,7 @@ TODO: Describe what this skill does.
                           );
                         })}
                         {archivedRows.length > 0 && (
-                          <div className="flex items-center gap-2">
+                          <div className="thread-archived-controls">
                             <button
                               className="thread-archived-toggle"
                               onClick={() =>
@@ -8615,11 +8615,20 @@ TODO: Describe what this skill does.
                               }
                               title="View archived threads"
                             >
-                              {showArchived ? "Hide archived" : `View archived (${archivedRows.length})`}
+                              {showArchived ? (
+                                "Hide archived"
+                              ) : (
+                                <>
+                                  <span>View archived</span>
+                                  <span className="thread-archived-count-chip" aria-label={`${archivedRows.length} archived threads`}>
+                                    {archivedRows.length}
+                                  </span>
+                                </>
+                              )}
                             </button>
                             {showArchived ? (
                               <button
-                                className="thread-row-action-btn"
+                                className="thread-archived-delete-all-btn"
                                 title="Delete archived threads"
                                 onClick={(event) => {
                                   event.stopPropagation();
@@ -8629,6 +8638,7 @@ TODO: Describe what this skill does.
                                 }}
                               >
                                 <FaTrashAlt className="text-[10px]" />
+                                Delete all
                               </button>
                             ) : null}
                           </div>

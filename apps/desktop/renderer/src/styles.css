@@ -1471,7 +1471,19 @@ webview {
 }
 
 .thread-archived-toggle {
-  @apply mt-1 w-full rounded-md bg-panel/35 px-2 py-1 text-left text-[11px] text-muted transition hover:bg-panel/75 hover:text-accent;
+  @apply mt-1 flex flex-1 items-center justify-between rounded-md bg-panel/35 px-2 py-1 text-left text-[11px] text-muted transition hover:bg-panel/75 hover:text-accent;
+}
+
+.thread-archived-controls {
+  @apply flex items-center justify-between gap-2;
+}
+
+.thread-archived-delete-all-btn {
+  @apply mt-1 inline-flex flex-shrink-0 items-center gap-1 rounded-md bg-rose-500/15 px-2 py-1 text-[11px] text-rose-200 transition hover:bg-rose-500/30;
+}
+
+.thread-archived-count-chip {
+  @apply ml-2 inline-flex items-center justify-center rounded-full border border-border/80 bg-panel/70 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted;
 }
 
 .thread-context-menu {
@@ -1761,6 +1773,10 @@ webview {
 
 .activity-group-edits {
   @apply border-0 bg-transparent;
+}
+
+.activity-summary-right {
+  @apply ml-auto flex items-center gap-2;
 }
 
 .activity-summary {
