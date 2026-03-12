@@ -87,6 +87,10 @@ const skillsReadDocumentChannel =
   (IPC_CHANNELS as Record<string, string>).skillsReadDocument ?? "skills:readDocument";
 const skillsWriteDocumentChannel =
   (IPC_CHANNELS as Record<string, string>).skillsWriteDocument ?? "skills:writeDocument";
+const projectTerminalWriteChannel =
+  (IPC_CHANNELS as Record<string, string>).projectTerminalWrite ?? "projectTerminal:write";
+const projectTerminalResizeChannel =
+  (IPC_CHANNELS as Record<string, string>).projectTerminalResize ?? "projectTerminal:resize";
 const orchestrationListRunsChannel =
   (IPC_CHANNELS as Record<string, string>).orchestrationListRuns ?? "orchestration:listRuns";
 const orchestrationGetRunChannel =
@@ -226,6 +230,8 @@ const api: DesktopApiWithGitExtras = {
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalStart, input),
     stop: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalStop, input),
     getState: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectTerminalGetState, input),
+    write: (input) => ipcRenderer.invoke(projectTerminalWriteChannel, input),
+    resize: (input) => ipcRenderer.invoke(projectTerminalResizeChannel, input),
     onEvent: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: ProjectTerminalEvent) => listener(payload);
       ipcRenderer.on(IPC_CHANNELS.projectTerminalEvent, wrapped);

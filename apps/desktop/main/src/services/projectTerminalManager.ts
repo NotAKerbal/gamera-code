@@ -32,6 +32,28 @@ const URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]+/gi;
 
 const nowIso = () => new Date().toISOString();
 const toRunningKey = (projectId: string, commandId: string) => `${projectId}:${commandId}`;
+const normalizeCommandId = (commandId: string) => commandId.trim();
+const findRunningTerminal = (
+  running: Map<string, RunningProjectTerminal>,
+  projectId: string,
+  commandId: string
+): RunningProjectTerminal | undefined => {
+  const normalizedCommandId = normalizeCommandId(commandId);
+  const exact =
+    running.get(toRunningKey(projectId, normalizedCommandId)) ??
+    Array.from(running.values()).find(
+      (candidate) => candidate.projectId === projectId && normalizeCommandId(candidate.commandId) === normalizedCommandId
+    );
+  if (exact) {
+    return exact;
+  }
+
+  const projectRunning = Array.from(running.values()).filter((candidate) => candidate.projectId === projectId);
+  if (projectRunning.length === 1) {
+    return projectRunning[0];
+  }
+  return undefined;
+};
 
 const isExecutableFile = (path: string): boolean => {
   try {
@@ -296,6 +318,40 @@ export class ProjectTerminalManager {
     });
 
     return { ok: !hadFailure };
+  }
+
+  write(projectId: string, commandId: string, data: string): { ok: boolean } {
+    const running = findRunningTerminal(this.running, projectId, commandId);
+    if (!running || !data) {
+      return { ok: false };
+    }
+
+    try {
+      running.ptyProcess.write(data);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  resize(projectId: string, commandId: string, cols: number, rows: number): { ok: boolean } {
+    const running = findRunningTerminal(this.running, projectId, commandId);
+    if (!running) {
+      return { ok: false };
+    }
+
+    const normalizedCols = Number.isFinite(cols) ? Math.max(1, Math.floor(cols)) : 0;
+    const normalizedRows = Number.isFinite(rows) ? Math.max(1, Math.floor(rows)) : 0;
+    if (!normalizedCols || !normalizedRows) {
+      return { ok: false };
+    }
+
+    try {
+      running.ptyProcess.resize(normalizedCols, normalizedRows);
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
   }
 
   private startCommand(project: Project, settings: ProjectSettings, command: ProjectDevCommand) {

@@ -327,7 +327,7 @@ const TimelineItemsList = ({
   return (
     <>
       {timelineItems.map((item, index) => {
-        const previousTs = index > 0 ? timelineItems[index - 1]?.tsMs : item.tsMs;
+        const previousTs = index > 0 ? (timelineItems[index - 1]?.tsMs ?? item.tsMs) : item.tsMs;
         const durationMs = Math.max(0, item.tsMs - previousTs);
 
         if (item.kind === "message") {

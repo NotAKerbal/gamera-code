@@ -2,6 +2,7 @@
   "name": "@code-app/main",
   "version": "0.6.4",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Main process for GameraCode desktop client",
   "author": "Isaac Cochran",
   "repository": {

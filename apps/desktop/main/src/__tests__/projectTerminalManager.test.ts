@@ -226,4 +226,58 @@ describe("projectTerminalManager switching", () => {
     expect(startSpy).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
+
+  it("writes user input to a running terminal", () => {
+    const repository = {
+      getProject: vi.fn((projectId: string) => ({ id: projectId, name: projectId, path: process.cwd() })),
+      getProjectSettings: vi.fn((projectId: string) => ({
+        ...baseSettings,
+        projectId
+      }))
+    } as unknown as ConstructorParameters<typeof ProjectTerminalManager>[0]["repository"];
+
+    const manager = new ProjectTerminalManager({
+      repository,
+      emit: vi.fn()
+    });
+
+    const write = vi.fn();
+    (manager as unknown as { running: Map<string, unknown> }).running.set("p1:default", {
+      projectId: "p1",
+      commandId: "default",
+      ptyProcess: { write }
+    });
+
+    expect(manager.write("p1", "default", "hello")).toEqual({ ok: true });
+    expect(write).toHaveBeenCalledWith("hello");
+    expect(manager.write("p1", "default", "")).toEqual({ ok: false });
+    expect(manager.write("p1", "missing", "hello")).toEqual({ ok: false });
+  });
+
+  it("resizes a running terminal with normalized dimensions", () => {
+    const repository = {
+      getProject: vi.fn((projectId: string) => ({ id: projectId, name: projectId, path: process.cwd() })),
+      getProjectSettings: vi.fn((projectId: string) => ({
+        ...baseSettings,
+        projectId
+      }))
+    } as unknown as ConstructorParameters<typeof ProjectTerminalManager>[0]["repository"];
+
+    const manager = new ProjectTerminalManager({
+      repository,
+      emit: vi.fn()
+    });
+
+    const resize = vi.fn();
+    (manager as unknown as { running: Map<string, unknown> }).running.set("p1:default", {
+      projectId: "p1",
+      commandId: "default",
+      ptyProcess: { resize }
+    });
+
+    expect(manager.resize("p1", "default", 123.9, 40.1)).toEqual({ ok: true });
+    expect(resize).toHaveBeenCalledWith(123, 40);
+    expect(manager.resize("p1", "default", 0, 10)).toEqual({ ok: false });
+    expect(manager.resize("p1", "missing", 10, 10)).toEqual({ ok: false });
+  });
 });

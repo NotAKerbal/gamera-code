@@ -107,6 +107,8 @@ export interface DesktopApi {
     start: (input: { projectId: string; commandId?: string }) => Promise<ProjectTerminalState>;
     stop: (input: { projectId: string; commandId?: string }) => Promise<{ ok: boolean }>;
     getState: (input: { projectId: string }) => Promise<ProjectTerminalState>;
+    write: (input: { projectId: string; commandId: string; data: string }) => Promise<{ ok: boolean }>;
+    resize: (input: { projectId: string; commandId: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
     onEvent: (listener: (event: ProjectTerminalEvent) => void) => () => void;
   };
   preview: {

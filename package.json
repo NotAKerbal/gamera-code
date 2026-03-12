@@ -2,6 +2,7 @@
   "name": "code-app",
   "version": "0.6.4",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Cross-platform desktop wrapper for multiple agent harnesses",
   "workspaces": [
     "apps/desktop/shared",

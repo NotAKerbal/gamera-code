@@ -11,6 +11,13 @@ import {
   type MouseEvent as ReactMouseEvent,
   type KeyboardEventHandler
 } from "react";
+import {
+  FitAddon as GhosttyFitAddon,
+  OSC8LinkProvider,
+  Terminal as GhosttyWebTerminal,
+  UrlRegexProvider,
+  init as initGhostty
+} from "ghostty-web";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XtermTerminal } from "@xterm/xterm";
@@ -198,6 +205,15 @@ import {
   RenameThreadModal,
   WorkspaceModal
 } from "./appOverlays";
+
+type ActionTerminalPopoutInstance = {
+  terminal: GhosttyWebTerminal;
+  fitAddon: GhosttyFitAddon;
+  renderedOutput: string;
+  projectId: string;
+  commandId: string;
+  terminalName: string;
+};
 
 const STARTER_PROMPT_CARDS = [
   {
@@ -581,6 +597,7 @@ export const App = () => {
   const [showArchivedByProjectId, setShowArchivedByProjectId] = useState<Record<string, boolean>>({});
   const [showArchivedProjectsByWorkspaceId, setShowArchivedProjectsByWorkspaceId] = useState<Record<string, boolean>>({});
   const [projectListOpenById, setProjectListOpenById] = useState<Record<string, boolean>>(() => readStoredProjectListOpenById());
+  const [temporarilyExpandedProjectId, setTemporarilyExpandedProjectId] = useState<string | null>(null);
   const [hasLoadedProjectsOnce, setHasLoadedProjectsOnce] = useState(false);
   const [threadDraftTitle, setThreadDraftTitle] = useState("New thread");
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
@@ -742,6 +759,7 @@ export const App = () => {
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
+  const [isCtrlSwitchHintVisible, setIsCtrlSwitchHintVisible] = useState(false);
   const [branchDropdownPosition, setBranchDropdownPosition] = useState<{ bottom: number; left: number; width: number } | null>(null);
   const [composerDropdown, setComposerDropdown] = useState<{
     kind: ComposerDropdownKind;
@@ -806,6 +824,8 @@ export const App = () => {
   const voiceStreamRef = useRef<MediaStream | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
   const terminalPopoutWindowsRef = useRef<Record<string, Window | null>>({});
+  const terminalPopoutInstancesRef = useRef<Record<string, ActionTerminalPopoutInstance>>({});
+  const ghosttyInitPromiseRef = useRef<Promise<void> | null>(null);
   const isLightTheme = (settings.theme ?? "midnight") === "dawn" || (settings.theme ?? "midnight") === "linen";
   const appIconSrc = isLightTheme ? appIconLight : appIconDark;
   const appendLog = useCallback((line: string) => {
@@ -3401,9 +3421,11 @@ export const App = () => {
         return;
       }
       const projectName = projects.find((project) => project.id === parsed.projectId)?.name;
-      renderTerminalPopout(popout, terminal, projectName);
+      void renderTerminalPopout(key, popout, parsed.projectId, terminal, projectName).catch((error) => {
+        appendLog(`Terminal pop-out render failed: ${String(error)}`);
+      });
     });
-  }, [projectTerminalById, projects, terminalPopoutByKey]);
+  }, [appendLog, projectTerminalById, projects, terminalPopoutByKey]);
 
   useEffect(() => {
     return () => {
@@ -3411,6 +3433,10 @@ export const App = () => {
         if (popout && !popout.closed) {
           popout.close();
         }
+      });
+      Object.keys(terminalPopoutInstancesRef.current).forEach((key) => {
+        terminalPopoutInstancesRef.current[key]?.terminal.dispose();
+        delete terminalPopoutInstancesRef.current[key];
       });
       terminalPopoutWindowsRef.current = {};
       setIsCodePanelPoppedOut(false);
@@ -4739,6 +4765,47 @@ export const App = () => {
         buttonHoverText: "#ffffff"
       };
 
+  const ensureGhosttyReady = useCallback(() => {
+    if (!ghosttyInitPromiseRef.current) {
+      ghosttyInitPromiseRef.current = initGhostty();
+    }
+    return ghosttyInitPromiseRef.current;
+  }, []);
+
+  const disposeTerminalPopoutInstance = useCallback((key: string) => {
+    const existing = terminalPopoutInstancesRef.current[key];
+    if (!existing) {
+      return;
+    }
+    existing.terminal.dispose();
+    delete terminalPopoutInstancesRef.current[key];
+  }, []);
+
+  const syncActionTerminalOutput = useCallback((instance: ActionTerminalPopoutInstance, output: string) => {
+    const nextOutput = output || "";
+    const previousOutput = instance.renderedOutput;
+    const terminal = instance.terminal;
+
+    if (!nextOutput) {
+      terminal.reset();
+      instance.renderedOutput = "";
+      return;
+    }
+
+    if (previousOutput && nextOutput.startsWith(previousOutput)) {
+      const delta = nextOutput.slice(previousOutput.length);
+      if (delta) {
+        terminal.write(delta);
+      }
+    } else if (previousOutput !== nextOutput) {
+      terminal.reset();
+      terminal.write(nextOutput);
+    }
+
+    instance.renderedOutput = nextOutput;
+    terminal.scrollToBottom();
+  }, []);
+
   const ensureTerminalPopoutFrame = (popout: Window) => {
     const doc = popout.document;
     if (doc.getElementById("codeapp-terminal-popout")) {
@@ -4754,7 +4821,8 @@ export const App = () => {
     <style>
       :root { color-scheme: ${terminalPopupTheme.colorScheme}; font-family: "Space Grotesk", "Avenir Next", sans-serif; }
       * { box-sizing: border-box; }
-      body { margin: 0; background: ${terminalPopupTheme.bodyBg}; color: ${terminalPopupTheme.text}; height: 100vh; }
+      html, body { margin: 0; background: ${terminalPopupTheme.bodyBg}; color: ${terminalPopupTheme.text}; height: 100%; }
+      body { overflow: hidden; }
       .shell { height: 100vh; display: flex; flex-direction: column; }
       .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 10px; border-bottom: 1px solid ${terminalPopupTheme.shellBorder}; background: ${terminalPopupTheme.shellBg}; -webkit-app-region: drag; }
       .head.macos { padding-left: 5rem; }
@@ -4771,12 +4839,10 @@ export const App = () => {
       .window-btn:hover { background: ${terminalPopupTheme.buttonHoverBg}; color: ${terminalPopupTheme.buttonHoverText}; }
       .window-btn.close:hover { background: rgba(239, 68, 68, 0.2); color: #fee2e2; }
       .status { font-size: 11px; color: ${terminalPopupTheme.muted}; min-width: 50px; text-align: right; }
-      .output { margin: 0; padding: 12px; flex: 1; min-height: 0; overflow: auto; font-family: "IBM Plex Mono", "Fira Code", monospace; font-size: 11px; line-height: 1.35; white-space: pre-wrap; word-break: break-word; background: ${terminalPopupTheme.outputBg}; }
-      .line { display: block; min-height: 1.35em; }
-      .dim { opacity: 0.72; }
-      .bold { font-weight: 700; }
-      .italic { font-style: italic; }
-      .underline { text-decoration: underline; }
+      .output { flex: 1; min-height: 0; overflow: hidden; background: ${terminalPopupTheme.outputBg}; padding: 10px; }
+      #terminal-output { width: 100%; height: 100%; border-radius: 10px; overflow: hidden; }
+      #terminal-output canvas { display: block; }
+      #terminal-output textarea { position: absolute; opacity: 0; pointer-events: none; }
     </style>
   </head>
   <body>
@@ -4802,208 +4868,8 @@ export const App = () => {
             : ""}
         </div>
       </div>
-      <div id="terminal-output" class="output">No terminal output yet.</div>
+      <div class="output"><div id="terminal-output"></div></div>
     </div>
-    <script>
-      const colorByCode = {
-        30: "#111827", 31: "#f87171", 32: "#4ade80", 33: "#facc15", 34: "#60a5fa", 35: "#c084fc", 36: "#22d3ee", 37: "#e5e7eb",
-        90: "#6b7280", 91: "#ef4444", 92: "#22c55e", 93: "#eab308", 94: "#3b82f6", 95: "#a855f7", 96: "#06b6d4", 97: "#f9fafb",
-        40: "#111827", 41: "#7f1d1d", 42: "#14532d", 43: "#713f12", 44: "#1e3a8a", 45: "#581c87", 46: "#155e75", 47: "#d1d5db",
-        100: "#374151", 101: "#991b1b", 102: "#166534", 103: "#854d0e", 104: "#1d4ed8", 105: "#6b21a8", 106: "#0e7490", 107: "#f3f4f6"
-      };
-
-      const defaultStyle = () => ({
-        fg: "",
-        bg: "",
-        bold: false,
-        dim: false,
-        italic: false,
-        underline: false
-      });
-
-      const applySgr = (style, paramsText) => {
-        const params = paramsText.length ? paramsText.split(";").map((token) => Number(token) || 0) : [0];
-        for (const code of params) {
-          if (code === 0) {
-            Object.assign(style, defaultStyle());
-            continue;
-          }
-          if (code === 1) { style.bold = true; continue; }
-          if (code === 2) { style.dim = true; continue; }
-          if (code === 3) { style.italic = true; continue; }
-          if (code === 4) { style.underline = true; continue; }
-          if (code === 22) { style.bold = false; style.dim = false; continue; }
-          if (code === 23) { style.italic = false; continue; }
-          if (code === 24) { style.underline = false; continue; }
-          if (code === 39) { style.fg = ""; continue; }
-          if (code === 49) { style.bg = ""; continue; }
-          if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
-            style.fg = colorByCode[code] || "";
-            continue;
-          }
-          if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
-            style.bg = colorByCode[code] || "";
-          }
-        }
-      };
-
-      const styleKey = (style) => JSON.stringify(style);
-
-      const pushText = (segments, style, text) => {
-        if (!text) {
-          return;
-        }
-        const key = styleKey(style);
-        const prev = segments.length > 0 ? segments[segments.length - 1] : null;
-        if (prev && prev.key === key) {
-          prev.text += text;
-          return;
-        }
-        segments.push({ key, text, style: { ...style } });
-      };
-
-      const popBackspace = (segments, buffer) => {
-        if (buffer.length > 0) {
-          return buffer.slice(0, -1);
-        }
-        const last = segments.length > 0 ? segments[segments.length - 1] : null;
-        if (!last || last.text.length === 0) {
-          return buffer;
-        }
-        last.text = last.text.slice(0, -1);
-        if (!last.text) {
-          segments.pop();
-        }
-        return buffer;
-      };
-
-      const parseTerminal = (raw) => {
-        const lines = [];
-        let lineSegments = [];
-        let textBuffer = "";
-        const style = defaultStyle();
-
-        const flush = () => {
-          if (!textBuffer) {
-            return;
-          }
-          pushText(lineSegments, style, textBuffer);
-          textBuffer = "";
-        };
-
-        for (let index = 0; index < raw.length; index += 1) {
-          const ch = raw[index];
-          if (ch === "\\u001b" && raw[index + 1] === "]") {
-            flush();
-            let end = index + 2;
-            while (end < raw.length) {
-              if (raw[end] === "\\u0007") {
-                break;
-              }
-              if (raw[end] === "\\u001b" && raw[end + 1] === "\\\\") {
-                end += 1;
-                break;
-              }
-              end += 1;
-            }
-            index = end;
-            continue;
-          }
-          if (ch === "\\u001b" && raw[index + 1] === "[") {
-            flush();
-            let end = index + 2;
-            while (end < raw.length && !/[A-Za-z]/.test(raw[end])) {
-              end += 1;
-            }
-            if (end < raw.length) {
-              const command = raw[end];
-              const params = raw.slice(index + 2, end);
-              if (command === "m") {
-                applySgr(style, params);
-              } else if (command === "K") {
-                lineSegments = [];
-                textBuffer = "";
-              } else if (command === "J" && params.trim() === "2") {
-                lines.length = 0;
-                lineSegments = [];
-                textBuffer = "";
-              }
-              index = end;
-              continue;
-            }
-          }
-          if (ch === "\\r") {
-            if (raw[index + 1] === "\\n") {
-              continue;
-            }
-            flush();
-            lineSegments = [];
-            textBuffer = "";
-            continue;
-          }
-          if (ch === "\\n") {
-            flush();
-            lines.push(lineSegments);
-            lineSegments = [];
-            continue;
-          }
-          if (ch === "\\b") {
-            textBuffer = popBackspace(lineSegments, textBuffer);
-            continue;
-          }
-          if (ch === "\\t") {
-            textBuffer += "    ";
-            continue;
-          }
-          textBuffer += ch;
-        }
-        flush();
-        lines.push(lineSegments);
-        return lines;
-      };
-
-      window.__codeappRenderTerminal = (raw) => {
-        const output = document.getElementById("terminal-output");
-        if (!output) {
-          return;
-        }
-        const isNearBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 20;
-        const source = String(raw || "");
-        const lines = parseTerminal(source);
-        output.textContent = "";
-        const fragment = document.createDocumentFragment();
-        for (const segments of lines) {
-          const line = document.createElement("div");
-          line.className = "line";
-          if (segments.length === 0) {
-            line.textContent = "";
-          } else {
-            for (const segment of segments) {
-              if (!segment.text) {
-                continue;
-              }
-              const span = document.createElement("span");
-              if (segment.style.bold) span.classList.add("bold");
-              if (segment.style.dim) span.classList.add("dim");
-              if (segment.style.italic) span.classList.add("italic");
-              if (segment.style.underline) span.classList.add("underline");
-              if (segment.style.fg) span.style.color = segment.style.fg;
-              if (segment.style.bg) span.style.backgroundColor = segment.style.bg;
-              span.textContent = segment.text;
-              line.appendChild(span);
-            }
-          }
-          fragment.appendChild(line);
-        }
-        output.appendChild(fragment);
-        if (source.length === 0) {
-          output.textContent = "No terminal output yet.";
-        }
-        if (isNearBottom) {
-          output.scrollTop = output.scrollHeight;
-        }
-      };
-    </script>
   </body>
 </html>`);
     doc.close();
@@ -5033,9 +4899,15 @@ export const App = () => {
     restartButton?.addEventListener("click", () => dispatchTerminalAction("restart"));
     stopButton?.addEventListener("click", () => dispatchTerminalAction("stop"));
     copyButton?.addEventListener("click", () => {
-      const output = doc.getElementById("terminal-output");
       const status = doc.getElementById("terminal-status");
-      const text = output?.textContent ?? "";
+      const key = Object.entries(terminalPopoutWindowsRef.current).find(([, value]) => value === popout)?.[0];
+      const instance = key ? terminalPopoutInstancesRef.current[key] : undefined;
+      const text = instance
+        ? (instance.terminal.hasSelection() ? instance.terminal.getSelection() : (instance.terminal.selectAll(), instance.terminal.getSelection()))
+        : "";
+      if (instance && !instance.terminal.hasSelection()) {
+        instance.terminal.clearSelection();
+      }
       if (!text) {
         return;
       }
@@ -5093,8 +4965,103 @@ export const App = () => {
     syncWindowState().catch(() => undefined);
   };
 
-  const renderTerminalPopout = (
+  const ensureTerminalPopoutInstance = useCallback(
+    async (key: string, popout: Window, projectId: string, terminal: ProjectTerminalState["terminals"][number]) => {
+      const existing = terminalPopoutInstancesRef.current[key];
+      if (existing) {
+        existing.projectId = projectId;
+        existing.commandId = terminal.commandId;
+        existing.terminalName = terminal.name;
+        return existing;
+      }
+
+      ensureTerminalPopoutFrame(popout);
+      await ensureGhosttyReady();
+
+      const container = popout.document.getElementById("terminal-output");
+      if (!container) {
+        throw new Error("Interactive terminal container not found.");
+      }
+
+      const interactiveTerminal = new GhosttyWebTerminal({
+        cursorBlink: true,
+        cursorStyle: "bar",
+        fontFamily: '"Cascadia Mono", "Fira Code", Consolas, "Courier New", monospace',
+        fontSize: 12,
+        scrollback: 2000,
+        allowTransparency: true,
+        theme: {
+          background: "#00000000",
+          foreground: terminalPopupTheme.text,
+          cursor: "#94a3b8",
+          selectionBackground: "#33415580"
+        }
+      });
+      const fitAddon = new GhosttyFitAddon();
+      interactiveTerminal.loadAddon(fitAddon);
+      interactiveTerminal.open(container as HTMLElement);
+      interactiveTerminal.registerLinkProvider(new OSC8LinkProvider(interactiveTerminal));
+      interactiveTerminal.registerLinkProvider(new UrlRegexProvider(interactiveTerminal));
+      fitAddon.fit();
+      fitAddon.observeResize();
+      const initialDimensions = fitAddon.proposeDimensions();
+      if (initialDimensions) {
+        api.projectTerminal.resize({
+          projectId,
+          commandId: terminal.commandId,
+          cols: initialDimensions.cols,
+          rows: initialDimensions.rows
+        }).catch((error) => {
+          appendLog(`Interactive terminal resize failed for ${terminal.name}: ${String(error)}`);
+        });
+      }
+
+      interactiveTerminal.onData((data) => {
+        if (!data) {
+          return;
+        }
+        const current = terminalPopoutInstancesRef.current[key];
+        if (!current) {
+          return;
+        }
+        api.projectTerminal.write({ projectId: current.projectId, commandId: current.commandId, data }).then((result) => {
+          if (!result?.ok) {
+            appendLog(`Interactive terminal input failed for ${current.terminalName}.`);
+          }
+        }).catch((error) => {
+          const latest = terminalPopoutInstancesRef.current[key];
+          appendLog(`Interactive terminal input failed for ${latest?.terminalName ?? terminal.name}: ${String(error)}`);
+        });
+      });
+      interactiveTerminal.onResize(({ cols, rows }) => {
+        const current = terminalPopoutInstancesRef.current[key];
+        if (!current) {
+          return;
+        }
+        api.projectTerminal.resize({ projectId: current.projectId, commandId: current.commandId, cols, rows }).catch((error) => {
+          appendLog(`Interactive terminal resize failed for ${current.terminalName}: ${String(error)}`);
+        });
+      });
+
+      const instance: ActionTerminalPopoutInstance = {
+        terminal: interactiveTerminal,
+        fitAddon,
+        renderedOutput: "",
+        projectId,
+        commandId: terminal.commandId,
+        terminalName: terminal.name
+      };
+      terminalPopoutInstancesRef.current[key] = instance;
+      syncActionTerminalOutput(instance, terminal.outputTail || "");
+      return instance;
+    },
+    [appendLog, ensureGhosttyReady, syncActionTerminalOutput, terminalPopupTheme.text]
+  );
+
+  const renderTerminalPopout = async (
+    key: string,
     popout: Window,
+    projectId: string,
     terminal: ProjectTerminalState["terminals"][number],
     projectName?: string
   ) => {
@@ -5134,14 +5101,14 @@ export const App = () => {
       stopButton.disabled = !terminal.running;
       stopButton.style.display = terminal.running ? "" : "none";
     }
-    const outputElement = doc.getElementById("terminal-output");
-    const renderer = popout as Window & { __codeappRenderTerminal?: (raw: string) => void };
-    if (renderer.__codeappRenderTerminal) {
-      renderer.__codeappRenderTerminal(terminal.outputTail || "");
-      return;
-    }
-    if (outputElement) {
-      outputElement.textContent = terminal.outputTail || "No terminal output yet.";
+    const instance = await ensureTerminalPopoutInstance(key, popout, projectId, terminal);
+    instance.projectId = projectId;
+    instance.commandId = terminal.commandId;
+    instance.terminalName = terminal.name;
+    syncActionTerminalOutput(instance, terminal.outputTail || "");
+    instance.fitAddon.fit();
+    if (terminal.running) {
+      instance.terminal.focus();
     }
   };
 
@@ -5153,6 +5120,7 @@ export const App = () => {
       return;
     }
     closedKeys.forEach((key) => {
+      disposeTerminalPopoutInstance(key);
       delete terminalPopoutWindowsRef.current[key];
     });
     setTerminalPopoutByKey((prev) => {
@@ -5169,6 +5137,7 @@ export const App = () => {
 
   const attachTerminalPopoutCloseListener = (key: string, popout: Window) => {
     const handleClose = () => {
+      disposeTerminalPopoutInstance(key);
       delete terminalPopoutWindowsRef.current[key];
       setTerminalPopoutByKey((prev) => {
         if (!prev[key]) {
@@ -5189,7 +5158,9 @@ export const App = () => {
     const key = getTerminalPopoutKey(activeProjectId, terminal.commandId);
     const existing = terminalPopoutWindowsRef.current[key];
     if (existing && !existing.closed) {
-      renderTerminalPopout(existing, terminal, activeProject?.name);
+      void renderTerminalPopout(key, existing, activeProjectId, terminal, activeProject?.name).catch((error) => {
+        appendLog(`Terminal pop-out render failed: ${String(error)}`);
+      });
       existing.focus();
       setTerminalPopoutByKey((prev) => ({ ...prev, [key]: true }));
       return;
@@ -5201,13 +5172,16 @@ export const App = () => {
       return;
     }
     terminalPopoutWindowsRef.current[key] = popout;
-    renderTerminalPopout(popout, terminal, activeProject?.name);
+    void renderTerminalPopout(key, popout, activeProjectId, terminal, activeProject?.name).catch((error) => {
+      appendLog(`Terminal pop-out render failed: ${String(error)}`);
+    });
     setTerminalPopoutByKey((prev) => ({ ...prev, [key]: true }));
     attachTerminalPopoutCloseListener(key, popout);
   };
 
   const closeTerminalPopout = (key: string) => {
     const popout = terminalPopoutWindowsRef.current[key];
+    disposeTerminalPopoutInstance(key);
     if (popout && !popout.closed) {
       popout.close();
     }
@@ -5427,9 +5401,42 @@ export const App = () => {
   );
 
   useEffect(() => {
+    const syncCtrlSwitchHintVisibility = (event: KeyboardEvent) => {
+      setIsCtrlSwitchHintVisible(event.ctrlKey);
+    };
+
+    const hideCtrlSwitchHintVisibility = () => {
+      setIsCtrlSwitchHintVisible(false);
+    };
+
+    window.addEventListener("keydown", syncCtrlSwitchHintVisibility);
+    window.addEventListener("keyup", syncCtrlSwitchHintVisibility);
+    window.addEventListener("blur", hideCtrlSwitchHintVisibility);
+
+    return () => {
+      window.removeEventListener("keydown", syncCtrlSwitchHintVisibility);
+      window.removeEventListener("keyup", syncCtrlSwitchHintVisibility);
+      window.removeEventListener("blur", hideCtrlSwitchHintVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
     const onGlobalShortcut = (event: KeyboardEvent) => {
+      if (event.isComposing || event.repeat) {
+        return;
+      }
+      const usesProjectSwitchModifier = event.ctrlKey;
       const usesPlatformModifier = isMacOS ? event.metaKey : event.ctrlKey;
-      if (!usesPlatformModifier || event.isComposing || event.repeat) {
+      if (usesProjectSwitchModifier && !event.shiftKey && !event.altKey) {
+        const key = event.key.toLowerCase();
+        if (/^[1-9]$/.test(key)) {
+          if (focusProjectByShortcutIndex(Number(key) - 1)) {
+            event.preventDefault();
+          }
+          return;
+        }
+      }
+      if (!usesPlatformModifier) {
         return;
       }
       const actionHotkey = actionHotkeyFromKeyboardEvent(event);
@@ -5473,6 +5480,7 @@ export const App = () => {
     activeProjectId,
     activeProjectSettings?.devCommands,
     activeProjectTerminals,
+    focusProjectByShortcutIndex,
     runShortcutByKey,
     startActiveProjectTerminal,
     stopActiveProjectTerminal
@@ -5540,6 +5548,17 @@ export const App = () => {
 
     await createThread(projectId);
   };
+
+  function focusProjectByShortcutIndex(index: number) {
+    const targetProject = projectsInActiveWorkspace[index];
+    if (!targetProject) {
+      return false;
+    }
+    focusProjectFromSidebar(targetProject.id).catch((error) => {
+      setLogs((prev) => [...prev, `Project switch failed: ${String(error)}`]);
+    });
+    return true;
+  }
 
   const focusWorkspace = async (workspaceId: string) => {
     setActiveWorkspaceId(workspaceId);
@@ -8376,13 +8395,19 @@ TODO: Describe what this skill does.
               <div className="projects-scroll-area flex-1 min-h-0 space-y-3 overflow-y-auto pb-3">
                 {projectsInActiveWorkspace.length === 0 && <p className="px-2 text-sm text-muted">No active projects in this workspace.</p>}
 
-                {projectsInActiveWorkspace.map((project) => {
+                {projectsInActiveWorkspace.map((project, projectShortcutIndex) => {
+                  const projectShortcutLabel =
+                    isCtrlSwitchHintVisible && projectShortcutIndex >= 0 && projectShortcutIndex < 9
+                      ? String(projectShortcutIndex + 1)
+                      : null;
                   const threadBuckets = threadBucketsByProjectId[project.id];
                   const threadRows = threadRowsByProjectId[project.id];
                   const visibleRows = threadRows?.active ?? [];
                   const archivedRows = threadRows?.archived ?? [];
                   const showArchived = Boolean(showArchivedByProjectId[project.id]);
-                  const projectListOpen = projectListOpenById[project.id] ?? true;
+                  const projectPersistedOpen = projectListOpenById[project.id] ?? true;
+                  const projectTemporarilyOpen = temporarilyExpandedProjectId === project.id;
+                  const projectListOpen = projectPersistedOpen || projectTemporarilyOpen;
                   const active = activeProjectId === project.id;
                   const menuOpen = threadMenuProjectId === project.id;
                   const setupState = projectSetupById[project.id];
@@ -8391,7 +8416,22 @@ TODO: Describe what this skill does.
                   const showProjectActions = active || menuOpen;
 
                   return (
-                    <section key={project.id} className={active ? "project-section active" : "project-section"}>
+                    <section
+                      key={project.id}
+                      className={active ? "project-section active" : "project-section"}
+                      onFocusCapture={() => {
+                        if (!projectPersistedOpen) {
+                          setTemporarilyExpandedProjectId(project.id);
+                        }
+                      }}
+                      onBlurCapture={(event) => {
+                        const nextFocused = event.relatedTarget;
+                        if (nextFocused instanceof Node && event.currentTarget.contains(nextFocused)) {
+                          return;
+                        }
+                        setTemporarilyExpandedProjectId((prev) => (prev === project.id ? null : prev));
+                      }}
+                    >
                       <div className="project-head" style={getProjectRowStyle(project, active)}>
                         {editingProjectId === project.id ? (
                           <input
@@ -8424,12 +8464,13 @@ TODO: Describe what this skill does.
                             <button
                               type="button"
                               className={projectListOpen ? "project-folder-toggle open" : "project-folder-toggle"}
-                              onClick={() =>
+                              onClick={() => {
                                 setProjectListOpenById((prev) => ({
                                   ...prev,
                                   [project.id]: !projectListOpen
-                                }))
-                              }
+                                }));
+                                setTemporarilyExpandedProjectId((prev) => (prev === project.id ? null : prev));
+                              }}
                               aria-expanded={projectListOpen}
                               aria-label={projectListOpen ? `Collapse ${project.name}` : `Expand ${project.name}`}
                               title={projectListOpen ? "Collapse project" : "Expand project"}
@@ -8447,6 +8488,11 @@ TODO: Describe what this skill does.
                               onDoubleClick={() => beginProjectInlineRename(project)}
                               title="Double-click to rename project"
                             >
+                              {projectShortcutLabel && (
+                                <span className="project-shortcut-badge" aria-hidden="true">
+                                  {projectShortcutLabel}
+                                </span>
+                              )}
                               <span className="min-w-0 flex-1 overflow-hidden">
                                 <span className="block truncate">{project.name}</span>
                                 {setupState && (
@@ -8520,6 +8566,7 @@ TODO: Describe what this skill does.
                           onClick={() => {
                             setActiveProjectId(project.id);
                             setProjectListOpenById((prev) => ({ ...prev, [project.id]: true }));
+                            setTemporarilyExpandedProjectId((prev) => (prev === project.id ? null : prev));
                             setThreadMenuProjectId((prev) => {
                               const next = prev === project.id ? null : project.id;
                               if (next === null) {

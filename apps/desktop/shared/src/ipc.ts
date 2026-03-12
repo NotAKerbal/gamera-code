@@ -32,6 +32,8 @@ export const IPC_CHANNELS = {
   projectTerminalStart: "projectTerminal:start",
   projectTerminalStop: "projectTerminal:stop",
   projectTerminalGetState: "projectTerminal:getState",
+  projectTerminalWrite: "projectTerminal:write",
+  projectTerminalResize: "projectTerminal:resize",
   projectTerminalEvent: "projectTerminal:event",
   previewOpenPopout: "preview:openPopout",
   previewClosePopout: "preview:closePopout",

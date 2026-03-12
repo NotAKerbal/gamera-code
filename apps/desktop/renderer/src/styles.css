@@ -1419,6 +1419,12 @@ webview {
   @apply flex min-w-0 w-full items-center justify-between gap-2 overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm text-left text-muted transition;
 }
 
+.project-shortcut-badge {
+  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[11px] font-semibold text-sky-100;
+  border-color: rgb(56 189 248 / 0.45);
+  background-color: rgb(14 165 233 / 0.12);
+}
+
 .project-row.active {
   @apply border-transparent bg-transparent text-accent shadow-none;
 }
