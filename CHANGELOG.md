@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.4
+- Bug fixes
+
 ## 0.6.3
 - Performance improvements
 - Delete last action

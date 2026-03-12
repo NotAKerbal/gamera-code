@@ -1,6 +1,6 @@
 {
   "name": "@code-app/main",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "private": true,
   "description": "Main process for GameraCode desktop client",
   "author": "Isaac Cochran",
@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@openai/codex": "^0.104.0",
-    "@code-app/shared": "0.6.3",
+    "@code-app/shared": "0.6.4",
     "better-sqlite3": "^12.6.2",
     "electron-log": "^5.3.0",
     "electron-updater": "^6.3.9",
