@@ -412,6 +412,10 @@ webview {
   @apply border-border/90;
 }
 
+.project-section.archived {
+  opacity: 0.85;
+}
+
 .projects-header {
   @apply mb-1 flex items-center justify-between px-2;
 }
@@ -1165,7 +1169,7 @@ webview {
 }
 
 .project-head {
-  @apply flex items-center gap-1 rounded-lg px-1 transition;
+  @apply flex items-center gap-1 rounded-lg border px-1 transition;
 }
 
 .project-head:hover,
@@ -1182,6 +1186,31 @@ webview {
 
 .project-action-btn {
   @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-panel/85 text-sm text-muted transition hover:border-border/80 hover:bg-panel hover:text-accent focus-visible:border-border/80 focus-visible:bg-panel focus-visible:text-accent;
+}
+
+.project-action-btn.project-action-btn-idle {
+  width: 0;
+  min-width: 0;
+  margin-left: 0;
+  padding: 0;
+  border-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(0.125rem);
+  overflow: hidden;
+}
+
+.project-head:hover .project-action-btn.project-action-btn-idle,
+.project-head:focus-within .project-action-btn.project-action-btn-idle,
+.project-section.active .project-action-btn.project-action-btn-idle {
+  width: 1.75rem;
+  min-width: 1.75rem;
+  margin-left: 0;
+  padding: 0;
+  border-width: 1px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .project-folder-toggle {
@@ -1387,7 +1416,7 @@ webview {
 }
 
 .project-row {
-  @apply flex w-full items-center justify-between rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm text-left text-muted transition;
+  @apply flex min-w-0 w-full items-center justify-between gap-2 overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm text-left text-muted transition;
 }
 
 .project-row.active {

@@ -52,7 +52,7 @@ import type {
 
 export interface DesktopApi {
   projects: {
-    list: () => Promise<Project[]>;
+    list: (input?: { includeArchived?: boolean }) => Promise<Project[]>;
     create: (input: { name: string; path: string }) => Promise<Project>;
     createInDirectory: (input: {
       name: string;
@@ -63,7 +63,8 @@ export interface DesktopApi {
     listGitRepositories: () => Promise<GitRepositoryCandidate[]>;
     importFromPath: (input: { path: string; name?: string }) => Promise<Project>;
     cloneFromGitUrl: (input: { url: string; name?: string }) => Promise<Project>;
-    update: (input: { id: string; name?: string; path?: string; workspaceId?: string }) => Promise<Project>;
+    update: (input: { id: string; name?: string; path?: string; workspaceId?: string; color?: string }) => Promise<Project>;
+    archive: (input: { id: string; archived: boolean }) => Promise<Project>;
     delete: (input: { id: string }) => Promise<{ ok: boolean }>;
     pickPath: () => Promise<string | null>;
     openTerminal: (input: { projectId: string; terminalId?: SystemTerminalId }) => Promise<{ ok: boolean }>;

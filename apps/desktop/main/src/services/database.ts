@@ -12,6 +12,8 @@ export const initializeDatabase = (dbPath: string) => {
       workspace_id TEXT,
       name TEXT NOT NULL,
       path TEXT NOT NULL UNIQUE,
+      color TEXT NOT NULL DEFAULT '#64748b',
+      archived_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -220,6 +222,15 @@ export const initializeDatabase = (dbPath: string) => {
   if (!hasWorkspaceIdColumn) {
     db.exec("ALTER TABLE projects ADD COLUMN workspace_id TEXT;");
   }
+  const hasProjectColorColumn = projectColumns.some((column) => column.name === "color");
+  if (!hasProjectColorColumn) {
+    db.exec("ALTER TABLE projects ADD COLUMN color TEXT NOT NULL DEFAULT '#64748b';");
+  }
+  const hasProjectArchivedAtColumn = projectColumns.some((column) => column.name === "archived_at");
+  if (!hasProjectArchivedAtColumn) {
+    db.exec("ALTER TABLE projects ADD COLUMN archived_at TEXT;");
+  }
+  db.exec("UPDATE projects SET color = '#64748b' WHERE color IS NULL OR trim(color) = '';");
   db.exec("CREATE INDEX IF NOT EXISTS idx_projects_workspace_updated ON projects(workspace_id, updated_at DESC);");
 
   const firstWorkspace = db

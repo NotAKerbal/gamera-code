@@ -579,6 +579,7 @@ export const App = () => {
   const [composerHasText, setComposerHasText] = useState(false);
   const [threadMenuProjectId, setThreadMenuProjectId] = useState<string | null>(null);
   const [showArchivedByProjectId, setShowArchivedByProjectId] = useState<Record<string, boolean>>({});
+  const [showArchivedProjectsByWorkspaceId, setShowArchivedProjectsByWorkspaceId] = useState<Record<string, boolean>>({});
   const [projectListOpenById, setProjectListOpenById] = useState<Record<string, boolean>>(() => readStoredProjectListOpenById());
   const [hasLoadedProjectsOnce, setHasLoadedProjectsOnce] = useState(false);
   const [threadDraftTitle, setThreadDraftTitle] = useState("New thread");
@@ -617,6 +618,7 @@ export const App = () => {
   const [showProjectActionsSettings, setShowProjectActionsSettings] = useState(false);
   const [projectSettingsInitialDraft, setProjectSettingsInitialDraft] = useState<{
     projectName: string;
+    projectColor: string;
     projectWorkspaceTargetId: string;
     projectSettingsEnvText: string;
     projectSettingsWebLinks: ProjectWebLink[];
@@ -1357,8 +1359,11 @@ export const App = () => {
       }),
     []
   );
-  const toRgba = useCallback((hexColor: string, alpha: number) => {
-    const value = hexColor.trim().replace(/^#/, "");
+  const toRgba = useCallback((hexColor: string | null | undefined, alpha: number) => {
+    const value = (hexColor ?? "").trim().replace(/^#/, "");
+    if (!value) {
+      return "";
+    }
     const normalized =
       value.length === 3
         ? value
@@ -1387,6 +1392,13 @@ export const App = () => {
       style.borderColor = toRgba(thread.color, active ? 0.35 : 0.22);
       return style;
     },
+    [toRgba]
+  );
+  const getProjectRowStyle = useCallback(
+    (project: Project, active: boolean) => ({
+      backgroundColor: toRgba(project.color ?? "#64748b", active ? 0.14 : 0.08),
+      borderColor: toRgba(project.color ?? "#64748b", active ? 0.34 : 0.18)
+    }),
     [toRgba]
   );
 
@@ -1420,7 +1432,7 @@ export const App = () => {
     () => Object.fromEntries(workspaces.map((workspace) => [workspace.id, workspace])) as Record<string, Workspace>,
     [workspaces]
   );
-  const projectsInActiveWorkspace = useMemo(() => {
+  const sortedProjectsInActiveWorkspace = useMemo(() => {
     const toTimestamp = (value: string) => {
       const ts = Date.parse(value);
       return Number.isFinite(ts) ? ts : 0;
@@ -1448,6 +1460,14 @@ export const App = () => {
         return a.name.localeCompare(b.name);
       });
   }, [projects, activeWorkspaceId, threads]);
+  const projectsInActiveWorkspace = useMemo(
+    () => sortedProjectsInActiveWorkspace.filter((project) => !project.archivedAt),
+    [sortedProjectsInActiveWorkspace]
+  );
+  const archivedProjectsInActiveWorkspace = useMemo(
+    () => sortedProjectsInActiveWorkspace.filter((project) => Boolean(project.archivedAt)),
+    [sortedProjectsInActiveWorkspace]
+  );
   const hasPendingSubagentReviewByThreadId = useMemo(() => {
     const next: Record<string, boolean> = {};
     Object.entries(orchestrationRunsByParentId).forEach(([threadId, runs]) => {
@@ -1459,7 +1479,7 @@ export const App = () => {
     const next: Record<string, { runningCount: number; reviewCount: number; finishedCount: number }> = {};
     threads.forEach((thread) => {
       const project = projectById[thread.projectId];
-      if (!project?.workspaceId || thread.archivedAt) {
+      if (!project?.workspaceId || project.archivedAt || thread.archivedAt) {
         return;
       }
       const metric = next[project.workspaceId] ?? { runningCount: 0, reviewCount: 0, finishedCount: 0 };
@@ -1704,26 +1724,29 @@ export const App = () => {
   };
 
   const loadProjects = async (workspaceIdOverride?: string | null) => {
-    const allProjects = await api.projects.list();
+    const allProjects = await api.projects.list({ includeArchived: true });
     setProjects(allProjects);
     setHasLoadedProjectsOnce(true);
 
-    const activeStillExists = activeProjectId ? allProjects.some((project) => project.id === activeProjectId) : false;
+    const activeStillExists = activeProjectId
+      ? allProjects.some((project) => project.id === activeProjectId && !project.archivedAt)
+      : false;
     if (activeStillExists) {
       return;
     }
 
     const storedProjectId = readStoredActiveProjectId();
-    if (storedProjectId && allProjects.some((project) => project.id === storedProjectId)) {
+    if (storedProjectId && allProjects.some((project) => project.id === storedProjectId && !project.archivedAt)) {
       setActiveProjectId(storedProjectId);
       return;
     }
 
+    const visibleProjects = allProjects.filter((project) => !project.archivedAt);
     const workspaceId = workspaceIdOverride ?? activeWorkspaceId;
     const projectsInWorkspace = workspaceId
-      ? allProjects.filter((project) => project.workspaceId === workspaceId)
-      : allProjects;
-    setActiveProjectId(projectsInWorkspace[0]?.id ?? allProjects[0]?.id ?? null);
+      ? visibleProjects.filter((project) => project.workspaceId === workspaceId)
+      : visibleProjects;
+    setActiveProjectId(projectsInWorkspace[0]?.id ?? visibleProjects[0]?.id ?? null);
   };
 
   const loadThreads = async () => {
@@ -1760,13 +1783,15 @@ export const App = () => {
 
     if (!activeThreadId && sortedThreads.length > 0) {
       if (isCodeWindow && activeProjectId) {
-        const threadForProject = sortedThreads.find((thread) => thread.projectId === activeProjectId);
+        const threadForProject = sortedThreads.find(
+          (thread) => thread.projectId === activeProjectId && !projectById[thread.projectId]?.archivedAt
+        );
         setActiveThreadId(threadForProject?.id ?? null);
         return;
       }
       if (activeWorkspaceId) {
         const workspaceProjectIds = new Set(
-          projects.filter((project) => project.workspaceId === activeWorkspaceId).map((project) => project.id)
+          projects.filter((project) => project.workspaceId === activeWorkspaceId && !project.archivedAt).map((project) => project.id)
         );
         const workspaceThread = sortedThreads.find((thread) => workspaceProjectIds.has(thread.projectId));
         if (workspaceThread) {
@@ -1775,7 +1800,11 @@ export const App = () => {
           return;
         }
       }
-      const fallbackThread = sortedThreads[0]!;
+      const fallbackThread = sortedThreads.find((thread) => !projectById[thread.projectId]?.archivedAt) ?? null;
+      if (!fallbackThread) {
+        setActiveThreadId(null);
+        return;
+      }
       setActiveProjectId((prev) => (prev === fallbackThread.projectId ? prev : fallbackThread.projectId));
       setActiveThreadId(fallbackThread.id);
     }
@@ -3981,10 +4010,13 @@ export const App = () => {
       name: link.name ?? "",
       url: link.url ?? ""
     }));
-    const projectName = projects.find((project) => project.id === projectId)?.name ?? "";
-    const projectWorkspaceId = projects.find((project) => project.id === projectId)?.workspaceId ?? "";
+    const selectedProject = projects.find((project) => project.id === projectId) ?? null;
+    const projectName = selectedProject?.name ?? "";
+    const projectColor = selectedProject?.color ?? "#64748b";
+    const projectWorkspaceId = selectedProject?.workspaceId ?? "";
     setProjectSettingsInitialDraft({
       projectName,
+      projectColor,
       projectWorkspaceTargetId: projectWorkspaceId,
       projectSettingsEnvText: envVarsToText(current.envVars),
       projectSettingsWebLinks: nextWebLinks
@@ -4023,6 +4055,7 @@ export const App = () => {
 
   const saveProjectSettings = async (draft: {
     projectName: string;
+    projectColor: string;
     projectWorkspaceTargetId: string;
     projectSettingsEnvText: string;
     projectSettingsWebLinks: ProjectWebLink[];
@@ -4070,6 +4103,7 @@ export const App = () => {
     const updatedProject = await api.projects.update({
       id: activeProjectId,
       name: nextProjectName,
+      color: draft.projectColor,
       workspaceId: draft.projectWorkspaceTargetId || undefined
     });
     setProjects((prev) => prev.map((project) => (project.id === updatedProject.id ? updatedProject : project)));
@@ -4150,94 +4184,10 @@ export const App = () => {
   };
 
   const removeActiveProject = async () => {
-    if (!activeProjectId || removingProject) {
+    if (!activeProjectId) {
       return;
     }
-
-    const project = projects.find((item) => item.id === activeProjectId);
-    const projectName = project?.name ?? "this project";
-    const confirmed = window.confirm(
-      `Remove "${projectName}" from GameraCode?\n\nThis removes its app settings and threads. Project files on disk are not deleted.`
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    const projectIdToRemove = activeProjectId;
-    setRemovingProject(true);
-    try {
-      await api.projects.delete({ id: projectIdToRemove });
-      setShowProjectSettings(false);
-      setProjectSettingsInitialDraft(null);
-      setShowProjectActionsSettings(false);
-      setProjectActionsSettingsInitialDraft(null);
-      setProjectSettingsById((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setProjectTerminalById((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      Object.keys(dismissedTerminalErrorStampByKeyRef.current).forEach((key) => {
-        if (key.startsWith(`${projectIdToRemove}:`)) {
-          delete dismissedTerminalErrorStampByKeyRef.current[key];
-        }
-      });
-      setProjectPreviewUrlById((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setGitStateByProjectId((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setGitOutgoingCommitsByProjectId((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setGitIncomingCommitsByProjectId((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setGitSharedHistoryByProjectId((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setGitSharedHistoryExpandedByProjectId((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setGitSharedHistoryLoadingByProjectId((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setGitSelectedPathByProjectId((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setGitActivityByProjectId((prev) => {
-        const next = { ...prev };
-        delete next[projectIdToRemove];
-        return next;
-      });
-      setLogs((prev) => [...prev, `Project removed: ${projectName}`]);
-      await loadProjectsAndThreads();
-    } catch (error) {
-      setLogs((prev) => [...prev, `Project remove failed: ${String(error)}`]);
-    } finally {
-      setRemovingProject(false);
-    }
+    await deleteProjectById(activeProjectId);
   };
 
   const startActiveProjectTerminal = async (commandId?: string) => {
@@ -4364,6 +4314,126 @@ export const App = () => {
     } finally {
       setGitBusyAction(null);
     }
+  };
+
+  const deleteProjectById = async (projectId: string) => {
+    if (removingProject) {
+      return;
+    }
+
+    const project = projects.find((item) => item.id === projectId);
+    const projectName = project?.name ?? "this project";
+    const confirmed = window.confirm(
+      `Remove "${projectName}" from GameraCode?\n\nThis removes its app settings and threads. Project files on disk are not deleted.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setRemovingProject(true);
+    try {
+      await api.projects.delete({ id: projectId });
+      setShowProjectSettings(false);
+      setProjectSettingsInitialDraft(null);
+      setShowProjectActionsSettings(false);
+      setProjectActionsSettingsInitialDraft(null);
+      setProjectSettingsById((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setProjectTerminalById((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      Object.keys(dismissedTerminalErrorStampByKeyRef.current).forEach((key) => {
+        if (key.startsWith(`${projectId}:`)) {
+          delete dismissedTerminalErrorStampByKeyRef.current[key];
+        }
+      });
+      setProjectPreviewUrlById((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setGitStateByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setGitOutgoingCommitsByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setGitIncomingCommitsByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setGitSharedHistoryByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setGitSharedHistoryExpandedByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setGitSharedHistoryLoadingByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setGitSelectedPathByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setGitActivityByProjectId((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      setLogs((prev) => [...prev, `Project removed: ${projectName}`]);
+      await loadProjectsAndThreads();
+    } catch (error) {
+      setLogs((prev) => [...prev, `Project remove failed: ${String(error)}`]);
+    } finally {
+      setRemovingProject(false);
+    }
+  };
+
+  const setProjectArchived = async (project: Project, archived: boolean) => {
+    await api.projects.archive({ id: project.id, archived });
+    if (archived) {
+      setThreadMenuProjectId((prev) => (prev === project.id ? null : prev));
+      if (activeProjectId === project.id) {
+        const fallbackProject =
+          projects.find(
+            (item) =>
+              item.id !== project.id &&
+              !item.archivedAt &&
+              (!activeWorkspaceId || item.workspaceId === activeWorkspaceId)
+          ) ??
+          projects.find((item) => item.id !== project.id && !item.archivedAt) ??
+          null;
+        const fallbackThread =
+          (fallbackProject
+            ? threads.find((thread) => thread.projectId === fallbackProject.id && !thread.archivedAt)
+            : null) ??
+          threads.find((thread) => {
+            const threadProject = projectById[thread.projectId];
+            return !thread.archivedAt && Boolean(threadProject) && !threadProject?.archivedAt && thread.projectId !== project.id;
+          }) ??
+          null;
+        setActiveProjectId(fallbackProject?.id ?? null);
+        setActiveThreadId(fallbackThread?.id ?? null);
+      }
+    }
+    await loadProjectsAndThreads();
   };
 
   const checkoutBranch = async (branch: string) => {
@@ -8304,7 +8374,7 @@ TODO: Describe what this skill does.
               )}
 
               <div className="projects-scroll-area flex-1 min-h-0 space-y-3 overflow-y-auto pb-3">
-                {projectsInActiveWorkspace.length === 0 && <p className="px-2 text-sm text-muted">No projects in this workspace.</p>}
+                {projectsInActiveWorkspace.length === 0 && <p className="px-2 text-sm text-muted">No active projects in this workspace.</p>}
 
                 {projectsInActiveWorkspace.map((project) => {
                   const threadBuckets = threadBucketsByProjectId[project.id];
@@ -8318,10 +8388,11 @@ TODO: Describe what this skill does.
                   const setupState = projectSetupById[project.id];
                   const setupRunning = setupState?.status === "running";
                   const FolderIcon = projectListOpen ? FaFolderOpen : FaFolder;
+                  const showProjectActions = active || menuOpen;
 
                   return (
                     <section key={project.id} className={active ? "project-section active" : "project-section"}>
-                      <div className="project-head">
+                      <div className="project-head" style={getProjectRowStyle(project, active)}>
                         {editingProjectId === project.id ? (
                           <input
                             className="input h-8 flex-1 text-xs"
@@ -8362,6 +8433,7 @@ TODO: Describe what this skill does.
                               aria-expanded={projectListOpen}
                               aria-label={projectListOpen ? `Collapse ${project.name}` : `Expand ${project.name}`}
                               title={projectListOpen ? "Collapse project" : "Expand project"}
+                              style={{ color: project.color ?? "#64748b" }}
                             >
                               <FolderIcon className="project-folder-icon" aria-hidden="true" />
                             </button>
@@ -8375,7 +8447,7 @@ TODO: Describe what this skill does.
                               onDoubleClick={() => beginProjectInlineRename(project)}
                               title="Double-click to rename project"
                             >
-                              <span className="min-w-0 flex-1">
+                              <span className="min-w-0 flex-1 overflow-hidden">
                                 <span className="block truncate">{project.name}</span>
                                 {setupState && (
                                   <span
@@ -8398,7 +8470,28 @@ TODO: Describe what this skill does.
                         )}
                         <button
                           className={`project-action-btn transition-all duration-300 ${
-                            setupRunning ? "pointer-events-none opacity-0 translate-y-0.5" : "opacity-100 translate-y-0"
+                            setupRunning
+                              ? "pointer-events-none opacity-0 translate-y-0.5"
+                              : showProjectActions
+                                ? "opacity-100 translate-y-0"
+                                : "project-action-btn-idle"
+                          }`}
+                          onClick={() => {
+                            setProjectArchived(project, true).catch((error) => {
+                              setLogs((prev) => [...prev, `Archive project failed: ${String(error)}`]);
+                            });
+                          }}
+                          title="Archive project"
+                        >
+                          <FaArchive className="text-[12px]" />
+                        </button>
+                        <button
+                          className={`project-action-btn transition-all duration-300 ${
+                            setupRunning
+                              ? "pointer-events-none opacity-0 translate-y-0.5"
+                              : showProjectActions
+                                ? "opacity-100 translate-y-0"
+                                : "project-action-btn-idle"
                           }`}
                           onClick={() => {
                             setActiveProjectId(project.id);
@@ -8412,7 +8505,11 @@ TODO: Describe what this skill does.
                         </button>
                         <button
                           className={`project-action-btn app-tooltip-target transition-all duration-300 ${
-                            setupRunning ? "pointer-events-none opacity-0 translate-y-0.5" : "opacity-100 translate-y-0"
+                            setupRunning
+                              ? "pointer-events-none opacity-0 translate-y-0.5"
+                              : showProjectActions
+                                ? "opacity-100 translate-y-0"
+                                : "project-action-btn-idle"
                           }`}
                           data-thread-menu-trigger={project.id}
                           data-app-tooltip={composerTooltipText(
@@ -8840,6 +8937,92 @@ TODO: Describe what this skill does.
                     </section>
                   );
                 })}
+
+                {archivedProjectsInActiveWorkspace.length > 0 && (
+                  <>
+                    <div className="thread-archived-controls">
+                      <button
+                        className="thread-archived-toggle"
+                        onClick={() =>
+                          setShowArchivedProjectsByWorkspaceId((prev) => ({
+                            ...prev,
+                            [activeWorkspaceId ?? "__all__"]: !prev[activeWorkspaceId ?? "__all__"]
+                          }))
+                        }
+                        title="View archived projects"
+                      >
+                        {(showArchivedProjectsByWorkspaceId[activeWorkspaceId ?? "__all__"] ?? false) ? (
+                          "Hide archived projects"
+                        ) : (
+                          <>
+                            <span>View archived projects</span>
+                            <span
+                              className="thread-archived-count-chip"
+                              aria-label={`${archivedProjectsInActiveWorkspace.length} archived projects`}
+                            >
+                              {archivedProjectsInActiveWorkspace.length}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <div
+                      className={
+                        (showArchivedProjectsByWorkspaceId[activeWorkspaceId ?? "__all__"] ?? false)
+                          ? "thread-archived-group expanded"
+                          : "thread-archived-group"
+                      }
+                    >
+                      <div className="thread-archived-group-inner">
+                        {archivedProjectsInActiveWorkspace.map((project) => (
+                          <section key={`archived-project-${project.id}`} className="project-section archived">
+                            <div className="project-head" style={getProjectRowStyle(project, false)}>
+                              <button
+                                type="button"
+                                className="project-folder-toggle open"
+                                style={{ color: project.color ?? "#64748b" }}
+                                title="Archived project"
+                                disabled
+                              >
+                                <FaFolder className="project-folder-icon" aria-hidden="true" />
+                              </button>
+                              <div className="project-row">
+                                <span className="min-w-0 flex-1 overflow-hidden">
+                                  <span className="block truncate">{project.name}</span>
+                                  <span className="mt-0.5 block truncate text-[10px] leading-4 text-slate-400">
+                                    Archived {project.archivedAt ? formatRelative(project.archivedAt) : ""}
+                                  </span>
+                                </span>
+                              </div>
+                              <button
+                                className="project-action-btn opacity-100"
+                                onClick={() => {
+                                  setProjectArchived(project, false).catch((error) => {
+                                    setLogs((prev) => [...prev, `Restore project failed: ${String(error)}`]);
+                                  });
+                                }}
+                                title="Restore project"
+                              >
+                                <FaBoxOpen className="text-[12px]" />
+                              </button>
+                              <button
+                                className="project-action-btn opacity-100"
+                                onClick={() => {
+                                  deleteProjectById(project.id).catch((error) => {
+                                    setLogs((prev) => [...prev, `Project remove failed: ${String(error)}`]);
+                                  });
+                                }}
+                                title="Delete project"
+                              >
+                                <FaTrashAlt className="text-[12px]" />
+                              </button>
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
               <div ref={threadContextMenuRef} className="thread-context-menu" style={{ display: "none" }}>
                 <button ref={threadContextMenuRenameRef} className="thread-context-menu-item" onClick={handleThreadContextMenuRename}>

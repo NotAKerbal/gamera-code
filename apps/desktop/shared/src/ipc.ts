@@ -6,6 +6,7 @@ export const IPC_CHANNELS = {
   projectsImportFromPath: "projects:importFromPath",
   projectsCloneFromGitUrl: "projects:cloneFromGitUrl",
   projectsUpdate: "projects:update",
+  projectsArchive: "projects:archive",
   projectsDelete: "projects:delete",
   projectsPickPath: "projects:pickPath",
   projectsOpenTerminal: "projects:openTerminal",

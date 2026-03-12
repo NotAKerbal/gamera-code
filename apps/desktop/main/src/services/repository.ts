@@ -64,6 +64,8 @@ interface ProjectRow {
   workspace_id: string | null;
   name: string;
   path: string;
+  color: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -189,8 +191,10 @@ const mapProject = (row: ProjectRow): Project => {
     workspaceId: row.workspace_id ?? "",
     name: row.name,
     path: row.path,
+    color: row.color?.trim() || "#64748b",
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    archivedAt: row.archived_at ?? undefined
   };
   return mapped as Project;
 };
@@ -518,8 +522,11 @@ export class Repository {
     private readonly paths: AppPaths
   ) {}
 
-  listProjects(): Project[] {
-    const rows = this.db.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all() as ProjectRow[];
+  listProjects(input?: { includeArchived?: boolean }): Project[] {
+    const includeArchived = Boolean(input?.includeArchived);
+    const rows = this.db
+      .prepare("SELECT * FROM projects WHERE (@includeArchived = 1 OR archived_at IS NULL) ORDER BY updated_at DESC")
+      .all({ includeArchived: includeArchived ? 1 : 0 }) as ProjectRow[];
     return rows.map(mapProject);
   }
 
@@ -631,7 +638,7 @@ export class Repository {
     return row ? mapProject(row) : null;
   }
 
-  createProject(input: { name: string; path: string }): Project {
+  createProject(input: { name: string; path: string; color?: string }): Project {
     const now = new Date().toISOString();
     const defaultWorkspace =
       this.listWorkspaces()[0] ??
@@ -645,20 +652,21 @@ export class Repository {
       workspaceId: defaultWorkspace.id,
       name: input.name,
       path: input.path,
+      color: input.color?.trim() || "#64748b",
       createdAt: now,
       updatedAt: now
     };
 
     this.db
       .prepare(
-        "INSERT INTO projects (id, workspace_id, name, path, created_at, updated_at) VALUES (@id, @workspaceId, @name, @path, @createdAt, @updatedAt)"
+        "INSERT INTO projects (id, workspace_id, name, path, color, created_at, updated_at) VALUES (@id, @workspaceId, @name, @path, @color, @createdAt, @updatedAt)"
       )
       .run(project);
 
     return project as Project;
   }
 
-  updateProject(input: { id: string; name?: string; path?: string; workspaceId?: string }): Project {
+  updateProject(input: { id: string; name?: string; path?: string; workspaceId?: string; color?: string }): Project {
     const existing = this.getProject(input.id);
     if (!existing) {
       throw new Error("Project not found");
@@ -674,16 +682,32 @@ export class Repository {
       workspaceId: input.workspaceId ?? existingModel.workspaceId,
       name: input.name ?? existing.name,
       path: input.path ?? existing.path,
+      color: input.color?.trim() || existingModel.color,
       updatedAt: new Date().toISOString()
     };
 
     this.db
       .prepare(
-        "UPDATE projects SET workspace_id = @workspaceId, name = @name, path = @path, updated_at = @updatedAt WHERE id = @id"
+        "UPDATE projects SET workspace_id = @workspaceId, name = @name, path = @path, color = @color, updated_at = @updatedAt WHERE id = @id"
       )
       .run(updated);
 
     return updated as Project;
+  }
+
+  archiveProject(id: string, archived: boolean): Project {
+    const existing = this.getProject(id);
+    if (!existing) {
+      throw new Error("Project not found");
+    }
+
+    const archivedAt = archived ? new Date().toISOString() : null;
+    const updatedAt = new Date().toISOString();
+    this.db
+      .prepare("UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ?")
+      .run(archivedAt, updatedAt, id);
+
+    return this.getProject(id)!;
   }
 
   deleteProject(id: string): void {

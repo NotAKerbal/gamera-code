@@ -25,6 +25,8 @@ const projectsReadFileChannel =
   (IPC_CHANNELS as Record<string, string>).projectsReadFile ?? "projects:readFile";
 const projectsWriteFileChannel =
   (IPC_CHANNELS as Record<string, string>).projectsWriteFile ?? "projects:writeFile";
+const projectsArchiveChannel =
+  (IPC_CHANNELS as Record<string, string>).projectsArchive ?? "projects:archive";
 const codePanelOpenPopoutChannel =
   (IPC_CHANNELS as Record<string, string>).codePanelOpenPopout ?? "codePanel:openPopout";
 const codePanelClosePopoutChannel =
@@ -169,13 +171,18 @@ type DesktopApiWithGitExtras = DesktopApi & {
 
 const api: DesktopApiWithGitExtras = {
   projects: {
-    list: () => ipcRenderer.invoke(IPC_CHANNELS.projectsList),
+    list: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsList, input),
     create: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreate, input),
     createInDirectory: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreateInDirectory, input),
     listGitRepositories: () => ipcRenderer.invoke(IPC_CHANNELS.projectsListGitRepositories),
     importFromPath: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsImportFromPath, input),
     cloneFromGitUrl: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCloneFromGitUrl, input),
     update: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsUpdate, input),
+    archive: (input) =>
+      ipcRenderer.invoke(projectsArchiveChannel, {
+        id: input?.id ?? "",
+        archived: Boolean(input?.archived)
+      }),
     delete: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsDelete, input),
     pickPath: () => ipcRenderer.invoke(IPC_CHANNELS.projectsPickPath),
     openTerminal: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenTerminal, input),

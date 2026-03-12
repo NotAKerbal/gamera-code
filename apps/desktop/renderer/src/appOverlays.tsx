@@ -9,6 +9,7 @@ import type {
   SkillRecord
 } from "@code-app/shared";
 import {
+  THREAD_COLOR_PRESETS,
   sanitizeProjectDirName,
   type RenameDialogState
 } from "./appCore";
@@ -19,6 +20,7 @@ type ProjectCommand = { id: string; name: string; command: string; autoStart: bo
 type ProjectSettingsTab = "general" | "env" | "links" | "skills";
 type ProjectSettingsDraft = {
   projectName: string;
+  projectColor: string;
   projectWorkspaceTargetId: string;
   projectSettingsEnvText: string;
   projectSettingsWebLinks: ProjectWebLink[];
@@ -126,6 +128,7 @@ const WORKSPACE_COLOR_PRESETS = [
   "#dc2626",
   "#7c3aed"
 ];
+const PROJECT_COLOR_PRESETS = ["#64748b", ...THREAD_COLOR_PRESETS];
 
 type ProjectSettingsModalProps = {
   activeProjectId: string;
@@ -174,6 +177,7 @@ export const ProjectSettingsModal = memo(({
 }: ProjectSettingsModalProps) => {
   const [projectSettingsTab, setProjectSettingsTab] = useState<ProjectSettingsTab>("general");
   const [projectSettingsProjectName, setProjectSettingsProjectName] = useState(initialDraft.projectName);
+  const [projectSettingsProjectColor, setProjectSettingsProjectColor] = useState(initialDraft.projectColor);
   const [projectWorkspaceTargetId, setProjectWorkspaceTargetId] = useState(initialDraft.projectWorkspaceTargetId);
   const [projectSettingsEnvText, setProjectSettingsEnvText] = useState(initialDraft.projectSettingsEnvText);
   const [projectSettingsWebLinks, setProjectSettingsWebLinks] = useState<ProjectWebLink[]>(initialDraft.projectSettingsWebLinks);
@@ -244,6 +248,26 @@ export const ProjectSettingsModal = memo(({
                   onChange={(event) => setProjectSettingsProjectName(event.target.value)}
                   placeholder="Project name"
                 />
+              </div>
+              <div className="mx-2 border-t border-border/70" />
+              <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="text-sm text-muted">Folder color</div>
+                <div className="thread-context-menu-colors" role="group" aria-label="Project color">
+                  {PROJECT_COLOR_PRESETS.map((color) => {
+                    const selected = projectSettingsProjectColor.toLowerCase() === color.toLowerCase();
+                    return (
+                      <button
+                        key={color}
+                        type="button"
+                        className={`thread-context-color-btn ${selected ? "is-selected" : ""}`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => setProjectSettingsProjectColor(color)}
+                        aria-label={`Set project color ${color}`}
+                        title={color}
+                      />
+                    );
+                  })}
+                </div>
               </div>
               <div className="mx-2 border-t border-border/70" />
               <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -494,6 +518,7 @@ export const ProjectSettingsModal = memo(({
             onClick={() => {
               onSaveProjectSettings({
                 projectName: projectSettingsProjectName,
+                projectColor: projectSettingsProjectColor,
                 projectWorkspaceTargetId,
                 projectSettingsEnvText,
                 projectSettingsWebLinks
@@ -600,6 +625,9 @@ export const ProjectActionsSettingsModal = memo(({
         let seen = 0;
         for (let i = 0; i < nextSource.length; i += 1) {
           const command = nextSource[i];
+          if (!command) {
+            continue;
+          }
           if (targetInSection ? command.inDropdown : !command.inDropdown) {
             if (seen === clampedTargetIndex) {
               insertionIndex = i;

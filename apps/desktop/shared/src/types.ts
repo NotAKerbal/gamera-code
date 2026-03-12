@@ -102,9 +102,11 @@ export interface Project {
   workspaceId: string;
   name: string;
   path: string;
+  color: string;
   settings?: ProjectSettings;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string;
 }
 
 export interface Workspace {

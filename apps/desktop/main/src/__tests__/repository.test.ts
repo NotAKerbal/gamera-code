@@ -32,9 +32,41 @@ describeRepository("Repository", () => {
     const thread = repo.createThread({ projectId: project.id, title: "hello", provider: "codex" });
 
     expect(repo.listProjects()).toHaveLength(1);
+    expect(repo.getProject(project.id)?.color).toBe("#64748b");
     expect(repo.listThreads({ projectId: project.id })).toHaveLength(1);
     expect(repo.getThread(thread.id)?.title).toBe("hello");
     expect(repo.getThread(thread.id)?.harnessId).toBe("codex");
+  });
+
+  it("stores project color", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-project-color-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-project-color", color: "#2563eb" });
+    expect(project.color).toBe("#2563eb");
+
+    const updated = repo.updateProject({ id: project.id, color: "#059669" });
+    expect(updated.color).toBe("#059669");
+    expect(repo.getProject(project.id)?.color).toBe("#059669");
+  });
+
+  it("archives and restores projects", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-app-project-archive-"));
+    const paths = createAppPaths(dir);
+    const db = initializeDatabase(paths.dbPath);
+    const repo = new Repository(db, paths);
+
+    const project = repo.createProject({ name: "repo", path: "/tmp/repo-project-archive" });
+    const archived = repo.archiveProject(project.id, true);
+    expect(archived.archivedAt).toBeTruthy();
+    expect(repo.listProjects()).toEqual([]);
+    expect(repo.listProjects({ includeArchived: true })).toHaveLength(1);
+
+    const restored = repo.archiveProject(project.id, false);
+    expect(restored.archivedAt).toBeUndefined();
+    expect(repo.listProjects()).toHaveLength(1);
   });
 
   it("stores and returns settings", () => {
