@@ -198,6 +198,14 @@ const mapThreadItem = (item: UnknownRecord): UnknownRecord | null => {
     };
   }
 
+  if (type === "imageView") {
+    return {
+      id,
+      type: "image_view",
+      path: asString(item.path) ?? ""
+    };
+  }
+
   if (type === "plan") {
     const text = asString(item.text) ?? "";
     return {

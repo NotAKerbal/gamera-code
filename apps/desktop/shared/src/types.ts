@@ -39,13 +39,12 @@ export type HarnessCapability<T extends HarnessId = HarnessId> = HarnessCapabili
 export type HarnessModelGroupId<T extends HarnessId = HarnessId> = HarnessModelGroupMap[T];
 export type HarnessAvailableModels = Partial<Record<HarnessId, string[]>>;
 
-export interface HarnessSettingsEntry<TDefaults = Record<string, never>> {
+export interface HarnessSettingsEntry {
   binaryOverride?: string;
-  defaults?: Partial<TDefaults>;
 }
 
 export type HarnessSettings = {
-  [K in HarnessId]?: HarnessSettingsEntry<HarnessDefaultsById[K]>;
+  [K in HarnessId]?: HarnessSettingsEntry;
 };
 
 export interface HarnessModelGroup<T extends HarnessId = HarnessId> {

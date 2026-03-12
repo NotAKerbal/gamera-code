@@ -57,7 +57,7 @@ describeRepository("Repository", () => {
     expect(settings.harnessSettings.codex?.binaryOverride).toBe("/x/codex");
   });
 
-  it("hydrates legacy and harness settings together", () => {
+  it("stores codex defaults independently from harness settings", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-app-harness-settings-"));
     const paths = createAppPaths(dir);
     const db = initializeDatabase(paths.dbPath);
@@ -66,12 +66,12 @@ describeRepository("Repository", () => {
     repo.setSettings({
       harnessSettings: {
         codex: {
-          binaryOverride: "/opt/codex",
-          defaults: {
-            model: "gpt-5.3-codex",
-            sandboxMode: "read-only"
-          }
+          binaryOverride: "/opt/codex"
         }
+      },
+      codexDefaults: {
+        model: "gpt-5.3-codex",
+        sandboxMode: "read-only"
       }
     });
 
@@ -79,6 +79,7 @@ describeRepository("Repository", () => {
     expect(settings.binaryOverrides.codex).toBe("/opt/codex");
     expect(settings.codexDefaults.model).toBe("gpt-5.3-codex");
     expect(settings.codexDefaults.sandboxMode).toBe("read-only");
+    expect(settings.harnessSettings.codex?.binaryOverride).toBe("/opt/codex");
   });
 
   it("persists provider thread ids", () => {

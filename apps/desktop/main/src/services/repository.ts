@@ -1,7 +1,6 @@
 import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { DEFAULT_HARNESS_OPTIONS } from "@code-app/shared";
 import type {
   AppSettings,
   HarnessId,
@@ -37,12 +36,8 @@ const DEFAULT_SETTINGS = {
   theme: "midnight",
   defaultHarnessId: "codex",
   harnessSettings: {
-    codex: {
-      defaults: DEFAULT_HARNESS_OPTIONS.codex
-    },
-    opencode: {
-      defaults: DEFAULT_HARNESS_OPTIONS.opencode
-    }
+    codex: {},
+    opencode: {}
   },
   binaryOverrides: {},
   envVars: {},
@@ -234,43 +229,24 @@ const mapThread = (row: ThreadRow): Thread => {
 
 const normalizeHarnessSettings = (partial: Partial<AppSettings> | null | undefined): HarnessSettings => {
   const input = partial ?? {};
-  const next: HarnessSettings = {
+  return {
     ...DEFAULT_SETTINGS.harnessSettings,
-    ...input.harnessSettings
-  };
-  const codexCurrent = next.codex ?? {};
-  const opencodeCurrent = next.opencode ?? {};
-
-  next.codex = {
-    ...(input.binaryOverrides?.codex ? { binaryOverride: input.binaryOverrides.codex } : {}),
-    ...codexCurrent,
-    defaults: {
-      ...DEFAULT_SETTINGS.codexDefaults,
-      ...(input.codexDefaults ?? {}),
-      ...(codexCurrent.defaults ?? {})
+    ...input.harnessSettings,
+    codex: {
+      ...(input.binaryOverrides?.codex ? { binaryOverride: input.binaryOverrides.codex } : {}),
+      ...(input.harnessSettings?.codex ?? {})
+    },
+    opencode: {
+      ...(input.binaryOverrides?.opencode ? { binaryOverride: input.binaryOverrides.opencode } : {}),
+      ...(input.harnessSettings?.opencode ?? {})
     }
   };
-    next.opencode = {
-      ...(input.binaryOverrides?.opencode ? { binaryOverride: input.binaryOverrides.opencode } : {}),
-      ...opencodeCurrent,
-      defaults: {
-        ...DEFAULT_HARNESS_OPTIONS.opencode,
-        ...(opencodeCurrent.defaults ?? {})
-      }
-    };
-
-  return next;
 };
 
 const deriveLegacyBinaryOverrides = (harnessSettings: HarnessSettings): AppSettings["binaryOverrides"] => ({
   ...DEFAULT_SETTINGS.binaryOverrides,
   codex: harnessSettings.codex?.binaryOverride,
   opencode: harnessSettings.opencode?.binaryOverride
-});
-
-const deriveLegacyCodexDefaults = (harnessSettings: HarnessSettings): AppSettings["codexDefaults"] => ({
-  ...DEFAULT_SETTINGS.codexDefaults,
-  ...(harnessSettings.codex?.defaults ?? {})
 });
 
 const normalizeAppSettings = (partial: Partial<AppSettings> | null | undefined): AppSettings => {
@@ -292,8 +268,7 @@ const normalizeAppSettings = (partial: Partial<AppSettings> | null | undefined):
     },
     codexDefaults: {
       ...DEFAULT_SETTINGS.codexDefaults,
-      ...input.codexDefaults,
-      ...deriveLegacyCodexDefaults(harnessSettings)
+      ...input.codexDefaults
     }
   };
 };

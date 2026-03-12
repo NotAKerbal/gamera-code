@@ -72,6 +72,7 @@ type MainHeaderProps = {
   isPreviewOpen: boolean;
   isGitPanelOpen: boolean;
   isGitPushBusy: boolean;
+  gitPushProgressLabel: string | null;
   isGitRefreshBusy: boolean;
   onToggleCodePanel: () => void;
   onTogglePreviewPanel: () => void;
@@ -188,6 +189,7 @@ const MainHeaderComponent = ({
   isPreviewOpen,
   isGitPanelOpen,
   isGitPushBusy,
+  gitPushProgressLabel,
   isGitRefreshBusy,
   onToggleCodePanel,
   onTogglePreviewPanel,
@@ -451,7 +453,7 @@ const MainHeaderComponent = ({
   const openWorkspaceContextMenuAt = (workspaceId: string, xInput: number, yInput: number) => {
     const menuWidth = 196;
     const menuHeight = 178;
-    const x = Math.min(xInput, Math.max(8, window.innerWidth - menuWidth - 8));
+    const x = Math.min(Math.max(8, xInput - 8), Math.max(8, window.innerWidth - menuWidth - 8));
     const y = Math.min(yInput, Math.max(8, window.innerHeight - menuHeight - 8));
     setWorkspaceContextMenu({ workspaceId, x, y });
   };
@@ -537,8 +539,10 @@ const MainHeaderComponent = ({
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                  openWorkspaceContextMenuAt(workspace.id, rect.right + 4, rect.bottom + 4);
+                  const trigger = event.currentTarget as HTMLElement;
+                  const workspaceButton = trigger.closest(".workspace-segment") as HTMLElement | null;
+                  const rect = (workspaceButton ?? trigger).getBoundingClientRect();
+                  openWorkspaceContextMenuAt(workspace.id, rect.left + 8, rect.bottom + 4);
                 }}
                 role="button"
                 tabIndex={0}
@@ -548,11 +552,17 @@ const MainHeaderComponent = ({
                   }
                   event.preventDefault();
                   event.stopPropagation();
-                  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                  openWorkspaceContextMenuAt(workspace.id, rect.right + 4, rect.bottom + 4);
+                  const trigger = event.currentTarget as HTMLElement;
+                  const workspaceButton = trigger.closest(".workspace-segment") as HTMLElement | null;
+                  const rect = (workspaceButton ?? trigger).getBoundingClientRect();
+                  openWorkspaceContextMenuAt(workspace.id, rect.left + 8, rect.bottom + 4);
                 }}
               >
-                <FaCog className="text-[10px]" />
+                <FaChevronDown
+                  className={`workspace-segment-dropdown-icon ${
+                    workspaceContextMenu?.workspaceId === workspace.id ? "is-open" : ""
+                  }`}
+                />
               </span>
             </button>
           );
@@ -725,7 +735,7 @@ const MainHeaderComponent = ({
                   ) : null}
                   <button
                     type="button"
-                    className={`terminal-action-more ${isMenuOpen ? "is-open" : ""}`}
+                    className={`terminal-action-more terminal-action-more--vertical ${isMenuOpen ? "is-open" : ""}`}
                     aria-label={`Open actions for ${terminal.name}`}
                     onClick={() => setOpenInlineActionMenuId((current) => (current === actionId ? null : actionId))}
                   >
@@ -841,7 +851,7 @@ const MainHeaderComponent = ({
                         <div className={`terminal-action-controls ${isMenuOpen ? "is-open" : ""}`}>
                           <button
                             type="button"
-                            className={`terminal-action-more ${isMenuOpen ? "is-open" : ""}`}
+                            className={`terminal-action-more terminal-action-more--horizontal ${isMenuOpen ? "is-open" : ""}`}
                             aria-label={`Open actions for ${terminal.name}`}
                             onClick={() => setOpenOverflowActionMenuId((current) => (current === actionId ? null : actionId))}
                           >
@@ -988,15 +998,15 @@ const MainHeaderComponent = ({
       <div className="git-header-segmented-control no-drag">
         <button
           className="git-header-main-btn app-tooltip-target"
-          data-app-tooltip={tooltipText("Push", "Stage all changes, create an AI commit message, commit, and push.")}
-          aria-label="Stage, commit, and push changes"
+          data-app-tooltip={tooltipText("Push", "Fetch and pull latest changes, then stage, commit, and push.")}
+          aria-label={gitPushProgressLabel ? `Push changes (${gitPushProgressLabel})` : "Fetch, pull, commit, and push changes"}
           onClick={onPushGitChanges}
           disabled={!activeProjectId || isGitPushBusy}
         >
           <span className="inline-flex items-center gap-1">
             <FaCodeBranch className="text-[10px]" />
-            Push
-            {isGitPushBusy ? <span className="loading-ring" aria-hidden="true" /> : null}
+            {gitPushProgressLabel ?? "Push"}
+            {gitPushProgressLabel ? <span className="loading-ring" aria-hidden="true" /> : null}
             {showHeaderGitDiffStats ? (
               <span className="git-header-diff-badge header-pill px-1.5 py-0.5 text-[10px]">
                 <span className="text-emerald-300">+{activeGitAddedLines}</span>

@@ -496,10 +496,34 @@ webview {
 
 .terminal-action-more {
   @apply inline-flex h-5 w-5 items-center justify-center rounded text-xs text-slate-400 transition;
+  transition-property: transform, background-color;
+  transition-duration: 160ms;
+  transition-timing-function: ease;
 }
 
 .terminal-action-more:hover {
   @apply bg-panel/70 text-slate-200;
+}
+
+.terminal-action-more--vertical,
+.terminal-action-more--horizontal {
+  transform-origin: center;
+}
+
+.terminal-action-more--vertical.is-open {
+  transform: rotate(180deg);
+}
+
+.terminal-action-more--horizontal.is-open {
+  transform: rotate(90deg);
+}
+
+.terminal-action-more--vertical {
+  transform: rotate(0deg);
+}
+
+.terminal-action-more--horizontal {
+  transform: rotate(270deg);
 }
 
 .terminal-action-dismiss-error {
@@ -1313,6 +1337,14 @@ webview {
 
 .workspace-segment-settings:hover {
   @apply bg-black/35 text-white;
+}
+
+.workspace-segment-dropdown-icon {
+  @apply text-[10px] text-slate-400 transition-transform duration-200;
+}
+
+.workspace-segment-dropdown-icon.is-open {
+  transform: rotate(180deg);
 }
 
 .workspace-segment-add {

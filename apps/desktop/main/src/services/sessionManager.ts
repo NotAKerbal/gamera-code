@@ -2339,6 +2339,20 @@ export class SessionManager {
       return;
     }
 
+    if (itemType === "image_view") {
+      const imagePath = asString(item.path) ?? "";
+      const imageLabel = imagePath ? path.basename(imagePath) : "image";
+      this.emitSessionEvent(threadId, "progress", `Viewed image: ${imageLabel}`, {
+        provider: "codex",
+        category: "file_read",
+        itemType,
+        itemId,
+        eventType,
+        path: imagePath || undefined
+      });
+      return;
+    }
+
     if (itemType === "todo_list") {
       const todos = Array.isArray(item.items)
         ? item.items

@@ -721,6 +721,7 @@ export const App = () => {
   const [gitSharedHistoryLoadingByProjectId, setGitSharedHistoryLoadingByProjectId] = useState<Record<string, boolean>>({});
   const [gitSelectedPathByProjectId, setGitSelectedPathByProjectId] = useState<Record<string, string | null>>({});
   const [gitBusyAction, setGitBusyAction] = useState<string | null>(null);
+  const [gitPushProgressLabel, setGitPushProgressLabel] = useState<string | null>(null);
   const [isGitRefreshBusy, setIsGitRefreshBusy] = useState(false);
   const [gitInitRevealByProjectId, setGitInitRevealByProjectId] = useState<Record<string, boolean>>({});
   const [gitCommitIsGeneratingMessage, setGitCommitIsGeneratingMessage] = useState(false);
@@ -4306,15 +4307,27 @@ export const App = () => {
     });
   };
 
+  const refreshGitSnapshotSelection = useCallback(async (projectId: string) => {
+    const nextSnapshot = await loadGitSnapshot(projectId);
+    const nextState = nextSnapshot.state;
+    const selectedPath =
+      activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
+        ? activeSelectedGitPath
+        : nextState.files[0]?.path;
+    selectGitPath(projectId, selectedPath);
+    return nextSnapshot;
+  }, [activeSelectedGitPath, loadGitSnapshot, selectGitPath]);
+
   const runGitAction = async (
     label: string,
-    action: (projectId: string) => Promise<{ ok: boolean; stdout: string; stderr: string }>
+    action: (projectId: string) => Promise<{ ok: boolean; stdout: string; stderr: string }>,
+    options?: { busyLabel?: string }
   ) => {
     if (!activeProjectId) {
       return;
     }
 
-    setGitBusyAction(label);
+    setGitBusyAction(options?.busyLabel ?? label);
     try {
       const result = await action(activeProjectId);
       const pushGitActivity = (message: string, tone: GitActivityEntry["tone"]) => {
@@ -4346,13 +4359,7 @@ export const App = () => {
         setLogs((prev) => [...prev, `Git ${label} failed.${result.stderr ? ` ${result.stderr}` : ""}`]);
       }
 
-      const nextSnapshot = await loadGitSnapshot(activeProjectId);
-      const nextState = nextSnapshot.state;
-      const selectedPath =
-        activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
-          ? activeSelectedGitPath
-          : nextState.files[0]?.path;
-      selectGitPath(activeProjectId, selectedPath);
+      await refreshGitSnapshotSelection(activeProjectId);
       return result;
     } finally {
       setGitBusyAction(null);
@@ -4464,7 +4471,7 @@ export const App = () => {
     }, 520);
   };
 
-  const commitGitChanges = async (options?: { message?: string; clearInput?: boolean }) => {
+  const commitGitChanges = async (options?: { message?: string; clearInput?: boolean; busyLabel?: string }) => {
     if (!activeProjectId) {
       return null;
     }
@@ -4472,7 +4479,7 @@ export const App = () => {
     const trimmedMessage = rawMessage.trim();
     const clearInput = options?.clearInput ?? true;
     setGitCommitIsGeneratingMessage(trimmedMessage.length === 0);
-    setGitBusyAction("commit");
+    setGitBusyAction(options?.busyLabel ?? "commit");
     try {
       const result = await api.git.commit({
         projectId: activeProjectId,
@@ -4517,13 +4524,7 @@ export const App = () => {
         }
       }
 
-      const nextSnapshot = await loadGitSnapshot(activeProjectId);
-      const nextState = nextSnapshot.state;
-      const selectedPath =
-        activeSelectedGitPath && nextState.files.some((file) => file.path === activeSelectedGitPath)
-          ? activeSelectedGitPath
-          : nextState.files[0]?.path;
-      selectGitPath(activeProjectId, selectedPath);
+      await refreshGitSnapshotSelection(activeProjectId);
       return result;
     } finally {
       setGitBusyAction(null);
@@ -4536,21 +4537,40 @@ export const App = () => {
       return;
     }
 
-    const stageResult = await runGitAction("stage-all", (projectId) => api.git.stage({ projectId }));
-    if (!stageResult?.ok) {
-      return;
-    }
+    setGitPushProgressLabel("Refresh 1/5");
+    try {
+      const fetchResult = await runGitAction("fetch", (projectId) => api.git.fetch({ projectId }), { busyLabel: "push-sequence" });
+      if (!fetchResult?.ok) {
+        return;
+      }
 
-    const commitResult = await commitGitChanges({ message: "", clearInput: false });
-    if (!commitResult) {
-      return;
-    }
+      setGitPushProgressLabel("Pull 2/5");
+      const pullResult = await runGitAction("pull", (projectId) => api.git.pull({ projectId }), { busyLabel: "push-sequence" });
+      if (!pullResult?.ok) {
+        return;
+      }
 
-    if (!commitResult.ok && !commitResult.stderr.includes("No staged changes to commit.")) {
-      return;
-    }
+      setGitPushProgressLabel("Stage 3/5");
+      const stageResult = await runGitAction("stage-all", (projectId) => api.git.stage({ projectId }), { busyLabel: "push-sequence" });
+      if (!stageResult?.ok) {
+        return;
+      }
 
-    await runGitAction("push", (projectId) => api.git.push({ projectId }));
+      setGitPushProgressLabel("Commit 4/5");
+      const commitResult = await commitGitChanges({ message: "", clearInput: false, busyLabel: "push-sequence" });
+      if (!commitResult) {
+        return;
+      }
+
+      if (!commitResult.ok && !commitResult.stderr.includes("No staged changes to commit.")) {
+        return;
+      }
+
+      setGitPushProgressLabel("Push 5/5");
+      await runGitAction("push", (projectId) => api.git.push({ projectId }), { busyLabel: "push-sequence" });
+    } finally {
+      setGitPushProgressLabel(null);
+    }
   };
 
   const switchOrCreateBranch = async (value?: string) => {
@@ -8125,19 +8145,13 @@ TODO: Describe what this skill does.
     }
     setIsGitRefreshBusy(true);
     try {
-      const snapshot = await loadGitSnapshot(activeProjectId);
-      const state = snapshot.state;
-      const selectedPath =
-        activeSelectedGitPath && state.files.some((file) => file.path === activeSelectedGitPath)
-          ? activeSelectedGitPath
-          : state.files[0]?.path;
-      selectGitPath(activeProjectId, selectedPath);
+      await refreshGitSnapshotSelection(activeProjectId);
     } catch (error) {
       setLogs((prev) => [...prev, `Git refresh failed: ${String(error)}`]);
     } finally {
       setIsGitRefreshBusy(false);
     }
-  }, [activeProjectId, activeSelectedGitPath, gitBusyAction, isGitRefreshBusy, loadGitSnapshot, selectGitPath]);
+  }, [activeProjectId, gitBusyAction, isGitRefreshBusy, refreshGitSnapshotSelection]);
 
   const handleSelectWorkspace = useCallback(
     (workspaceId: string) => {
@@ -8224,6 +8238,7 @@ TODO: Describe what this skill does.
               isPreviewOpen={isPreviewOpen}
               isGitPanelOpen={isGitPanelOpen}
               isGitPushBusy={Boolean(gitBusyAction)}
+              gitPushProgressLabel={gitPushProgressLabel}
               isGitRefreshBusy={isGitRefreshBusy}
               onToggleCodePanel={toggleCodePanel}
               onTogglePreviewPanel={togglePreviewPanel}
