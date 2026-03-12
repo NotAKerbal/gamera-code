@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.5
+- Improved terminals
+
 ## 0.6.4
 - Bug fixes
 

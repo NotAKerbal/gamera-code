@@ -1,6 +1,6 @@
 {
   "name": "code-app",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "private": true,
   "license": "Apache-2.0",
   "description": "Cross-platform desktop wrapper for multiple agent harnesses",
