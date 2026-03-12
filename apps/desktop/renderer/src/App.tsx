@@ -597,7 +597,6 @@ export const App = () => {
   const [showArchivedByProjectId, setShowArchivedByProjectId] = useState<Record<string, boolean>>({});
   const [showArchivedProjectsByWorkspaceId, setShowArchivedProjectsByWorkspaceId] = useState<Record<string, boolean>>({});
   const [projectListOpenById, setProjectListOpenById] = useState<Record<string, boolean>>(() => readStoredProjectListOpenById());
-  const [temporarilyExpandedProjectId, setTemporarilyExpandedProjectId] = useState<string | null>(null);
   const [hasLoadedProjectsOnce, setHasLoadedProjectsOnce] = useState(false);
   const [threadDraftTitle, setThreadDraftTitle] = useState("New thread");
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
@@ -760,6 +759,7 @@ export const App = () => {
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isCtrlSwitchHintVisible, setIsCtrlSwitchHintVisible] = useState(false);
+  const [isAltThreadSwitchHintVisible, setIsAltThreadSwitchHintVisible] = useState(false);
   const [branchDropdownPosition, setBranchDropdownPosition] = useState<{ bottom: number; left: number; width: number } | null>(null);
   const [composerDropdown, setComposerDropdown] = useState<{
     kind: ComposerDropdownKind;
@@ -5421,9 +5421,41 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
+    const syncAltThreadSwitchHintVisibility = (event: KeyboardEvent) => {
+      setIsAltThreadSwitchHintVisible(event.altKey);
+    };
+
+    const hideAltThreadSwitchHintVisibility = () => {
+      setIsAltThreadSwitchHintVisible(false);
+    };
+
+    window.addEventListener("keydown", syncAltThreadSwitchHintVisibility);
+    window.addEventListener("keyup", syncAltThreadSwitchHintVisibility);
+    window.addEventListener("blur", hideAltThreadSwitchHintVisibility);
+
+    return () => {
+      window.removeEventListener("keydown", syncAltThreadSwitchHintVisibility);
+      window.removeEventListener("keyup", syncAltThreadSwitchHintVisibility);
+      window.removeEventListener("blur", hideAltThreadSwitchHintVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
     const onGlobalShortcut = (event: KeyboardEvent) => {
       if (event.isComposing || event.repeat) {
         return;
+      }
+      if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        const key = event.key.toLowerCase();
+        if (/^[1-9]$/.test(key)) {
+          if (isEditableKeyboardTarget(event.target)) {
+            return;
+          }
+          if (focusThreadByShortcutIndex(Number(key) - 1)) {
+            event.preventDefault();
+          }
+          return;
+        }
       }
       const usesProjectSwitchModifier = event.ctrlKey;
       const usesPlatformModifier = isMacOS ? event.metaKey : event.ctrlKey;
@@ -5481,6 +5513,7 @@ export const App = () => {
     activeProjectSettings?.devCommands,
     activeProjectTerminals,
     focusProjectByShortcutIndex,
+    focusThreadByShortcutIndex,
     runShortcutByKey,
     startActiveProjectTerminal,
     stopActiveProjectTerminal
@@ -5557,6 +5590,24 @@ export const App = () => {
     focusProjectFromSidebar(targetProject.id).catch((error) => {
       setLogs((prev) => [...prev, `Project switch failed: ${String(error)}`]);
     });
+    return true;
+  }
+
+  function focusThreadByShortcutIndex(index: number) {
+    if (!activeProjectId) {
+      return false;
+    }
+    const threadRows = threadRowsByProjectId[activeProjectId];
+    if (!threadRows) {
+      return false;
+    }
+    const showArchived = Boolean(showArchivedByProjectId[activeProjectId]);
+    const visibleThreadRows = showArchived ? [...threadRows.active, ...threadRows.archived] : threadRows.active;
+    const targetRow = visibleThreadRows[index];
+    if (!targetRow) {
+      return false;
+    }
+    activateThreadFromSidebar(activeProjectId, targetRow.thread.id);
     return true;
   }
 
@@ -8405,33 +8456,25 @@ TODO: Describe what this skill does.
                   const visibleRows = threadRows?.active ?? [];
                   const archivedRows = threadRows?.archived ?? [];
                   const showArchived = Boolean(showArchivedByProjectId[project.id]);
-                  const projectPersistedOpen = projectListOpenById[project.id] ?? true;
-                  const projectTemporarilyOpen = temporarilyExpandedProjectId === project.id;
-                  const projectListOpen = projectPersistedOpen || projectTemporarilyOpen;
                   const active = activeProjectId === project.id;
+                  const projectPersistedOpen = projectListOpenById[project.id] ?? true;
+                  const projectListOpen = projectPersistedOpen || active;
                   const menuOpen = threadMenuProjectId === project.id;
                   const setupState = projectSetupById[project.id];
                   const setupRunning = setupState?.status === "running";
                   const FolderIcon = projectListOpen ? FaFolderOpen : FaFolder;
                   const showProjectActions = active || menuOpen;
+                  const visibleShortcutThreadRows = showArchived ? [...visibleRows, ...archivedRows] : visibleRows;
+                  const threadShortcutLabelById = isAltThreadSwitchHintVisible
+                    ? Object.fromEntries(
+                        visibleShortcutThreadRows
+                          .slice(0, 9)
+                          .map((row, index) => [row.thread.id, String(index + 1)])
+                      ) as Record<string, string>
+                    : null;
 
                   return (
-                    <section
-                      key={project.id}
-                      className={active ? "project-section active" : "project-section"}
-                      onFocusCapture={() => {
-                        if (!projectPersistedOpen) {
-                          setTemporarilyExpandedProjectId(project.id);
-                        }
-                      }}
-                      onBlurCapture={(event) => {
-                        const nextFocused = event.relatedTarget;
-                        if (nextFocused instanceof Node && event.currentTarget.contains(nextFocused)) {
-                          return;
-                        }
-                        setTemporarilyExpandedProjectId((prev) => (prev === project.id ? null : prev));
-                      }}
-                    >
+                    <section key={project.id} className={active ? "project-section active" : "project-section"}>
                       <div className="project-head" style={getProjectRowStyle(project, active)}>
                         {editingProjectId === project.id ? (
                           <input
@@ -8469,7 +8512,6 @@ TODO: Describe what this skill does.
                                   ...prev,
                                   [project.id]: !projectListOpen
                                 }));
-                                setTemporarilyExpandedProjectId((prev) => (prev === project.id ? null : prev));
                               }}
                               aria-expanded={projectListOpen}
                               aria-label={projectListOpen ? `Collapse ${project.name}` : `Expand ${project.name}`}
@@ -8566,7 +8608,6 @@ TODO: Describe what this skill does.
                           onClick={() => {
                             setActiveProjectId(project.id);
                             setProjectListOpenById((prev) => ({ ...prev, [project.id]: true }));
-                            setTemporarilyExpandedProjectId((prev) => (prev === project.id ? null : prev));
                             setThreadMenuProjectId((prev) => {
                               const next = prev === project.id ? null : project.id;
                               if (next === null) {
@@ -8651,6 +8692,11 @@ TODO: Describe what this skill does.
                                 <div className="thread-row-main">
                                   <div className="thread-row-title-block">
                                     <div className="thread-row-title-line">
+                                      {threadShortcutLabelById?.[thread.id] && (
+                                        <span className="thread-shortcut-badge" aria-hidden="true">
+                                          {threadShortcutLabelById[thread.id]}
+                                        </span>
+                                      )}
                                       {thread.pinnedAt && <FaThumbtack className="thread-pin-indicator" aria-label="Pinned thread" />}
                                       <div className="truncate text-left text-sm">{thread.title}</div>
                                     </div>
@@ -8881,6 +8927,11 @@ TODO: Describe what this skill does.
                               <div className="thread-row-main">
                                 <div className="thread-row-title-block">
                                   <div className="thread-row-title-line">
+                                    {threadShortcutLabelById?.[thread.id] && (
+                                      <span className="thread-shortcut-badge" aria-hidden="true">
+                                        {threadShortcutLabelById[thread.id]}
+                                      </span>
+                                    )}
                                     {thread.pinnedAt && <FaThumbtack className="thread-pin-indicator" aria-label="Pinned thread" />}
                                     <div className="truncate text-left text-sm">{thread.title}</div>
                                   </div>

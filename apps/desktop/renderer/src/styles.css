@@ -1461,6 +1461,10 @@ webview {
   @apply flex min-w-0 items-center gap-1.5;
 }
 
+.thread-shortcut-badge {
+  @apply inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-md border border-amber-400/45 bg-amber-500/12 px-1 text-[10px] font-semibold leading-none text-amber-100;
+}
+
 .thread-pin-indicator {
   @apply shrink-0 text-[10px] text-accent/90;
 }
