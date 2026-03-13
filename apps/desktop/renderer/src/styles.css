@@ -1434,7 +1434,7 @@ webview {
 }
 
 .thread-list {
-  @apply ml-8 space-y-1;
+  @apply ml-2 mr-2 space-y-1;
 }
 
 .thread-empty {

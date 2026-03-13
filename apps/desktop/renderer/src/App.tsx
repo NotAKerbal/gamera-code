@@ -5468,12 +5468,13 @@ export const App = () => {
         return;
       }
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-        const key = event.key.toLowerCase();
-        if (/^[1-9]$/.test(key)) {
-          if (isEditableKeyboardTarget(event.target)) {
-            return;
-          }
-          if (focusThreadByShortcutIndex(Number(key) - 1)) {
+        const digitKey = /^[1-9]$/.test(event.key)
+          ? event.key
+          : event.code.startsWith("Digit") && /^[1-9]$/.test(event.code.slice(5))
+            ? event.code.slice(5)
+            : null;
+        if (digitKey) {
+          if (focusThreadByShortcutIndex(Number(digitKey) - 1)) {
             event.preventDefault();
           }
           return;
