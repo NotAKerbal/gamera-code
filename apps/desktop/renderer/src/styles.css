@@ -1420,8 +1420,7 @@ webview {
 }
 
 .project-shortcut-badge {
-  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[11px] font-semibold text-sky-100;
-  border-color: rgb(56 189 248 / 0.45);
+  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold text-sky-100;
   background-color: rgb(14 165 233 / 0.12);
 }
 
@@ -1462,7 +1461,7 @@ webview {
 }
 
 .thread-shortcut-badge {
-  @apply inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-md border border-amber-400/45 bg-amber-500/10 px-1 text-[10px] font-semibold leading-none text-amber-100;
+  @apply inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-md bg-amber-500/10 px-1 text-[10px] font-semibold leading-none text-amber-100;
 }
 
 .thread-pin-indicator {

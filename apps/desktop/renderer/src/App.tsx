@@ -8550,6 +8550,11 @@ TODO: Describe what this skill does.
                           />
                         ) : (
                           <>
+                            {projectShortcutLabel && (
+                              <span className="project-shortcut-badge" aria-hidden="true">
+                                {projectShortcutLabel}
+                              </span>
+                            )}
                             <button
                               type="button"
                               className={projectListOpen ? "project-folder-toggle open" : "project-folder-toggle"}
@@ -8576,11 +8581,6 @@ TODO: Describe what this skill does.
                               onDoubleClick={() => beginProjectInlineRename(project)}
                               title="Double-click to rename project"
                             >
-                              {projectShortcutLabel && (
-                                <span className="project-shortcut-badge" aria-hidden="true">
-                                  {projectShortcutLabel}
-                                </span>
-                              )}
                               <span className="min-w-0 flex-1 overflow-hidden">
                                 <span className="block truncate">{project.name}</span>
                                 {setupState && (
