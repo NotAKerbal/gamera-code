@@ -2,7 +2,9 @@ import type {
   CodexThreadOptions,
   HarnessCapability,
   HarnessModelCatalogEntry,
+  HarnessModelDefinition,
   HarnessDescriptor,
+  HarnessDefinedModel,
   HarnessId,
   HarnessModelProviderEntry,
   HarnessModelProviderKey,
@@ -72,21 +74,24 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
         id: "flagship",
         harnessId: "codex",
         label: "Flagship",
-        models: ["gpt-5.4"],
+        models: [{ value: "gpt-5.4", label: "GPT-5.4" }],
         defaultModel: "gpt-5.4"
       },
       {
         id: "codex",
         harnessId: "codex",
         label: "Codex",
-        models: ["gpt-5.3-codex", "gpt-5.2-codex"],
+        models: [
+          { value: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+          { value: "gpt-5.2-codex", label: "GPT-5.2 Codex" }
+        ],
         defaultModel: "gpt-5.3-codex"
       },
       {
         id: "spark",
         harnessId: "codex",
         label: "Spark",
-        models: ["gpt-5.3-codex-spark"],
+        models: [{ value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" }],
         defaultModel: "gpt-5.3-codex-spark"
       }
     ],
@@ -120,14 +125,25 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
         id: "openai",
         harnessId: "opencode",
         label: "OpenAI",
-        models: ["opencode/gpt-5.4-pro", "opencode/gpt-5.4", "opencode/gpt-5.2", "opencode/gpt-5-nano"],
+        models: [
+          { value: "opencode/gpt-5.4-pro", label: "GPT-5.4 Pro" },
+          { value: "opencode/gpt-5.4", label: "GPT-5.4" },
+          { value: "opencode/gpt-5.2", label: "GPT-5.2" },
+          { value: "opencode/gpt-5-nano", label: "GPT-5 Nano" }
+        ],
         defaultModel: "opencode/gpt-5.4-pro"
       },
       {
         id: "anthropic",
         harnessId: "opencode",
         label: "Anthropic",
-        models: ["opencode/claude-opus-4-6", "opencode/claude-opus-4-5", "opencode/claude-sonnet-4-6", "opencode/claude-sonnet-4-5", "opencode/claude-haiku-4-5"],
+        models: [
+          { value: "opencode/claude-opus-4-6", label: "Claude Opus 4.6" },
+          { value: "opencode/claude-opus-4-5", label: "Claude Opus 4.5" },
+          { value: "opencode/claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+          { value: "opencode/claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
+          { value: "opencode/claude-haiku-4-5", label: "Claude Haiku 4.5" }
+        ],
         defaultModel: "opencode/claude-sonnet-4-6"
       },
       {
@@ -135,12 +151,12 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
         harnessId: "opencode",
         label: "Google",
         models: [
-          "opencode/gemini-3.1-pro",
-          "opencode/gemini-3-pro",
-          "opencode/gemini-3-flash",
-          "google-vertex/gemini-3.1-pro-preview",
-          "google-vertex/gemini-3-pro-preview",
-          "google-vertex/gemini-3-flash-preview"
+          { value: "opencode/gemini-3.1-pro", label: "Gemini 3.1 Pro" },
+          { value: "opencode/gemini-3-pro", label: "Gemini 3 Pro" },
+          { value: "opencode/gemini-3-flash", label: "Gemini 3 Flash" },
+          { value: "google-vertex/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
+          { value: "google-vertex/gemini-3-pro-preview", label: "Gemini 3 Pro Preview" },
+          { value: "google-vertex/gemini-3-flash-preview", label: "Gemini 3 Flash Preview" }
         ],
         defaultModel: "opencode/gemini-3.1-pro"
       },
@@ -148,28 +164,38 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
         id: "xai",
         harnessId: "opencode",
         label: "Codex",
-        models: ["opencode/gpt-5.3-codex", "opencode/gpt-5.3-codex-spark", "opencode/gpt-5.2-codex"],
+        models: [
+          { value: "opencode/gpt-5.3-codex", label: "GPT-5.3 Codex" },
+          { value: "opencode/gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
+          { value: "opencode/gpt-5.2-codex", label: "GPT-5.2 Codex" }
+        ],
         defaultModel: "opencode/gpt-5.3-codex"
       },
       {
         id: "deepseek",
         harnessId: "opencode",
         label: "DeepSeek",
-        models: ["google-vertex/deepseek-ai/deepseek-v3.1-maas"],
+        models: [{ value: "google-vertex/deepseek-ai/deepseek-v3.1-maas", label: "DeepSeek V3.1 MaaS" }],
         defaultModel: "google-vertex/deepseek-ai/deepseek-v3.1-maas"
       },
       {
         id: "glm",
         harnessId: "opencode",
         label: "GLM",
-        models: ["opencode/glm-5", "opencode/glm-4.7", "opencode/glm-4.6", "google-vertex/zai-org/glm-5-maas", "google-vertex/zai-org/glm-4.7-maas"],
+        models: [
+          { value: "opencode/glm-5", label: "GLM-5" },
+          { value: "opencode/glm-4.7", label: "GLM-4.7" },
+          { value: "opencode/glm-4.6", label: "GLM-4.6" },
+          { value: "google-vertex/zai-org/glm-5-maas", label: "GLM-5 MaaS" },
+          { value: "google-vertex/zai-org/glm-4.7-maas", label: "GLM-4.7 MaaS" }
+        ],
         defaultModel: "opencode/glm-5"
       },
       {
         id: "kimi",
         harnessId: "opencode",
         label: "Kimi",
-        models: ["opencode/kimi-k2.5"],
+        models: [{ value: "opencode/kimi-k2.5", label: "Kimi K2.5" }],
         defaultModel: "opencode/kimi-k2.5"
       },
       {
@@ -177,11 +203,11 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
         harnessId: "opencode",
         label: "Vertex OSS",
         models: [
-          "google-vertex/openai/gpt-oss-120b-maas",
-          "google-vertex/openai/gpt-oss-20b-maas",
-          "google-vertex/meta/llama-4-maverick-17b-128e-instruct-maas",
-          "google-vertex/meta/llama-3.3-70b-instruct-maas",
-          "google-vertex/qwen/qwen3-235b-a22b-instruct-2507-maas"
+          { value: "google-vertex/openai/gpt-oss-120b-maas", label: "GPT-OSS 120B MaaS" },
+          { value: "google-vertex/openai/gpt-oss-20b-maas", label: "GPT-OSS 20B MaaS" },
+          { value: "google-vertex/meta/llama-4-maverick-17b-128e-instruct-maas", label: "Llama 4 Maverick 17B 128E Instruct MaaS" },
+          { value: "google-vertex/meta/llama-3.3-70b-instruct-maas", label: "Llama 3.3 70B Instruct MaaS" },
+          { value: "google-vertex/qwen/qwen3-235b-a22b-instruct-2507-maas", label: "Qwen3 235B A22B Instruct 2507 MaaS" }
         ],
         defaultModel: "google-vertex/openai/gpt-oss-120b-maas"
       },
@@ -189,7 +215,12 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
         id: "minimax",
         harnessId: "opencode",
         label: "MiniMax",
-        models: ["opencode/minimax-m2.5", "opencode/minimax-m2.5-free", "opencode/minimax-m2.1", "opencode/big-pickle"],
+        models: [
+          { value: "opencode/minimax-m2.5", label: "MiniMax M2.5" },
+          { value: "opencode/minimax-m2.5-free", label: "MiniMax M2.5 Free" },
+          { value: "opencode/minimax-m2.1", label: "MiniMax M2.1" },
+          { value: "opencode/big-pickle", label: "Big Pickle" }
+        ],
         defaultModel: "opencode/minimax-m2.5"
       }
     ],
@@ -214,19 +245,27 @@ export const DEFAULT_HARNESS_OPTIONS: Record<HarnessId, CodexThreadOptions | Rec
 const toProviderKey = (harnessId: HarnessId, groupId: string): HarnessModelProviderKey =>
   `${harnessId}:${groupId}` as HarnessModelProviderKey;
 
+const normalizeModelDefinition = (model: HarnessModelDefinition): HarnessDefinedModel =>
+  typeof model === "string" ? { value: model } : model;
+
+export const getHarnessModelValue = (model: HarnessModelDefinition): string => normalizeModelDefinition(model).value;
+
 const createModelCatalogEntry = <T extends HarnessId>(
   harnessId: T,
   providerId: HarnessModelProviderKey,
-  model: string,
+  modelDefinition: HarnessModelDefinition,
   defaultModel?: string
-): HarnessModelCatalogEntry<T> => ({
-  id: `${providerId}:${model}`,
-  harnessId,
-  providerId,
-  value: model,
-  label: model,
-  isDefault: model === defaultModel
-});
+): HarnessModelCatalogEntry<T> => {
+  const model = normalizeModelDefinition(modelDefinition);
+  return {
+    id: `${providerId}:${model.value}`,
+    harnessId,
+    providerId,
+    value: model.value,
+    label: model.label ?? model.value,
+    isDefault: model.value === defaultModel
+  };
+};
 
 const buildProviderModelMap = (descriptors: HarnessRegistryEntry[]): HarnessProviderModelMap =>
   descriptors.reduce<HarnessProviderModelMap>((catalog, descriptor) => {
@@ -239,7 +278,9 @@ const buildProviderModelMap = (descriptors: HarnessRegistryEntry[]): HarnessProv
           groupId: group.id,
           label: group.label,
           defaultModel: group.defaultModel,
-          models: group.models.map((model) => createModelCatalogEntry(descriptor.id, providerId, model, group.defaultModel))
+          models: group.models.map((model) =>
+            createModelCatalogEntry(descriptor.id, providerId, model, group.defaultModel)
+          )
         };
         return groupCatalog;
       },
@@ -280,6 +321,15 @@ export const findHarnessModelProvider = <T extends HarnessId>(
   model: string
 ): HarnessModelProviderEntry<T> | undefined =>
   getHarnessModelProviders(harnessId).find((provider) => provider.models.some((entry) => entry.value === model));
+
+export const findHarnessModelEntry = <T extends HarnessId>(
+  harnessId: T,
+  model: string
+): HarnessModelCatalogEntry<T> | undefined =>
+  findHarnessModelProvider(harnessId, model)?.models.find((entry) => entry.value === model);
+
+export const getHarnessModelLabel = <T extends HarnessId>(harnessId: T, model: string): string | undefined =>
+  findHarnessModelEntry(harnessId, model)?.label;
 
 export const getDefaultHarnessModel = (harnessId: HarnessId): string | undefined =>
   getHarnessModelProviders(harnessId).find((provider) => provider.defaultModel)?.defaultModel;

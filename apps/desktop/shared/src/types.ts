@@ -51,9 +51,16 @@ export interface HarnessModelGroup<T extends HarnessId = HarnessId> {
   id: HarnessModelGroupId<T>;
   harnessId: T;
   label: string;
-  models: string[];
+  models: HarnessModelDefinition[];
   defaultModel?: string;
 }
+
+export interface HarnessDefinedModel {
+  value: string;
+  label?: string;
+}
+
+export type HarnessModelDefinition = string | HarnessDefinedModel;
 
 export type HarnessModelProviderKey = `${HarnessId}:${string}`;
 

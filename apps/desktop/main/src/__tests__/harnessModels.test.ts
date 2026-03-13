@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  findHarnessModelEntry,
   findHarnessModelProvider,
   getDefaultHarnessModel,
+  getHarnessModelLabel,
   getHarnessModelProviders,
   getHarnessModelSuggestions,
   HARNESS_PROVIDER_MODEL_MAP
@@ -28,6 +30,11 @@ describe("harness model catalog", () => {
     expect(findHarnessModelProvider("opencode", "google-vertex/deepseek-ai/deepseek-v3.1-maas")?.id).toBe(
       "opencode:deepseek"
     );
+  });
+
+  it("returns curated labels when provided", () => {
+    expect(findHarnessModelEntry("codex", "gpt-5.4")?.label).toBe("GPT-5.4");
+    expect(getHarnessModelLabel("opencode", "opencode/gpt-5.4-pro")).toBe("GPT-5.4 Pro");
   });
 
   it("keeps suggestion ordering identical to the provider catalog", () => {

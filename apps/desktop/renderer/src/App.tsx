@@ -136,6 +136,7 @@ import {
   getSupportedHarness,
   harnessSupports,
   formatMentionFileLabel,
+  getSupportedHarnessModelLabel,
   formatRelative,
   getProjectNameFromPath,
   getTerminalPopoutKey,
@@ -10047,7 +10048,7 @@ TODO: Describe what this skill does.
                         {!showComposerHarnessSegmented && !showComposerLockedHarnessBadge ? (
                           <HarnessBadge harness={activeHarness} showLabel={false} className="composer-inline-harness-badge" />
                         ) : null}
-                        <span>{formatModelDisplayName(modelLabel)}</span>
+                        <span>{getSupportedHarnessModelLabel(activeHarness.id, modelLabel) ?? formatModelDisplayName(modelLabel)}</span>
                         <FaChevronDown className="text-[10px] text-slate-500" />
                       </button>
                       <button

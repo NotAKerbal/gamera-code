@@ -1,6 +1,7 @@
 import { createPortal } from "react-dom";
-import { memo, useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { memo, useEffect, useState, type ComponentType, type Dispatch, type RefObject, type SVGProps, type SetStateAction } from "react";
 import type { CodexSandboxMode, CodexThreadOptions, HarnessId } from "@code-app/shared";
+import { Anthropic, DeepSeek, Google, Meta, Minimax, Moonshot, OpenAI, Qwen, VertexAI, ZAI } from "@lobehub/icons";
 import {
   APPROVAL_OPTIONS,
   COLLABORATION_OPTIONS,
@@ -33,6 +34,30 @@ type ComposerDropdownPortalProps = {
   onSelectHarnessModel: (harnessId: HarnessId, model: string) => void;
   setComposerOptions: Dispatch<SetStateAction<CodexThreadOptions>>;
   setComposerDropdown: Dispatch<SetStateAction<ComposerDropdownState | null>>;
+};
+
+type ProviderIconComponent = ComponentType<SVGProps<SVGSVGElement>>;
+
+const PROVIDER_ICONS: Record<string, ProviderIconComponent> = {
+  openai: OpenAI,
+  anthropic: Anthropic,
+  google: Google,
+  deepseek: DeepSeek,
+  zai: ZAI,
+  moonshot: Moonshot,
+  meta: Meta,
+  qwen: Qwen,
+  "open-models": VertexAI,
+  minimax: Minimax
+};
+
+const ProviderIcon = ({ providerId }: { providerId: string }) => {
+  const Icon = PROVIDER_ICONS[providerId];
+  if (!Icon) {
+    return <span className="composer-model-provider-icon composer-model-provider-icon-fallback" aria-hidden="true" />;
+  }
+
+  return <Icon className="composer-model-provider-icon" aria-hidden="true" />;
 };
 
 const ComposerDropdownPortalComponent = ({
@@ -142,7 +167,10 @@ const ComposerDropdownPortalComponent = ({
                           }
                         }}
                       >
-                        <span className="composer-model-provider-label">{group.label}</span>
+                        <span className="composer-model-provider-heading">
+                          <ProviderIcon providerId={group.id} />
+                          <span className="composer-model-provider-label">{group.label}</span>
+                        </span>
                         <span className="composer-model-provider-meta">
                           {group.rows.length} model{group.rows.length === 1 ? "" : "s"}
                         </span>
@@ -154,7 +182,10 @@ const ComposerDropdownPortalComponent = ({
                   {activeProviderGroup ? (
                     <>
                       <div className="composer-model-group-header">
-                        <div className="composer-model-group-title">{activeProviderGroup.label}</div>
+                        <div className="composer-model-group-title">
+                          <ProviderIcon providerId={activeProviderGroup.id} />
+                          <span>{activeProviderGroup.label}</span>
+                        </div>
                         <div className="composer-model-group-meta">
                           {activeProviderGroup.rows.length} model{activeProviderGroup.rows.length === 1 ? "" : "s"}
                         </div>

@@ -909,6 +909,13 @@ webview {
     color 160ms ease;
 }
 
+.composer-model-provider-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
 .composer-model-provider:hover {
   background: rgb(var(--theme-panel) / 0.52);
   color: white;
@@ -938,6 +945,18 @@ webview {
   text-transform: uppercase;
 }
 
+.composer-model-provider-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
+.composer-model-provider-icon-fallback {
+  border-radius: 999px;
+  background: rgb(var(--theme-muted) / 0.35);
+}
+
 .composer-model-provider-meta {
   font-size: 0.62rem;
   color: rgb(var(--theme-muted));
@@ -964,6 +983,9 @@ webview {
 }
 
 .composer-model-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.08em;

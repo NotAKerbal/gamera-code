@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
 import { FaChevronDown, FaTimes } from "react-icons/fa";
-import type {
+import {
   AppTheme,
   AppSettings,
   CodexApprovalMode,
@@ -33,6 +33,7 @@ import {
   SANDBOX_OPTIONS,
   SUPPORTED_HARNESSES,
   WEB_SEARCH_OPTIONS,
+  getModelValue,
   type AppSettingsTab
 } from "./appCore";
 import { HarnessBadge } from "./harnessBadge";
@@ -265,7 +266,7 @@ export const SettingsModal = memo(({
   const [skillEditorNotice, setSkillEditorNotice] = useState("");
   const selectedHarnessId = settings.defaultHarnessId ?? currentHarnessId;
   const currentHarness = getSupportedHarness(selectedHarnessId);
-  const modelSuggestions = currentHarness?.modelGroups.flatMap((group) => group.models) ?? [];
+  const modelSuggestions = currentHarness?.modelGroups.flatMap((group) => group.models.map(getModelValue)) ?? [];
 
   useEffect(() => {
     setSettingsTab(initialDraft.settingsTab);
@@ -975,7 +976,7 @@ export const SettingsModal = memo(({
       </datalist>
       {SUPPORTED_HARNESSES.map((harness) => (
         <datalist key={harness.id} id={`model-suggestions-${harness.id}`}>
-          {harness.modelGroups.flatMap((group) => group.models).map((model) => (
+          {harness.modelGroups.flatMap((group) => group.models.map(getModelValue)).map((model) => (
             <option key={model} value={model} />
           ))}
         </datalist>

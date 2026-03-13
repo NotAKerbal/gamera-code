@@ -1,6 +1,6 @@
 import type { CodexThreadOptions, HarnessId, HarnessModelGroup } from "@code-app/shared";
 import { getModelTooltip } from "../../shared/src/modelTooltips";
-import { formatModelDisplayName, SUPPORTED_HARNESSES } from "./appCore";
+import { formatModelDisplayName, getModelValue, getSupportedHarnessModelLabel, SUPPORTED_HARNESSES } from "./appCore";
 
 type VisibleHarnessDescriptor = (typeof SUPPORTED_HARNESSES)[number];
 
@@ -9,6 +9,19 @@ type ProviderMeta = {
   label: string;
   order: number;
 };
+
+const PROVIDER_META = {
+  openai: { id: "openai", label: "OpenAI", order: 0 },
+  anthropic: { id: "anthropic", label: "Anthropic", order: 1 },
+  google: { id: "google", label: "Google", order: 2 },
+  deepseek: { id: "deepseek", label: "DeepSeek", order: 3 },
+  zai: { id: "zai", label: "Z.ai", order: 4 },
+  moonshot: { id: "moonshot", label: "Moonshot", order: 5 },
+  meta: { id: "meta", label: "Meta", order: 6 },
+  qwen: { id: "qwen", label: "Qwen.AI", order: 7 },
+  minimax: { id: "minimax", label: "MiniMax", order: 8 },
+  openModels: { id: "open-models", label: "Open Models", order: 9 }
+} as const;
 
 export type ComposerMergedModelSupport = {
   harnessId: HarnessId;
@@ -38,28 +51,44 @@ export type ComposerMergedModelGroup = {
 };
 
 const PROVIDER_GROUP_META: Partial<Record<HarnessModelGroup["id"], ProviderMeta>> = {
-  flagship: { id: "openai", label: "OpenAI", order: 0 },
-  codex: { id: "openai", label: "OpenAI", order: 0 },
-  spark: { id: "openai", label: "OpenAI", order: 0 },
-  openai: { id: "openai", label: "OpenAI", order: 0 },
-  anthropic: { id: "anthropic", label: "Anthropic", order: 1 },
-  google: { id: "google", label: "Google", order: 2 },
-  deepseek: { id: "deepseek", label: "DeepSeek", order: 3 },
-  glm: { id: "zai", label: "Z.ai", order: 4 },
-  kimi: { id: "moonshot", label: "Moonshot", order: 5 },
-  vertex_oss: { id: "open-models", label: "Open Models", order: 6 },
-  minimax: { id: "minimax", label: "MiniMax", order: 7 },
-  xai: { id: "openai", label: "OpenAI", order: 0 }
+  flagship: PROVIDER_META.openai,
+  codex: PROVIDER_META.openai,
+  spark: PROVIDER_META.openai,
+  openai: PROVIDER_META.openai,
+  anthropic: PROVIDER_META.anthropic,
+  google: PROVIDER_META.google,
+  deepseek: PROVIDER_META.deepseek,
+  glm: PROVIDER_META.zai,
+  kimi: PROVIDER_META.moonshot,
+  vertex_oss: PROVIDER_META.openModels,
+  minimax: PROVIDER_META.minimax,
+  xai: PROVIDER_META.openai
 };
 
-const getProviderMeta = (group: HarnessModelGroup): ProviderMeta =>
-  PROVIDER_GROUP_META[group.id] ?? {
+const getProviderMeta = (group: HarnessModelGroup, model: string): ProviderMeta => {
+  if (group.id === "vertex_oss") {
+    if (model.includes("/openai/") || model.includes("/gpt-oss-")) {
+      return PROVIDER_META.openai;
+    }
+    if (model.includes("/meta/") || model.includes("/llama-")) {
+      return PROVIDER_META.meta;
+    }
+    if (model.includes("/qwen/") || model.includes("/qwen")) {
+      return PROVIDER_META.qwen;
+    }
+  }
+
+  return PROVIDER_GROUP_META[group.id] ?? {
     id: group.id,
     label: group.label,
     order: Number.MAX_SAFE_INTEGER
   };
+};
 
 const HARNESS_ORDER = new Map(SUPPORTED_HARNESSES.map((harness, index) => [harness.id, index] as const));
+
+const getDisplayName = (harnessId: HarnessId, model: string): string =>
+  getSupportedHarnessModelLabel(harnessId, model) ?? formatModelDisplayName(model);
 
 export const buildComposerModelGroups = ({
   composerOptions,
@@ -91,10 +120,10 @@ export const buildComposerModelGroups = ({
     }
 
     harness.modelGroups.forEach((group) => {
-      const provider = getProviderMeta(group);
-
-      group.models.forEach((model) => {
-        const displayName = formatModelDisplayName(model);
+      group.models.forEach((modelDefinition) => {
+        const model = getModelValue(modelDefinition);
+        const provider = getProviderMeta(group, model);
+        const displayName = getDisplayName(harness.id, model);
         const rowKey = displayName.toLowerCase();
         const disabled = !harnessVisible || (harness.id !== currentHarnessId && !canSwitchHarnesses);
         const selected = harness.id === currentHarnessId && (composerOptions.model ?? "").trim() === model;
@@ -212,7 +241,7 @@ export const findComposerModelRow = ({
   if (!currentModel) {
     return null;
   }
-  const currentDisplayName = formatModelDisplayName(currentModel);
+  const currentDisplayName = getDisplayName(currentHarnessId, currentModel);
 
   const groups = buildComposerModelGroups({
     composerOptions,
