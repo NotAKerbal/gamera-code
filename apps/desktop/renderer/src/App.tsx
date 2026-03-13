@@ -5469,7 +5469,7 @@ export const App = () => {
       }
       if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
         const alphaKey = event.key.toLowerCase();
-        if (alphaKey === "a") {
+        if (alphaKey === "b") {
           if (toggleArchivedThreadsForActiveProject()) {
             event.preventDefault();
           }
@@ -8932,7 +8932,7 @@ TODO: Describe what this skill does.
                                 <>
                                   {isAltThreadSwitchHintVisible && (
                                     <span className="thread-shortcut-badge" aria-hidden="true">
-                                      A
+                                      B
                                     </span>
                                   )}
                                   <span>Hide archived</span>
@@ -8941,7 +8941,7 @@ TODO: Describe what this skill does.
                                 <>
                                   {isAltThreadSwitchHintVisible && (
                                     <span className="thread-shortcut-badge" aria-hidden="true">
-                                      A
+                                      B
                                     </span>
                                   )}
                                   <span>View archived</span>
