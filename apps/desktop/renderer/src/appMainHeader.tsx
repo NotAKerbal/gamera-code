@@ -11,6 +11,7 @@ import {
   FaFolderOpen,
   FaRedoAlt,
   FaTerminal,
+  FaStop,
   FaTimes,
   FaPlus,
   FaWindows,
@@ -22,6 +23,15 @@ import {
 import type { ProjectTerminalState, ProjectWebLink, SystemTerminalOption } from "@code-app/shared";
 
 type HeaderTerminal = ProjectTerminalState["terminals"][number];
+type OtherProjectRunningActionGroup = {
+  projectId: string;
+  projectName: string;
+  actions: Array<{
+    commandId: string;
+    name: string;
+    updatedAt: string;
+  }>;
+};
 
 type MainHeaderProps = {
   isMacOS: boolean;
@@ -56,7 +66,10 @@ type MainHeaderProps = {
   onOpenProjectWebLink: (link: ProjectWebLink) => Promise<void>;
   activeProjectId: string | null;
   activeProjectTerminals: HeaderTerminal[];
+  otherProjectRunningActions: OtherProjectRunningActionGroup[];
   systemTerminals: SystemTerminalOption[];
+  onStopOtherProjectTerminal: (projectId: string, commandId: string) => Promise<void>;
+  onStopAllOtherProjectTerminals: (projectId: string) => Promise<void>;
   onOpenProjectTerminal: (terminalId?: string) => Promise<void>;
   onOpenTerminalPopout: (terminal: HeaderTerminal) => void;
   onAcknowledgeTerminalError: (commandId: string) => void;
@@ -173,7 +186,10 @@ const MainHeaderComponent = ({
   onOpenProjectWebLink,
   activeProjectId,
   activeProjectTerminals,
+  otherProjectRunningActions,
   systemTerminals,
+  onStopOtherProjectTerminal,
+  onStopAllOtherProjectTerminals,
   onOpenProjectTerminal,
   onOpenTerminalPopout,
   onAcknowledgeTerminalError,
@@ -213,6 +229,9 @@ const MainHeaderComponent = ({
   const [isTerminalActionsMenuOpen, setIsTerminalActionsMenuOpen] = useState(false);
   const [openInlineActionMenuId, setOpenInlineActionMenuId] = useState<string | null>(null);
   const [openOverflowActionMenuId, setOpenOverflowActionMenuId] = useState<string | null>(null);
+  const [isOtherProjectsOpen, setIsOtherProjectsOpen] = useState(false);
+  const [runningOtherProjectActionId, setRunningOtherProjectActionId] = useState<string | null>(null);
+  const [runningOtherProjectStopAllId, setRunningOtherProjectStopAllId] = useState<string | null>(null);
   const [workspaceContextMenu, setWorkspaceContextMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   const [runningTerminalActionId, setRunningTerminalActionId] = useState<string | null>(null);
   const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
@@ -360,6 +379,7 @@ const MainHeaderComponent = ({
     setIsTerminalActionsMenuOpen(false);
     setOpenInlineActionMenuId(null);
     setOpenOverflowActionMenuId(null);
+    setIsOtherProjectsOpen(false);
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -924,6 +944,74 @@ const MainHeaderComponent = ({
                 <FaCog className="text-[10px]" />
                 Action Settings
               </button>
+              <div className="my-1 h-px bg-border/60" />
+              <button
+                type="button"
+                className="other-projects-toggle"
+                aria-expanded={isOtherProjectsOpen}
+                onClick={() => setIsOtherProjectsOpen((current) => !current)}
+              >
+                <span>Other Projects</span>
+                <FaChevronDown className={`other-projects-chevron ${isOtherProjectsOpen ? "is-open" : ""}`} />
+              </button>
+              <div className={`other-projects-panel ${isOtherProjectsOpen ? "is-open" : ""}`}>
+                <div className="other-projects-panel-inner">
+                  {otherProjectRunningActions.length > 0 ? (
+                    <div className="other-projects-list">
+                      {otherProjectRunningActions.map((project) => (
+                        <section key={project.projectId} className="other-projects-group">
+                          <div className="other-projects-group-header">
+                            <div className="other-projects-group-title">{project.projectName}</div>
+                            <button
+                              type="button"
+                              className="other-projects-stop-all"
+                              disabled={runningOtherProjectStopAllId === project.projectId}
+                              onClick={() => {
+                                setRunningOtherProjectStopAllId(project.projectId);
+                                onStopAllOtherProjectTerminals(project.projectId)
+                                  .catch((error) => appendLog(`Stop all actions failed: ${String(error)}`))
+                                  .finally(() => {
+                                    setRunningOtherProjectStopAllId((current) => (current === project.projectId ? null : current));
+                                  });
+                              }}
+                            >
+                              {runningOtherProjectStopAllId === project.projectId ? "Stopping..." : "Stop all"}
+                            </button>
+                          </div>
+                          <div className="other-projects-group-actions">
+                            {project.actions.map((action) => (
+                              <div key={`${project.projectId}:${action.commandId}`} className="other-projects-action-row">
+                                <div className="other-projects-action-name" title={action.name}>
+                                  {action.name}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="other-projects-action-stop"
+                                  disabled={runningOtherProjectActionId === `${project.projectId}:${action.commandId}`}
+                                  onClick={() => {
+                                    const actionId = `${project.projectId}:${action.commandId}`;
+                                    setRunningOtherProjectActionId(actionId);
+                                    onStopOtherProjectTerminal(project.projectId, action.commandId)
+                                      .catch((error) => appendLog(`Stop action failed: ${String(error)}`))
+                                      .finally(() => {
+                                        setRunningOtherProjectActionId((current) => (current === actionId ? null : current));
+                                      });
+                                  }}
+                                >
+                                  <FaStop className="text-[9px]" />
+                                  {runningOtherProjectActionId === `${project.projectId}:${action.commandId}` ? "Stopping..." : "Stop"}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="other-projects-empty">No running actions in other projects.</div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : null}
         </div>

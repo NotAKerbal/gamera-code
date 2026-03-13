@@ -549,6 +549,103 @@ webview {
   left: calc(100% + 6px);
 }
 
+.other-projects-toggle {
+  @apply flex w-full items-center justify-between rounded-md border border-border/70 bg-black/10 px-2 py-1.5 text-left text-xs text-slate-200 transition;
+}
+
+.other-projects-toggle:hover {
+  @apply bg-black/20;
+}
+
+.other-projects-toggle--section {
+  @apply rounded-b-none rounded-t-xl px-4 py-3 text-[11px] uppercase tracking-wide text-muted;
+}
+
+.other-projects-chevron {
+  @apply text-[10px] text-slate-400;
+  transition: transform 180ms ease;
+}
+
+.other-projects-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.other-projects-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 220ms ease, opacity 180ms ease, margin-top 180ms ease;
+  margin-top: 0;
+}
+
+.other-projects-panel.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  margin-top: 0.375rem;
+}
+
+.other-projects-panel--section.is-open {
+  margin-top: 0;
+}
+
+.other-projects-panel-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.other-projects-list {
+  @apply flex flex-col gap-2;
+}
+
+.other-projects-group {
+  @apply rounded-lg border border-border/70 bg-black/10 px-3 py-2;
+}
+
+.other-projects-group-header {
+  @apply flex items-center justify-between gap-2;
+}
+
+.other-projects-group-title {
+  @apply text-[11px] font-semibold uppercase tracking-wide text-slate-300;
+}
+
+.other-projects-group-actions {
+  @apply mt-2 flex flex-col gap-1.5;
+}
+
+.other-projects-action-row {
+  @apply flex items-center justify-between gap-2 rounded-md border border-border/70 bg-black/20 px-2 py-1.5;
+}
+
+.other-projects-action-name {
+  @apply min-w-0 truncate text-xs text-slate-200;
+}
+
+.other-projects-action-stop,
+.other-projects-stop-all {
+  @apply inline-flex shrink-0 items-center justify-center gap-1 rounded-md border border-transparent px-2 py-1 text-[11px] transition;
+  background: rgb(239 68 68 / 0.14);
+  color: rgb(254 202 202);
+}
+
+.other-projects-action-stop:hover,
+.other-projects-stop-all:hover {
+  background: rgb(239 68 68 / 0.22);
+}
+
+.other-projects-action-stop:disabled,
+.other-projects-stop-all:disabled {
+  @apply cursor-not-allowed opacity-60;
+}
+
+.other-projects-stop-all {
+  @apply px-2.5;
+}
+
+.other-projects-empty {
+  @apply rounded-lg border border-dashed border-border/70 bg-black/10 px-3 py-3 text-xs text-slate-400;
+}
+
 .changelog-pop {
   @apply absolute left-0 top-7 z-30 w-72 rounded-md border border-border bg-surface/95 p-2 shadow-lg backdrop-blur;
   animation: dropdown-fade 120ms ease-out;
@@ -1332,18 +1429,18 @@ webview {
 }
 
 .workspace-segment-count.count-running {
-  background: rgba(16, 185, 129, 0.16);
-  color: rgb(110, 231, 183);
+  background: rgb(16, 185, 129);
+  color: rgb(6, 78, 59);
 }
 
 .workspace-segment-count.count-review {
-  background: rgba(245, 158, 11, 0.16);
-  color: rgb(253, 186, 116);
+  background: rgb(245, 158, 11);
+  color: rgb(120, 53, 15);
 }
 
 .workspace-segment-count.count-finished {
-  background: rgba(96, 165, 250, 0.16);
-  color: rgb(147, 197, 253);
+  background: rgb(96, 165, 250);
+  color: rgb(30, 64, 175);
 }
 
 .workspace-segment-settings {
@@ -1417,6 +1514,44 @@ webview {
 
 .project-row {
   @apply flex min-w-0 w-full items-center justify-between gap-2 overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm text-left text-muted transition;
+}
+
+.project-row-condensed {
+  @apply gap-1.5;
+}
+
+.project-row-condensed .project-row-label {
+  font-size: 13px;
+}
+
+.project-row-meta {
+  @apply ml-1 flex shrink-0 items-center gap-1;
+}
+
+.project-row-count {
+  @apply inline-flex min-w-[18px] items-center justify-center rounded-md px-1.5 text-[10px] font-semibold leading-none;
+}
+
+.project-row-count.count-running {
+  background: rgb(59 130 246 / 0.16);
+  color: #bfdbfe;
+}
+
+.project-row-count.count-finished {
+  background: rgb(16 185 129 / 0.16);
+  color: #bbf7d0;
+}
+
+[data-theme="dawn"] .project-row-count.count-running,
+[data-theme="linen"] .project-row-count.count-running {
+  background: rgb(59 130 246 / 0.14);
+  color: #1d4ed8;
+}
+
+[data-theme="dawn"] .project-row-count.count-finished,
+[data-theme="linen"] .project-row-count.count-finished {
+  background: rgb(16 185 129 / 0.14);
+  color: #047857;
 }
 
 .project-shortcut-badge {

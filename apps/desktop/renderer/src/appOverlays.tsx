@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { FaGripVertical, FaTimes, FaTrashAlt } from "react-icons/fa";
+import { FaChevronDown, FaGripVertical, FaStop, FaTimes, FaTrashAlt } from "react-icons/fa";
 import type {
   GitRepositoryCandidate,
   Project,
@@ -29,6 +29,15 @@ type ProjectSettingsDraft = {
 type ProjectActionsSettingsDraft = {
   focusCommandId?: string;
   projectSettingsCommands: Array<ProjectCommand & { stayRunning: boolean }>;
+};
+type OtherProjectRunningActionGroup = {
+  projectId: string;
+  projectName: string;
+  actions: Array<{
+    commandId: string;
+    name: string;
+    updatedAt: string;
+  }>;
 };
 
 const normalizeHotkeyKey = (key: string): string => {
@@ -539,6 +548,9 @@ export const ProjectSettingsModal = memo(({
 
 type ProjectActionsSettingsModalProps = {
   initialDraft: ProjectActionsSettingsDraft;
+  otherProjectRunningActions: OtherProjectRunningActionGroup[];
+  onStopOtherProjectTerminal: (projectId: string, commandId: string) => Promise<void>;
+  onStopAllOtherProjectTerminals: (projectId: string) => Promise<void>;
   onClose: () => void;
   onSave: (draft: ProjectActionsSettingsDraft) => Promise<void>;
   appendLog: (line: string) => void;
@@ -546,6 +558,9 @@ type ProjectActionsSettingsModalProps = {
 
 export const ProjectActionsSettingsModal = memo(({
   initialDraft,
+  otherProjectRunningActions,
+  onStopOtherProjectTerminal,
+  onStopAllOtherProjectTerminals,
   onClose,
   onSave,
   appendLog
@@ -562,6 +577,9 @@ export const ProjectActionsSettingsModal = memo(({
     index: number;
     mode: "before" | "append";
   } | null>(null);
+  const [isOtherProjectsOpen, setIsOtherProjectsOpen] = useState(false);
+  const [runningOtherProjectActionId, setRunningOtherProjectActionId] = useState<string | null>(null);
+  const [runningOtherProjectStopAllId, setRunningOtherProjectStopAllId] = useState<string | null>(null);
   const canReorder = !Boolean(initialDraft.focusCommandId);
   const focusedCommandIndex = initialDraft.focusCommandId
     ? projectSettingsCommands.findIndex((command) => command.id === initialDraft.focusCommandId)
@@ -1009,6 +1027,76 @@ export const ProjectActionsSettingsModal = memo(({
             </div>
             </>
             ) : null}
+
+            <section className="rounded-xl border border-border/80 bg-black/20">
+              <button
+                type="button"
+                className="other-projects-toggle other-projects-toggle--section"
+                aria-expanded={isOtherProjectsOpen}
+                onClick={() => setIsOtherProjectsOpen((current) => !current)}
+              >
+                <span>Other Projects</span>
+                <FaChevronDown className={`other-projects-chevron ${isOtherProjectsOpen ? "is-open" : ""}`} />
+              </button>
+              <div className={`other-projects-panel other-projects-panel--section ${isOtherProjectsOpen ? "is-open" : ""}`}>
+                <div className="other-projects-panel-inner">
+                  {otherProjectRunningActions.length > 0 ? (
+                    <div className="other-projects-list">
+                      {otherProjectRunningActions.map((project) => (
+                        <section key={project.projectId} className="other-projects-group">
+                          <div className="other-projects-group-header">
+                            <div className="other-projects-group-title">{project.projectName}</div>
+                            <button
+                              type="button"
+                              className="other-projects-stop-all"
+                              disabled={runningOtherProjectStopAllId === project.projectId}
+                              onClick={() => {
+                                setRunningOtherProjectStopAllId(project.projectId);
+                                onStopAllOtherProjectTerminals(project.projectId)
+                                  .catch((error) => appendLog(`Stop all actions failed: ${String(error)}`))
+                                  .finally(() => {
+                                    setRunningOtherProjectStopAllId((current) => (current === project.projectId ? null : current));
+                                  });
+                              }}
+                            >
+                              {runningOtherProjectStopAllId === project.projectId ? "Stopping..." : "Stop all"}
+                            </button>
+                          </div>
+                          <div className="other-projects-group-actions">
+                            {project.actions.map((action) => (
+                              <div key={`${project.projectId}:${action.commandId}`} className="other-projects-action-row">
+                                <div className="other-projects-action-name" title={action.name}>
+                                  {action.name}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="other-projects-action-stop"
+                                  disabled={runningOtherProjectActionId === `${project.projectId}:${action.commandId}`}
+                                  onClick={() => {
+                                    const actionId = `${project.projectId}:${action.commandId}`;
+                                    setRunningOtherProjectActionId(actionId);
+                                    onStopOtherProjectTerminal(project.projectId, action.commandId)
+                                      .catch((error) => appendLog(`Stop action failed: ${String(error)}`))
+                                      .finally(() => {
+                                        setRunningOtherProjectActionId((current) => (current === actionId ? null : current));
+                                      });
+                                  }}
+                                >
+                                  <FaStop className="text-[9px]" />
+                                  {runningOtherProjectActionId === `${project.projectId}:${action.commandId}` ? "Stopping..." : "Stop"}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="other-projects-empty">No running actions in other projects.</div>
+                  )}
+                </div>
+              </div>
+            </section>
 
             {!initialDraft.focusCommandId ? (
             <div className="flex flex-wrap items-center gap-2">

@@ -1091,6 +1091,29 @@ export const App = () => {
     () => activeProjectTerminalState?.terminals ?? [],
     [activeProjectTerminalState]
   );
+  const otherProjectRunningActions = useMemo(
+    () =>
+      projects
+        .filter((project) => !project.archivedAt && project.id !== activeProjectId)
+        .map((project) => {
+          const runningActions = (projectTerminalById[project.id]?.terminals ?? [])
+            .filter((terminal) => terminal.running)
+            .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+            .map((terminal) => ({
+              commandId: terminal.commandId,
+              name: terminal.name,
+              updatedAt: terminal.updatedAt
+            }));
+          return {
+            projectId: project.id,
+            projectName: project.name,
+            actions: runningActions
+          };
+        })
+        .filter((project) => project.actions.length > 0)
+        .sort((left, right) => left.projectName.localeCompare(right.projectName)),
+    [activeProjectId, projectTerminalById, projects]
+  );
   const activeProjectPreviewUrl = useMemo(
     () => (activeProjectId ? projectPreviewUrlById[activeProjectId] ?? "" : ""),
     [activeProjectId, projectPreviewUrlById]
@@ -1530,6 +1553,29 @@ export const App = () => {
     projectById,
     runStateByThreadId,
     threadAwaitingInputById,
+    threadFinishedUnreadById,
+    threads
+  ]);
+  const projectThreadMetrics = useMemo(() => {
+    const next: Record<string, { runningCount: number; finishedCount: number }> = {};
+    threads.forEach((thread) => {
+      const project = projectById[thread.projectId];
+      if (!project || project.archivedAt || thread.archivedAt) {
+        return;
+      }
+      const metric = next[project.id] ?? { runningCount: 0, finishedCount: 0 };
+      if ((runStateByThreadId[thread.id] ?? "idle") === "running") {
+        metric.runningCount += 1;
+      }
+      if (Boolean(threadFinishedUnreadById[thread.id])) {
+        metric.finishedCount += 1;
+      }
+      next[project.id] = metric;
+    });
+    return next;
+  }, [
+    projectById,
+    runStateByThreadId,
     threadFinishedUnreadById,
     threads
   ]);
@@ -1974,6 +2020,21 @@ export const App = () => {
     }));
     return nextState;
   };
+
+  useEffect(() => {
+    const visibleProjectIds = projects
+      .filter((project) => !project.archivedAt)
+      .map((project) => project.id)
+      .filter((projectId) => !(projectId in projectTerminalById));
+    if (visibleProjectIds.length === 0) {
+      return;
+    }
+    visibleProjectIds.forEach((projectId) => {
+      loadProjectTerminalState(projectId).catch((error) => {
+        setLogs((prev) => [...prev, `Terminal state preload failed: ${String(error)}`]);
+      });
+    });
+  }, [projectTerminalById, projects]);
 
   const loadGitSnapshot = async (projectId: string) => {
     const snapshot = await api.git.getSnapshot({ projectId });
@@ -3271,49 +3332,49 @@ export const App = () => {
   }, [threads]);
 
   useEffect(() => {
-    let refreshTimer: number | null = null;
-    let refreshInFlight = false;
-    let refreshQueued = false;
+    const refreshTimers = new Map<string, number>();
+    const refreshInFlight = new Set<string>();
+    const refreshQueued = new Set<string>();
 
-    const refreshActiveProjectTerminalState = () => {
-      if (!activeProjectId) {
-        refreshQueued = false;
+    const refreshProjectTerminalState = (projectId: string) => {
+      if (!projectId) {
         return;
       }
-      if (refreshInFlight) {
-        refreshQueued = true;
+      if (refreshInFlight.has(projectId)) {
+        refreshQueued.add(projectId);
         return;
       }
-      refreshInFlight = true;
+      refreshInFlight.add(projectId);
       api.projectTerminal
-        .getState({ projectId: activeProjectId })
+        .getState({ projectId })
         .then((state) => {
-          const nextState = applyDismissedTerminalErrors(activeProjectId, state);
+          const nextState = applyDismissedTerminalErrors(projectId, state);
           setProjectTerminalById((prev) => ({
             ...prev,
-            [activeProjectId]: nextState
+            [projectId]: nextState
           }));
         })
         .catch((error) => {
           setLogs((prev) => [...prev, `Terminal state refresh failed: ${String(error)}`]);
         })
         .finally(() => {
-          refreshInFlight = false;
-          if (refreshQueued) {
-            refreshQueued = false;
-            refreshActiveProjectTerminalState();
+          refreshInFlight.delete(projectId);
+          if (refreshQueued.has(projectId)) {
+            refreshQueued.delete(projectId);
+            refreshProjectTerminalState(projectId);
           }
         });
     };
 
-    const scheduleTerminalRefresh = (delayMs: number) => {
-      if (refreshTimer) {
+    const scheduleTerminalRefresh = (projectId: string, delayMs: number) => {
+      if (!projectId || refreshTimers.has(projectId)) {
         return;
       }
-      refreshTimer = window.setTimeout(() => {
-        refreshTimer = null;
-        refreshActiveProjectTerminalState();
+      const timer = window.setTimeout(() => {
+        refreshTimers.delete(projectId);
+        refreshProjectTerminalState(projectId);
       }, delayMs);
+      refreshTimers.set(projectId, timer);
     };
 
     const unsubscribe = api.projectTerminal.onEvent((event: ProjectTerminalEvent) => {
@@ -3342,16 +3403,18 @@ export const App = () => {
         });
       }
 
+      if (event.type === "status" || event.type === "exit") {
+        scheduleTerminalRefresh(event.projectId, 0);
+        return;
+      }
+
       if (activeProjectId && event.projectId === activeProjectId) {
         const delayMs = event.type === "stdout" || event.type === "stderr" ? 120 : 0;
-        scheduleTerminalRefresh(delayMs);
+        scheduleTerminalRefresh(event.projectId, delayMs);
       }
     });
     return () => {
-      if (refreshTimer) {
-        window.clearTimeout(refreshTimer);
-        refreshTimer = null;
-      }
+      refreshTimers.forEach((timer) => window.clearTimeout(timer));
       unsubscribe();
     };
   }, [activeProjectId]);
@@ -4254,6 +4317,39 @@ export const App = () => {
     setProjectTerminalById((prev) => ({
       ...prev,
       [activeProjectId]: nextState
+    }));
+  };
+
+  const stopProjectTerminalById = async (projectId: string, commandId?: string) => {
+    const normalizedProjectId = projectId.trim();
+    const normalizedCommandId = commandId?.trim();
+    if (!normalizedProjectId) {
+      return;
+    }
+    if (!normalizedCommandId) {
+      setLogs((prev) => [...prev, `Terminal stop failed: missing command id for project ${normalizedProjectId}.`]);
+      return;
+    }
+    await api.projectTerminal.stop({ projectId: normalizedProjectId, commandId: normalizedCommandId });
+    const state = await api.projectTerminal.getState({ projectId: normalizedProjectId });
+    const nextState = applyDismissedTerminalErrors(normalizedProjectId, state);
+    setProjectTerminalById((prev) => ({
+      ...prev,
+      [normalizedProjectId]: nextState
+    }));
+  };
+
+  const stopAllProjectTerminalsById = async (projectId: string) => {
+    const normalizedProjectId = projectId.trim();
+    if (!normalizedProjectId) {
+      return;
+    }
+    await api.projectTerminal.stop({ projectId: normalizedProjectId });
+    const state = await api.projectTerminal.getState({ projectId: normalizedProjectId });
+    const nextState = applyDismissedTerminalErrors(normalizedProjectId, state);
+    setProjectTerminalById((prev) => ({
+      ...prev,
+      [normalizedProjectId]: nextState
     }));
   };
 
@@ -8408,6 +8504,9 @@ TODO: Describe what this skill does.
               onOpenProjectWebLink={openProjectWebLink}
               activeProjectId={activeProjectId}
               activeProjectTerminals={activeProjectTerminals}
+              otherProjectRunningActions={otherProjectRunningActions}
+              onStopOtherProjectTerminal={stopProjectTerminalById}
+              onStopAllOtherProjectTerminals={stopAllProjectTerminalsById}
               systemTerminals={systemTerminals}
               onOpenProjectTerminal={openProjectTerminal}
               onOpenTerminalPopout={openTerminalPopout}
@@ -8507,6 +8606,8 @@ TODO: Describe what this skill does.
                   const projectListOpen = projectPersistedOpen || active;
                   const menuOpen = threadMenuProjectId === project.id;
                   const setupState = projectSetupById[project.id];
+                  const projectMetrics = projectThreadMetrics[project.id] ?? { runningCount: 0, finishedCount: 0 };
+                  const showProjectThreadFeedback = !active && (projectMetrics.runningCount > 0 || projectMetrics.finishedCount > 0);
                   const setupRunning = setupState?.status === "running";
                   const FolderIcon = projectListOpen ? FaFolderOpen : FaFolder;
                   const showProjectActions = active || menuOpen;
@@ -8572,7 +8673,7 @@ TODO: Describe what this skill does.
                               <FolderIcon className="project-folder-icon" aria-hidden="true" />
                             </button>
                             <button
-                              className={active ? "project-row active" : "project-row"}
+                              className={`${active ? "project-row active" : "project-row"} ${showProjectThreadFeedback ? "project-row-condensed" : ""}`}
                               onClick={() => {
                                 focusProjectFromSidebar(project.id).catch((error) => {
                                   setLogs((prev) => [...prev, `Project focus failed: ${String(error)}`]);
@@ -8582,7 +8683,7 @@ TODO: Describe what this skill does.
                               title="Double-click to rename project"
                             >
                               <span className="min-w-0 flex-1 overflow-hidden">
-                                <span className="block truncate">{project.name}</span>
+                                <span className="project-row-label block truncate">{project.name}</span>
                                 {setupState && (
                                   <span
                                     className={`mt-0.5 block truncate text-[10px] leading-4 ${
@@ -8593,6 +8694,20 @@ TODO: Describe what this skill does.
                                   </span>
                                 )}
                               </span>
+                              {showProjectThreadFeedback && (
+                                <span className="project-row-meta" title="Project thread status">
+                                  {projectMetrics.runningCount > 0 && (
+                                    <span className="project-row-count count-running" title={`${projectMetrics.runningCount} running thread${projectMetrics.runningCount === 1 ? "" : "s"}`}>
+                                      {projectMetrics.runningCount}
+                                    </span>
+                                  )}
+                                  {projectMetrics.finishedCount > 0 && (
+                                    <span className="project-row-count count-finished" title={`${projectMetrics.finishedCount} newly completed thread${projectMetrics.finishedCount === 1 ? "" : "s"}`}>
+                                      {projectMetrics.finishedCount}
+                                    </span>
+                                  )}
+                                </span>
+                              )}
                               {setupState?.status === "running" && (
                                 <FaSyncAlt className="ml-2 shrink-0 animate-spin text-[10px] text-slate-400" />
                               )}
@@ -10712,6 +10827,9 @@ TODO: Describe what this skill does.
       {showProjectActionsSettings && projectActionsSettingsInitialDraft && (
         <ProjectActionsSettingsModal
           initialDraft={projectActionsSettingsInitialDraft}
+          otherProjectRunningActions={otherProjectRunningActions}
+          onStopOtherProjectTerminal={stopProjectTerminalById}
+          onStopAllOtherProjectTerminals={stopAllProjectTerminalsById}
           onClose={closeProjectActionsSettingsModal}
           onSave={saveProjectActionsSettings}
           appendLog={appendLog}
