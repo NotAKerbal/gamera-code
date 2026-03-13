@@ -69,6 +69,7 @@ export const initializeDatabase = (dbPath: string) => {
       node_ok INTEGER NOT NULL,
       npm_ok INTEGER NOT NULL,
       codex_ok INTEGER NOT NULL,
+      opencode_ok INTEGER NOT NULL,
       gemini_ok INTEGER NOT NULL,
       payload TEXT NOT NULL
     );
@@ -237,6 +238,14 @@ export const initializeDatabase = (dbPath: string) => {
   }
   db.exec("UPDATE projects SET color = '#64748b' WHERE color IS NULL OR trim(color) = '';");
   db.exec("CREATE INDEX IF NOT EXISTS idx_projects_workspace_updated ON projects(workspace_id, updated_at DESC);");
+
+  const installCheckColumns = db
+    .prepare("PRAGMA table_info(install_checks)")
+    .all() as Array<{ name: string }>;
+  const hasOpenCodeOkColumn = installCheckColumns.some((column) => column.name === "opencode_ok");
+  if (!hasOpenCodeOkColumn) {
+    db.exec("ALTER TABLE install_checks ADD COLUMN opencode_ok INTEGER NOT NULL DEFAULT 0;");
+  }
 
   const firstWorkspace = db
     .prepare("SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1")

@@ -245,6 +245,7 @@ export class InstallerManager {
     const rg = await existsInPath(this.runner, "rg", ["--version"]);
     const codex = await this.checkHarnessHealth("codex");
     const opencode = await this.checkHarnessHealth("opencode");
+    const gemini = await this.checkHarnessHealth("gemini");
     const bundledRg = resolveBundledRipgrepBinaryPath();
     const rgOk = rg.ok || Boolean(bundledRg);
 
@@ -259,7 +260,8 @@ export class InstallerManager {
         message: rg.ok ? "ok" : bundledRg ? "Bundled with app" : rg.message
       },
       { key: "codex", ok: codex.ok, version: codex.version, message: codex.message },
-      { key: "opencode", ok: opencode.ok, version: opencode.version, message: opencode.message }
+      { key: "opencode", ok: opencode.ok, version: opencode.version, message: opencode.message },
+      { key: "gemini", ok: gemini.ok, version: gemini.version, message: gemini.message }
     ];
 
     const status: InstallStatus = {
@@ -269,8 +271,8 @@ export class InstallerManager {
       rgOk,
       codexOk: codex.ok,
       opencodeOk: opencode.ok,
-      geminiOk: true,
-      readyHarnessIds: [codex.ok ? "codex" : null, opencode.ok ? "opencode" : null].filter(
+      geminiOk: gemini.ok,
+      readyHarnessIds: [codex.ok ? "codex" : null, opencode.ok ? "opencode" : null, gemini.ok ? "gemini" : null].filter(
         (value): value is HarnessId => Boolean(value)
       ),
       details
@@ -403,7 +405,10 @@ export class InstallerManager {
     return parseOpenCodeAuthListOutputV2(result.stdout || result.stderr);
   }
 
-  async getAvailableModels(input?: { opencodeBinaryOverride?: string }): Promise<HarnessAvailableModels> {
+  async getAvailableModels(input?: {
+    opencodeBinaryOverride?: string;
+    geminiBinaryOverride?: string;
+  }): Promise<HarnessAvailableModels> {
     const available: HarnessAvailableModels = {};
 
     const codexModels = await this.getCodexAvailableModels();
@@ -414,6 +419,11 @@ export class InstallerManager {
     const opencodeModels = await this.getOpenCodeAvailableModels(input?.opencodeBinaryOverride);
     if (opencodeModels && opencodeModels.length > 0) {
       available.opencode = opencodeModels;
+    }
+
+    const geminiModels = await this.getGeminiAvailableModels(input?.geminiBinaryOverride);
+    if (geminiModels && geminiModels.length > 0) {
+      available.gemini = geminiModels;
     }
 
     return available;
@@ -487,6 +497,20 @@ export class InstallerManager {
     return matches.length > 0 ? matches : null;
   }
 
+  private async getGeminiAvailableModels(binaryOverride?: string): Promise<string[] | null> {
+    const adapter = getPtyHarnessAdapter("gemini");
+    if (!adapter) {
+      return null;
+    }
+
+    const health = await adapter.healthCheck(binaryOverride ?? this.repository.getSettings().harnessSettings.gemini?.binaryOverride);
+    if (!health.ok) {
+      return null;
+    }
+
+    return (await adapter.discoverAvailableModels?.(binaryOverride)) ?? getHarnessModelSuggestions("gemini");
+  }
+
   async installCli(provider: Provider): Promise<{ ok: boolean; logs: string[] }> {
     const definition = getHarnessDefinition(provider);
     if (definition.bundled) {
@@ -500,12 +524,12 @@ export class InstallerManager {
     }
 
     const adapter = getPtyHarnessAdapter(provider);
-    if (adapter && provider === "opencode") {
+    if (adapter) {
       const install = adapter.getInstallCommand();
       return {
         ok: true,
         logs: [
-          "OpenCode is not bundled with the desktop app.",
+          `${definition.label} is not bundled with the desktop app.`,
           `Install it with: ${install.command} ${install.args.join(" ")}`
         ]
       };
@@ -542,17 +566,9 @@ export class InstallerManager {
     }
 
     const actionable = this.mapToActionableDependencies(missing);
-    if (actionable.length === 0) {
-      pushLog("Missing dependencies do not require a package-manager install.");
-      const status = await this.doctor();
-      return {
-        ok: this.resolveMissingDependencies(status, requested).length === 0,
-        logs,
-        status
-      };
-    }
-
-    const plan = await this.buildInstallPlan(actionable);
+    const systemPlan = await this.buildInstallPlan(actionable);
+    const cliPlan = await this.buildCliInstallPlan(missing);
+    const plan = [...systemPlan, ...cliPlan];
     if (plan.length === 0) {
       pushLog("No supported package manager found for automatic installation on this system.");
       const status = await this.doctor();
@@ -622,6 +638,9 @@ export class InstallerManager {
       if (target === "opencode") {
         return !status.opencodeOk;
       }
+      if (target === "gemini") {
+        return !status.geminiOk;
+      }
       return false;
     });
   }
@@ -657,6 +676,24 @@ export class InstallerManager {
       .filter((value): value is "node" | "git" | "rg" => Boolean(value));
 
     return Array.from(new Set(mapped));
+  }
+
+  private async buildCliInstallPlan(targets: InstallDependencyKey[]): Promise<InstallCommand[]> {
+    const providers = targets.filter(
+      (target): target is Exclude<Provider, "codex"> => target === "opencode" || target === "gemini"
+    );
+    return providers.map((provider) => {
+      const adapter = getPtyHarnessAdapter(provider);
+      if (!adapter) {
+        return null;
+      }
+      const install = adapter.getInstallCommand();
+      return {
+        label: `Install ${provider} CLI`,
+        command: install.command,
+        args: install.args
+      };
+    }).filter((step): step is InstallCommand => Boolean(step));
   }
 
   private async buildInstallPlan(targets: Array<"node" | "git" | "rg">): Promise<InstallCommand[]> {

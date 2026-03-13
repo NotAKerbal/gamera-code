@@ -1,6 +1,7 @@
 export interface HarnessDefaultsById {
   codex: CodexThreadOptions;
   opencode: CodexThreadOptions;
+  gemini: CodexThreadOptions;
 }
 
 export interface HarnessCapabilityMap {
@@ -26,11 +27,13 @@ export interface HarnessCapabilityMap {
     | "web_search"
     | "approval_policy"
     | "collaboration_mode";
+  gemini: "streaming";
 }
 
 export interface HarnessModelGroupMap {
   codex: "flagship" | "codex" | "spark";
   opencode: "openai" | "anthropic" | "google" | "xai" | "deepseek" | "glm" | "kimi" | "vertex_oss" | "minimax";
+  gemini: "google";
 }
 
 export type HarnessId = keyof HarnessDefaultsById;
@@ -82,9 +85,10 @@ export interface HarnessModelProviderEntry<T extends HarnessId = HarnessId> {
   models: HarnessModelCatalogEntry<T>[];
 }
 
+export type HarnessBadgeIcon = "openai" | "opencode" | "google" | "gemini";
+
 export interface HarnessBadgeAssets {
-  iconOnLightPath: string;
-  iconOnDarkPath: string;
+  icon: HarnessBadgeIcon;
 }
 
 export type HarnessProviderModelMap = Partial<
@@ -361,7 +365,8 @@ export interface InstallStatus {
   details: InstallDetail[];
 }
 
-export type InstallDependencyKey = "node" | "npm" | "git" | "rg" | "codex" | "opencode";
+export type InstallDependencyKey = "node" | "npm" | "git" | "rg" | "codex" | "opencode" | "gemini";
+export type InstallableProvider = HarnessId;
 
 export interface InstallDependenciesResult {
   ok: boolean;

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.0
+- Gemini CLI support
+
 ## 0.6.7
 - Improved model picker
 

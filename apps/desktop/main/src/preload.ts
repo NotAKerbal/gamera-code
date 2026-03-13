@@ -301,7 +301,8 @@ const api: DesktopApiWithGitExtras = {
     installCli: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallCli, input),
     installDependencies: (input) => ipcRenderer.invoke(IPC_CHANNELS.installerInstallDependencies, input),
     getCodexAuthStatus: () => ipcRenderer.invoke(installerGetCodexAuthStatusChannel),
-    getAvailableModels: (input?: { opencodeBinaryOverride?: string }) => ipcRenderer.invoke(installerGetAvailableModelsChannel, input),
+    getAvailableModels: (input?: { opencodeBinaryOverride?: string; geminiBinaryOverride?: string }) =>
+      ipcRenderer.invoke(installerGetAvailableModelsChannel, input),
     loginCodex: () => ipcRenderer.invoke(installerLoginCodexChannel),
     logoutCodex: () => ipcRenderer.invoke(installerLogoutCodexChannel),
     getOpenCodeAuthStatus: (input?: { binaryOverride?: string }) => ipcRenderer.invoke(installerGetOpenCodeAuthStatusChannel, input),

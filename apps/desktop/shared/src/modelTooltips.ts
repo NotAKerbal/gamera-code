@@ -15,11 +15,29 @@ const MODEL_TOOLTIPS: Record<string, string> = {
   "opencode/gemini-3.1-pro": "Highest-capability Gemini 3.1 Pro route for complex reasoning, coding, and multimodal work.",
   "opencode/gemini-3-pro": "Balanced Gemini 3 Pro route for general reasoning and coding.",
   "opencode/gemini-3-flash": "Low-latency Gemini 3 Flash route for fast chat, extraction, and high-throughput tasks.",
+  "opencode/gemini-2.5-pro": "Highest-capability Gemini 2.5 Pro route for complex reasoning, coding, and multimodal work.",
+  "opencode/gemini-2.5-flash": "Balanced Gemini 2.5 Flash route for fast reasoning, coding, and general assistant tasks.",
+  "opencode/gemini-2.5-flash-lite":
+    "Lowest-latency Gemini 2.5 Flash-Lite route for lightweight chat, extraction, and high-throughput tasks.",
+  "gemini-3.1-pro-preview": "Gemini CLI preview route for Gemini 3.1 Pro, aimed at advanced reasoning and coding.",
+  "gemini-3-flash-preview": "Gemini CLI preview route for Gemini 3 Flash, optimized for low latency and high throughput.",
+  "gemini-2.5-pro": "Highest-capability Gemini 2.5 Pro route for complex reasoning, coding, and multimodal work.",
+  "gemini-2.5-flash": "Balanced Gemini 2.5 Flash route for fast reasoning, coding, and general assistant tasks.",
+  "gemini-2.5-flash-lite": "Lowest-latency Gemini 2.5 Flash-Lite route for lightweight chat, extraction, and high-throughput tasks.",
   "google-vertex/gemini-3.1-pro-preview":
     "Vertex AI preview route for Gemini 3.1 Pro, aimed at complex reasoning, coding, and multimodal work.",
   "google-vertex/gemini-3-pro-preview": "Vertex AI preview route for Gemini 3 Pro, tuned for general reasoning and coding.",
   "google-vertex/gemini-3-flash-preview":
     "Vertex AI preview route for Gemini 3 Flash, optimized for low latency and high throughput.",
+  "google-vertex/gemini-2.5-pro": "Vertex AI route for Gemini 2.5 Pro, aimed at complex reasoning, coding, and multimodal work.",
+  "google-vertex/gemini-2.5-pro-preview-06-05":
+    "Vertex AI preview route for Gemini 2.5 Pro, exposed as the 06-05 preview snapshot for advanced reasoning and coding.",
+  "google-vertex/gemini-2.5-flash":
+    "Vertex AI route for Gemini 2.5 Flash, tuned for lower latency reasoning, coding, and multimodal tasks.",
+  "google-vertex/gemini-2.5-flash-preview-05-20":
+    "Vertex AI preview route for Gemini 2.5 Flash, exposed as the 05-20 preview snapshot for fast reasoning and tool use.",
+  "google-vertex/gemini-2.5-flash-lite-preview-06-17":
+    "Vertex AI preview route for Gemini 2.5 Flash-Lite, exposed as the 06-17 preview snapshot for the fastest lightweight tasks.",
   "opencode/gpt-5.3-codex": "Latest frontier agentic coding model.",
   "opencode/gpt-5.3-codex-spark": "Faster Codex-tuned GPT-5.3 variant for quick edits and lighter agent loops.",
   "opencode/gpt-5.2-codex": "Frontier agentic coding model.",

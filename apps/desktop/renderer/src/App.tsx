@@ -7838,10 +7838,9 @@ TODO: Describe what this skill does.
   const codexAuthBlocked = Boolean(
     activeHarnessId === "codex" && codexAuthStatus?.requiresOpenaiAuth && !codexAuthStatus?.authenticated
   );
-  const visibleHarnesses: Partial<Record<HarnessId, boolean>> = {
-    codex: installStatus ? installStatus.readyHarnessIds.includes("codex") : true,
-    opencode: installStatus ? installStatus.readyHarnessIds.includes("opencode") : true
-  };
+  const visibleHarnesses: Partial<Record<HarnessId, boolean>> = Object.fromEntries(
+    SUPPORTED_HARNESSES.map((harness) => [harness.id, installStatus ? installStatus.readyHarnessIds.includes(harness.id) : true])
+  ) as Partial<Record<HarnessId, boolean>>;
   const visibleHarnessCount = SUPPORTED_HARNESSES.filter((harness) => visibleHarnesses[harness.id] !== false).length;
   const selectedComposerModelRow = useMemo(
     () =>
@@ -10800,7 +10799,7 @@ TODO: Describe what this skill does.
       {showSetupModal && installStatus && (
         <SetupModal
           installStatus={installStatus}
-          setupDescription="Install the shared tooling once, then make at least one harness available. Codex is bundled with the app. OpenCode can be installed separately."
+          setupDescription="Install the shared tooling once, then make at least one harness available. Codex is bundled with the app. OpenCode and Gemini can be installed separately."
           requiredSetupKeys={REQUIRED_SETUP_KEYS}
           setupInstalling={setupInstalling}
           setupPermissionGranted={setupPermissionGranted}

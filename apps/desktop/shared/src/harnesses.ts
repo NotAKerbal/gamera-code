@@ -46,13 +46,16 @@ const DEFAULT_OPENCODE_OPTIONS: CodexThreadOptions = {
   approvalPolicy: "on-request"
 };
 
+const DEFAULT_GEMINI_OPTIONS: CodexThreadOptions = {
+  model: "gemini-2.5-pro"
+};
+
 export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
   {
     id: "codex",
     label: "Codex",
     badge: {
-      iconOnLightPath: "/harness/codex-on-light.svg",
-      iconOnDarkPath: "/harness/codex-on-dark.svg"
+      icon: "openai"
     },
     capabilities: [
       "streaming",
@@ -108,8 +111,7 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
     id: "opencode",
     label: "OpenCode",
     badge: {
-      iconOnLightPath: "/harness/opencode-on-light.svg",
-      iconOnDarkPath: "/harness/opencode-on-dark.svg"
+      icon: "opencode"
     },
     capabilities: [
       "streaming",
@@ -154,9 +156,20 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
           { value: "opencode/gemini-3.1-pro", label: "Gemini 3.1 Pro" },
           { value: "opencode/gemini-3-pro", label: "Gemini 3 Pro" },
           { value: "opencode/gemini-3-flash", label: "Gemini 3 Flash" },
+          { value: "opencode/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+          { value: "opencode/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+          { value: "opencode/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
           { value: "google-vertex/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
           { value: "google-vertex/gemini-3-pro-preview", label: "Gemini 3 Pro Preview" },
-          { value: "google-vertex/gemini-3-flash-preview", label: "Gemini 3 Flash Preview" }
+          { value: "google-vertex/gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
+          { value: "google-vertex/gemini-2.5-pro", label: "Gemini 2.5 Pro (Vertex)" },
+          { value: "google-vertex/gemini-2.5-pro-preview-06-05", label: "Gemini 2.5 Pro Preview 06-05" },
+          { value: "google-vertex/gemini-2.5-flash", label: "Gemini 2.5 Flash (Vertex)" },
+          { value: "google-vertex/gemini-2.5-flash-preview-05-20", label: "Gemini 2.5 Flash Preview 05-20" },
+          {
+            value: "google-vertex/gemini-2.5-flash-lite-preview-06-17",
+            label: "Gemini 2.5 Flash-Lite Preview 06-17"
+          }
         ],
         defaultModel: "opencode/gemini-3.1-pro"
       },
@@ -232,6 +245,37 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
         "This guided setup can automatically install missing dependencies for this app: Node.js/npm, Git, ripgrep, and the OpenCode CLI.",
       verifyLabel: "Verify OpenCode CLI"
     }
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    badge: {
+      icon: "gemini"
+    },
+    capabilities: ["streaming"],
+    modelGroups: [
+      {
+        id: "google",
+        harnessId: "gemini",
+        label: "Google",
+        models: [
+          { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
+          { value: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
+          { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+          { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+          { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" }
+        ],
+        defaultModel: "gemini-2.5-pro"
+      }
+    ],
+    setup: {
+      requiredKeys: ["node", "npm", "git", "rg", "gemini"],
+      blockingKeys: ["gemini"],
+      installTargets: ["node", "npm", "git", "rg", "gemini"],
+      description:
+        "This guided setup can automatically install missing dependencies for this app: Node.js/npm, Git, ripgrep, and the Gemini CLI.",
+      verifyLabel: "Verify Gemini CLI"
+    }
   }
 ];
 
@@ -239,7 +283,8 @@ export const ENABLED_HARNESS_IDS = HARNESS_DESCRIPTORS.map((harness) => harness.
 
 export const DEFAULT_HARNESS_OPTIONS: Record<HarnessId, CodexThreadOptions | Record<string, never>> = {
   codex: DEFAULT_CODEX_OPTIONS,
-  opencode: DEFAULT_OPENCODE_OPTIONS
+  opencode: DEFAULT_OPENCODE_OPTIONS,
+  gemini: DEFAULT_GEMINI_OPTIONS
 };
 
 const toProviderKey = (harnessId: HarnessId, groupId: string): HarnessModelProviderKey =>

@@ -38,7 +38,8 @@ const createHarnessDefinition = (harnessId: HarnessId): HarnessDefinition => {
 
 export const HARNESS_DEFINITIONS: Record<HarnessId, HarnessDefinition> = {
   codex: createHarnessDefinition("codex"),
-  opencode: createHarnessDefinition("opencode")
+  opencode: createHarnessDefinition("opencode"),
+  gemini: createHarnessDefinition("gemini")
 };
 
 export const resolveHarnessId = (threadLike: Pick<Thread, "harnessId" | "provider"> | { harnessId?: HarnessId; provider?: HarnessId }) =>

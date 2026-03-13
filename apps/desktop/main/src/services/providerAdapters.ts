@@ -1,4 +1,10 @@
-import type { CodexThreadOptions, Provider, ProviderInstallCommand } from "@code-app/shared";
+import {
+  getDefaultHarnessModel,
+  getHarnessModelSuggestions,
+  type CodexThreadOptions,
+  type Provider,
+  type ProviderInstallCommand
+} from "@code-app/shared";
 import { createCommandRunner, type CommandRunner } from "../utils/commandRunner";
 
 export interface ThreadContext {
@@ -14,6 +20,7 @@ export interface ProviderAdapter {
   getBinaryName: (override?: string) => string;
   getInstallCommand: () => ProviderInstallCommand;
   getRunCommand: (context: ThreadContext) => { command: string; args: string[] };
+  discoverAvailableModels?: (override?: string) => Promise<string[] | null>;
   parseOutputChunk: (chunk: string) => string;
   healthCheck: (override?: string) => Promise<{ ok: boolean; version?: string; message: string }>;
 }
@@ -31,6 +38,15 @@ const buildHealthCheck = async (
 
   const line = result.stdout.split("\n")[0] || result.stderr.split("\n")[0] || "unknown";
   return { ok: true, version: line.trim(), message: "ok" };
+};
+
+const resolveSelectedModel = (provider: Provider, model?: string): string | null => {
+  const normalized = model?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return getHarnessModelSuggestions(provider).includes(normalized) ? normalized : null;
 };
 
 const createAdapter = (
@@ -52,6 +68,7 @@ const createAdapter = (
       command: context.binaryOverride || defaultBinary,
       args: []
     },
+  discoverAvailableModels: async () => getHarnessModelSuggestions(provider),
   parseOutputChunk: (chunk) => chunk,
   healthCheck: async (override) => buildHealthCheck(runner, override || defaultBinary)
 });
@@ -60,13 +77,19 @@ export const PROVIDER_ADAPTERS: Record<Provider, ProviderAdapter> = {
   codex: createAdapter("codex", "@openai/codex", "codex"),
   opencode: createAdapter("opencode", "opencode-ai", "opencode", (context) => {
     const args: string[] = [];
-    const model = context.options?.model?.trim();
+    const model = resolveSelectedModel("opencode", context.options?.model);
     if (model) {
       args.push("--model", model);
     }
     return {
       command: context.binaryOverride || "opencode",
       args
+    };
+  }),
+  gemini: createAdapter("gemini", "@google/gemini-cli", "gemini", (context) => {
+    return {
+      command: context.binaryOverride || "gemini",
+      args: ["--model", resolveSelectedModel("gemini", context.options?.model) ?? getDefaultHarnessModel("gemini") ?? "gemini-2.5-pro"]
     };
   })
 };

@@ -198,7 +198,7 @@ export interface DesktopApi {
     installCli: (input: { harnessId?: HarnessId; provider?: Provider }) => Promise<{ ok: boolean; logs: string[] }>;
     installDependencies: (input?: { targets?: InstallDependencyKey[] }) => Promise<InstallDependenciesResult>;
     getCodexAuthStatus: () => Promise<CodexAuthStatus>;
-    getAvailableModels: (input?: { opencodeBinaryOverride?: string }) => Promise<HarnessAvailableModels>;
+    getAvailableModels: (input?: { opencodeBinaryOverride?: string; geminiBinaryOverride?: string }) => Promise<HarnessAvailableModels>;
     loginCodex: () => Promise<CodexLoginResult>;
     logoutCodex: () => Promise<CodexLogoutResult>;
     getOpenCodeAuthStatus: (input?: { binaryOverride?: string }) => Promise<OpenCodeAuthStatus>;

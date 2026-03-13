@@ -574,6 +574,16 @@ export const SettingsModal = memo(({
               {SUPPORTED_HARNESSES.map((harness) => {
                 const isReady = installStatus?.readyHarnessIds.includes(harness.id) ?? false;
                 const statusDetail = installStatus?.details.find((detail) => detail.key === harness.id);
+                const binaryOverridePlaceholder =
+                  harness.id === "opencode"
+                    ? isWindows
+                      ? "C:\\Users\\<you>\\AppData\\Roaming\\npm\\opencode.cmd"
+                      : "/usr/local/bin/opencode"
+                    : harness.id === "gemini"
+                      ? isWindows
+                        ? "C:\\Users\\<you>\\AppData\\Roaming\\npm\\gemini.cmd"
+                        : "/usr/local/bin/gemini"
+                      : "";
 
                 return (
                   <section key={harness.id} className="rounded-xl border border-border/80 bg-black/20 py-2">
@@ -595,6 +605,38 @@ export const SettingsModal = memo(({
                         </span>
                       </div>
                     </div>
+
+                    {harness.id !== "codex" && (
+                      <>
+                        <div className="mx-2 border-t border-border/70" />
+                        <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                          <div className="text-sm text-muted">Binary override</div>
+                          <div className="space-y-2">
+                            <input
+                              className="input"
+                              value={settings.harnessSettings[harness.id]?.binaryOverride ?? ""}
+                              placeholder={binaryOverridePlaceholder}
+                              onChange={(event) =>
+                                setSettings((prev) => ({
+                                  ...prev,
+                                  harnessSettings: {
+                                    ...prev.harnessSettings,
+                                    [harness.id]: {
+                                      ...prev.harnessSettings[harness.id],
+                                      binaryOverride: event.target.value
+                                    }
+                                  }
+                                }))
+                              }
+                            />
+                            <div className="text-xs text-slate-500">
+                              Leave blank to use PATH. On Windows, npm-installed CLIs usually live under your roaming npm
+                              folder as a <span className="font-mono">{harness.id}.cmd</span> shim.
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
 
                     {harness.id === "codex" && (
                       <>
@@ -701,6 +743,19 @@ export const SettingsModal = memo(({
                                 No authentication methods configured.
                               </div>
                             )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {harness.id === "gemini" && (
+                      <>
+                        <div className="mx-2 border-t border-border/70" />
+                        <div className="mx-2 grid gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                          <div className="text-sm text-muted">Authentication</div>
+                          <div className="rounded-lg border border-border/70 bg-black/10 px-3 py-3 text-xs text-slate-400">
+                            Gemini authentication is managed by the Gemini CLI. If the CLI does not prompt automatically on
+                            first use, run <span className="font-mono text-slate-300">gemini auth login</span> in your terminal.
                           </div>
                         </div>
                       </>

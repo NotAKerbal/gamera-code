@@ -37,7 +37,8 @@ const DEFAULT_SETTINGS = {
   defaultHarnessId: "codex",
   harnessSettings: {
     codex: {},
-    opencode: {}
+    opencode: {},
+    gemini: {}
   },
   binaryOverrides: {},
   envVars: {},
@@ -93,11 +94,8 @@ type ProjectModel = Project & { workspaceId: string };
 type ThreadWithMetadata = Thread & { color?: string; pinnedAt?: string };
 
 const normalizeStoredProvider = (value: string): Provider => {
-  if (value === "codex" || value === "opencode") {
+  if (value === "codex" || value === "opencode" || value === "gemini") {
     return value;
-  }
-  if (value === "gemini") {
-    return "opencode";
   }
   return "codex";
 };
@@ -245,6 +243,10 @@ const normalizeHarnessSettings = (partial: Partial<AppSettings> | null | undefin
     opencode: {
       ...(input.binaryOverrides?.opencode ? { binaryOverride: input.binaryOverrides.opencode } : {}),
       ...(input.harnessSettings?.opencode ?? {})
+    },
+    gemini: {
+      ...(input.binaryOverrides?.gemini ? { binaryOverride: input.binaryOverrides.gemini } : {}),
+      ...(input.harnessSettings?.gemini ?? {})
     }
   };
 };
@@ -252,7 +254,8 @@ const normalizeHarnessSettings = (partial: Partial<AppSettings> | null | undefin
 const deriveLegacyBinaryOverrides = (harnessSettings: HarnessSettings): AppSettings["binaryOverrides"] => ({
   ...DEFAULT_SETTINGS.binaryOverrides,
   codex: harnessSettings.codex?.binaryOverride,
-  opencode: harnessSettings.opencode?.binaryOverride
+  opencode: harnessSettings.opencode?.binaryOverride,
+  gemini: harnessSettings.gemini?.binaryOverride
 });
 
 const normalizeAppSettings = (partial: Partial<AppSettings> | null | undefined): AppSettings => {
@@ -1331,8 +1334,8 @@ export class Repository {
   saveInstallCheck(status: InstallStatus): void {
     this.db
       .prepare(
-        `INSERT INTO install_checks (id, ts, node_ok, npm_ok, codex_ok, gemini_ok, payload)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO install_checks (id, ts, node_ok, npm_ok, codex_ok, opencode_ok, gemini_ok, payload)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         randomUUID(),
@@ -1340,6 +1343,7 @@ export class Repository {
         status.nodeOk ? 1 : 0,
         status.npmOk ? 1 : 0,
         status.codexOk ? 1 : 0,
+        status.opencodeOk ? 1 : 0,
         status.geminiOk ? 1 : 0,
         JSON.stringify(status)
       );

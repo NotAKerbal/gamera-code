@@ -1926,14 +1926,25 @@ export class SessionManager {
     const binaryOverride = settings.harnessSettings[harnessId]?.binaryOverride ?? settings.binaryOverrides[harnessId];
     const run = adapter.getRunCommand({ cwd: projectPath, binaryOverride, options });
 
-    const ptyProcess = pty.spawn(run.command, run.args, {
-      name: "xterm-256color",
-      cols: 120,
-      rows: 40,
-      cwd: projectPath,
-      env: env,
-      useConpty: process.platform === "win32"
-    });
+    let ptyProcess: pty.IPty;
+    try {
+      ptyProcess = pty.spawn(run.command, run.args, {
+        name: "xterm-256color",
+        cols: 120,
+        rows: 40,
+        cwd: projectPath,
+        env: env,
+        useConpty: process.platform === "win32"
+      });
+    } catch (error) {
+      const printable = [run.command, ...run.args].join(" ").trim();
+      const binaryHint = binaryOverride
+        ? `Check the configured binary override: ${binaryOverride}`
+        : `Check that the ${harnessId} CLI is installed and available on PATH.`;
+      throw new Error(
+        `Failed to start ${harnessId} session with "${printable}". ${binaryHint} ${describeRuntimeError(error)}`
+      );
+    }
 
     const envHash = createHash("sha1").update(JSON.stringify(env)).digest("hex");
     const session = this.deps.repository.startSession({
