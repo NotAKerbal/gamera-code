@@ -481,6 +481,17 @@ export class CodexAppServerClient {
     });
   }
 
+  async interruptTurn(): Promise<void> {
+    if (!this.pendingTurn) {
+      throw new Error("Cannot interrupt: no active turn.");
+    }
+
+    await this.request("turn/interrupt", {
+      threadId: this.pendingTurn.threadId,
+      turnId: this.pendingTurn.turnId
+    });
+  }
+
   async submitUserInputAnswers(
     requestId: string,
     answers: Record<string, { answers: string[] }>
@@ -1007,6 +1018,7 @@ export class CodexAppServerClient {
       }
       turn.onEvent({
         type: "turn.completed",
+        status: status ?? "completed",
         usage: null
       });
       turn.resolve();

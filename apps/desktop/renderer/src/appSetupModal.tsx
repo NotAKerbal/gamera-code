@@ -1,6 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { HarnessId, InstallStatus } from "@code-app/shared";
 import { INSTALL_DETAIL_LABELS, REQUIRED_SETUP_KEYS, SUPPORTED_HARNESSES } from "./appCore";
+import { HarnessBadge } from "./harnessBadge";
 
 type SetupModalProps = {
   installStatus: InstallStatus;
@@ -76,7 +77,7 @@ export const SetupModal = ({
             <div key={harness.id} className="rounded-lg border border-border bg-black/20 p-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="font-medium">{harness.label}</div>
+                  <HarnessBadge harness={harness} className="harness-badge-setup" />
                   <div className={detail?.ok ? "text-slate-100" : "text-slate-300"}>
                     {detail?.ok ? `Ready${detail.version ? ` (${detail.version})` : ""}` : detail?.message ?? "Not configured"}
                   </div>

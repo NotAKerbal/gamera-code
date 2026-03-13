@@ -873,43 +873,37 @@ webview {
   padding: 0.55rem;
 }
 
-.composer-model-harnesses {
+.composer-model-groups {
   display: grid;
-  grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr);
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.55rem;
 }
 
-.composer-model-harnesses-single {
+.composer-model-groups-single {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.composer-model-harness {
+.composer-model-group {
   display: flex;
   flex-direction: column;
   min-width: 0;
   padding: 0.45rem;
   border: 1px solid rgb(var(--theme-border) / 0.55);
-  border-radius: 0.65rem;
-  background: rgb(2 6 23 / 0.26);
+  border-radius: 0.7rem;
+  background:
+    linear-gradient(180deg, rgb(var(--theme-surface) / 0.62), rgb(var(--theme-panel) / 0.46)),
+    rgb(2 6 23 / 0.18);
 }
 
-.composer-model-harness-codex {
-  align-self: start;
-}
-
-.composer-model-harness-open {
-  min-width: 0;
-}
-
-.composer-model-harness-header {
+.composer-model-group-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.35rem;
-  padding: 0 0.15rem 0.35rem;
+  gap: 0.45rem;
+  padding: 0 0.15rem 0.45rem;
 }
 
-.composer-model-harness-title {
+.composer-model-group-title {
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -917,82 +911,118 @@ webview {
   color: rgb(var(--theme-accent));
 }
 
-.composer-model-harness-meta {
+.composer-model-group-meta {
   font-size: 0.62rem;
   color: rgb(var(--theme-muted));
 }
 
-.composer-model-harness-columns {
+.composer-model-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+}
+
+.composer-model-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
-  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
-.composer-model-harness-columns-codex {
-  grid-template-columns: minmax(0, 1fr);
+.composer-model-row:hover {
+  background: rgb(var(--theme-panel) / 0.44);
+  border-color: rgb(var(--theme-border) / 0.4);
 }
 
-.composer-model-column {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 0.1rem;
+.composer-model-row-current {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(180deg, rgba(6, 95, 70, 0.26), rgba(4, 120, 87, 0.16));
+  box-shadow: inset 0 1px 0 rgba(167, 243, 208, 0.06);
 }
 
-.composer-model-column-header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.08rem;
-  padding: 0 0.15rem 0.3rem;
-}
-
-.composer-model-column-title {
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgb(var(--theme-accent));
-}
-
-.composer-model-column-meta {
-  font-size: 0.62rem;
-  color: rgb(var(--theme-muted));
-}
-
-.composer-model-column-items {
-  display: flex;
-  flex-direction: column;
-  gap: 0.18rem;
-}
-
-.composer-model-option {
+.composer-model-row-main {
   display: block;
   width: 100%;
+  min-width: 0;
   padding: 0.35rem 0.45rem;
-  border: 1px solid transparent;
-  border-radius: 0.45rem;
+  border: 0;
+  border-radius: 0.4rem;
   background: transparent;
   text-align: left;
   color: rgb(var(--theme-accent));
   transition:
-    border-color 160ms ease,
     background-color 160ms ease,
     color 160ms ease;
 }
 
-.composer-model-option:hover {
-  background: rgb(var(--theme-panel) / 0.72);
+.composer-model-row-main:hover {
+  background: rgb(var(--theme-panel) / 0.68);
   color: white;
 }
 
-.composer-model-option:disabled {
+.composer-model-row-main:disabled {
   opacity: 0.45;
 }
 
-.composer-model-option-current {
-  border-color: rgba(16, 185, 129, 0.6);
-  background: rgba(6, 95, 70, 0.18);
+.composer-model-row-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.composer-model-harness-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.08rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: rgb(var(--theme-muted));
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.composer-model-harness-badge:hover {
+  transform: translateY(-1px);
+  background: rgb(var(--theme-panel) / 0.52);
+  color: white;
+}
+
+.composer-model-harness-badge:disabled {
+  opacity: 0.45;
+}
+
+.composer-model-harness-badge-current {
+  background: rgba(6, 95, 70, 0.22);
   color: rgb(209 250 229);
+}
+
+.composer-model-harness-badge-visual .harness-badge-icon-shell {
+  width: 1.2rem;
+  height: 1.2rem;
+  border: 0;
+  background: transparent;
+}
+
+.composer-model-harness-badge-visual .harness-badge-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.composer-model-harness-badge-text {
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .composer-model-option-name {
@@ -1003,7 +1033,7 @@ webview {
 }
 
 @media (max-width: 900px) {
-  .composer-model-harnesses {
+  .composer-model-groups {
     grid-template-columns: 1fr;
   }
 }
@@ -2363,6 +2393,106 @@ webview {
 
 .composer-option {
   @apply inline-flex items-center rounded-md bg-black/20 pr-1;
+}
+
+.harness-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.harness-badge-icon-shell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.32rem;
+  height: 1.32rem;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.harness-badge-icon {
+  display: block;
+  width: 1.18rem;
+  height: 1.18rem;
+  object-fit: contain;
+}
+
+.harness-badge-label {
+  min-width: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--theme-accent));
+}
+
+.harness-badge-settings {
+  padding-top: 0.1rem;
+}
+
+.harness-badge-setup {
+  margin-bottom: 0.35rem;
+}
+
+.composer-inline-harness-badge .harness-badge-icon-shell {
+  width: 1.12rem;
+  height: 1.12rem;
+}
+
+.composer-inline-harness-badge .harness-badge-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.composer-harness-segmented {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid rgb(var(--theme-border) / 0.72);
+  border-radius: 0.65rem;
+  background: rgb(var(--theme-panel) / 0.24);
+  overflow: hidden;
+}
+
+.composer-harness-segment {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.55rem;
+  border: 0;
+  background: transparent;
+  color: rgb(var(--theme-muted));
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    opacity 180ms ease;
+}
+
+.composer-harness-segment + .composer-harness-segment {
+  border-left: 1px solid rgb(var(--theme-border) / 0.55);
+}
+
+.composer-harness-segment:hover {
+  background: rgb(var(--theme-panel) / 0.52);
+  color: rgb(var(--theme-accent));
+}
+
+.composer-harness-segment:disabled {
+  opacity: 0.45;
+}
+
+.composer-harness-segment-current {
+  background: rgba(6, 95, 70, 0.22);
+  color: rgb(209 250 229);
+}
+
+.composer-harness-segment-badge .harness-badge-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .composer-option-icon {

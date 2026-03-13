@@ -55,9 +55,39 @@ export interface HarnessModelGroup<T extends HarnessId = HarnessId> {
   defaultModel?: string;
 }
 
+export type HarnessModelProviderKey = `${HarnessId}:${string}`;
+
+export interface HarnessModelCatalogEntry<T extends HarnessId = HarnessId> {
+  id: string;
+  harnessId: T;
+  providerId: HarnessModelProviderKey;
+  value: string;
+  label: string;
+  isDefault: boolean;
+}
+
+export interface HarnessModelProviderEntry<T extends HarnessId = HarnessId> {
+  id: HarnessModelProviderKey;
+  harnessId: T;
+  groupId: HarnessModelGroupId<T>;
+  label: string;
+  defaultModel?: string;
+  models: HarnessModelCatalogEntry<T>[];
+}
+
+export interface HarnessBadgeAssets {
+  iconOnLightPath: string;
+  iconOnDarkPath: string;
+}
+
+export type HarnessProviderModelMap = Partial<
+  Record<HarnessId, Record<HarnessModelProviderKey, HarnessModelProviderEntry>>
+>;
+
 export interface HarnessDescriptor<T extends HarnessId = HarnessId> {
   id: T;
   label: string;
+  badge: HarnessBadgeAssets;
   capabilities: HarnessCapability<T>[];
   modelGroups: HarnessModelGroup<T>[];
 }

@@ -1,20 +1,19 @@
 import { createPortal } from "react-dom";
 import { memo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CodexSandboxMode, CodexThreadOptions, HarnessId } from "@code-app/shared";
-import { getModelTooltip } from "../../shared/src/modelTooltips";
 import {
   APPROVAL_OPTIONS,
   COLLABORATION_OPTIONS,
-  formatModelDisplayName,
   harnessSupports,
   acknowledgeDangerFullAccessWarning,
   hasDangerFullAccessWarningAcknowledged,
   REASONING_OPTIONS,
   SANDBOX_OPTIONS,
-  SUPPORTED_HARNESSES,
   WEB_SEARCH_OPTIONS,
   type ComposerDropdownKind
 } from "./appCore";
+import { HarnessBadge } from "./harnessBadge";
+import { buildComposerModelGroups } from "./harnessModelCatalog";
 
 type ComposerDropdownState = {
   kind: ComposerDropdownKind;
@@ -49,6 +48,13 @@ const ComposerDropdownPortalComponent = ({
   setComposerDropdown
 }: ComposerDropdownPortalProps) => {
   const [pendingDangerSandboxMode, setPendingDangerSandboxMode] = useState<CodexSandboxMode | null>(null);
+  const providerModelGroups = buildComposerModelGroups({
+    composerOptions,
+    currentHarnessId,
+    visibleHarnesses,
+    canSwitchHarnesses,
+    showUnavailableModels: !canSwitchHarnesses || visibleHarnessCount <= 1
+  });
 
   if (!composerDropdown && !pendingDangerSandboxMode) {
     return null;
@@ -78,74 +84,64 @@ const ComposerDropdownPortalComponent = ({
         >
           <div className={composerDropdown.kind === "model" ? "composer-model-dropdown-list" : "branch-dropdown-list"}>
             {composerDropdown.kind === "model" && (
-              <div
-                className={
-                  visibleHarnessCount <= 1
-                    ? "composer-model-harnesses composer-model-harnesses-single"
-                    : "composer-model-harnesses"
-                }
-              >
-                {SUPPORTED_HARNESSES.map((harness) => {
-                  if (visibleHarnesses[harness.id] === false) {
-                    return null;
-                  }
-                  const harnessIsActive = harness.id === currentHarnessId;
-                  const harnessClassName =
-                    harness.id === "codex"
-                      ? "composer-model-harness composer-model-harness-codex"
-                      : "composer-model-harness composer-model-harness-open";
-                  return (
-                    <section key={harness.id} className={harnessClassName}>
-                      <div className="composer-model-harness-header">
-                        <div className="composer-model-harness-title">{harness.label}</div>
-                        {!harnessIsActive && !canSwitchHarnesses ? (
-                          <div className="composer-model-harness-meta">Create a new thread to switch</div>
-                        ) : (
-                          <div className="composer-model-harness-meta">{harness.modelGroups.length} sections</div>
-                        )}
+              <div className={visibleHarnessCount <= 1 ? "composer-model-groups composer-model-groups-single" : "composer-model-groups"}>
+                {providerModelGroups.map((group) => (
+                  <section key={group.id} className="composer-model-group">
+                    <div className="composer-model-group-header">
+                      <div className="composer-model-group-title">{group.label}</div>
+                      <div className="composer-model-group-meta">
+                        {group.rows.length} model{group.rows.length === 1 ? "" : "s"}
                       </div>
-                      <div
-                        className={
-                          harness.id === "codex"
-                            ? "composer-model-harness-columns composer-model-harness-columns-codex"
-                            : "composer-model-harness-columns"
-                        }
-                      >
-                        {harness.modelGroups.map((group) => (
-                          <section key={`${harness.id}:${group.id}`} className="composer-model-column">
-                            <div className="composer-model-column-header">
-                              <div className="composer-model-column-title">{group.label}</div>
-                            </div>
-                            <div className="composer-model-column-items">
-                              {group.models.map((model) => {
-                                const selected = harnessIsActive && (composerOptions.model ?? "").trim() === model;
-                                const disabled = !harnessIsActive && !canSwitchHarnesses;
-                                const tooltip = getModelTooltip(model);
-                                return (
-                                  <button
-                                    key={`${harness.id}:${model}`}
-                                    className={
-                                      selected ? "composer-model-option composer-model-option-current" : "composer-model-option"
-                                    }
-                                    disabled={disabled}
-                                    data-app-tooltip={tooltip}
-                                    title={tooltip}
-                                    onClick={() => {
-                                      onSelectHarnessModel(harness.id, model);
-                                      setComposerDropdown(null);
-                                    }}
-                                  >
-                                    <span className="composer-model-option-name">{formatModelDisplayName(model)}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </section>
-                        ))}
-                      </div>
-                    </section>
-                  );
-                })}
+                    </div>
+                    <div className="composer-model-group-items">
+                      {group.rows.map((row) => (
+                        <div
+                          key={row.id}
+                          className={row.selected ? "composer-model-row composer-model-row-current" : "composer-model-row"}
+                        >
+                          <button
+                            className="composer-model-row-main"
+                            disabled={row.preferredHarness.disabled}
+                            data-app-tooltip={row.tooltip}
+                            title={row.tooltip}
+                            onClick={() => {
+                              onSelectHarnessModel(row.preferredHarness.harnessId, row.preferredHarness.model);
+                              setComposerDropdown(null);
+                            }}
+                          >
+                            <span className="composer-model-option-name">{row.displayName}</span>
+                          </button>
+                          <div className="composer-model-row-badges">
+                            {row.harnesses.map((harness) => (
+                              <button
+                                key={`${row.id}:${harness.harnessId}`}
+                                className={
+                                  harness.selected
+                                    ? "composer-model-harness-badge composer-model-harness-badge-current"
+                                    : "composer-model-harness-badge"
+                                }
+                                disabled={harness.disabled}
+                                data-app-tooltip={harness.tooltip}
+                                title={harness.tooltip}
+                                aria-label={harness.tooltip}
+                                onClick={() => {
+                                  onSelectHarnessModel(harness.harnessId, harness.model);
+                                  setComposerDropdown(null);
+                                }}
+                              >
+                                <HarnessBadge
+                                  harness={{ label: harness.harnessLabel, badge: harness.badge }}
+                                  showLabel={false}
+                                  className="composer-model-harness-badge-visual"
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
               </div>
             )}
             {composerDropdown.kind === "effort" &&

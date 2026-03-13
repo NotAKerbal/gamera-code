@@ -35,6 +35,7 @@ import {
   WEB_SEARCH_OPTIONS,
   type AppSettingsTab
 } from "./appCore";
+import { HarnessBadge } from "./harnessBadge";
 
 type SettingsModalProps = {
   initialDraft: {
@@ -575,7 +576,9 @@ export const SettingsModal = memo(({
 
                 return (
                   <section key={harness.id} className="rounded-xl border border-border/80 bg-black/20 py-2">
-                    <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">{harness.label}</div>
+                    <div className="mb-1 px-4">
+                      <HarnessBadge harness={harness} className="harness-badge-settings" />
+                    </div>
                     <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                       <div className="text-sm text-muted">Status</div>
                       <div className="flex flex-wrap items-center gap-2">

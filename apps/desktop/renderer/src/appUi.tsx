@@ -16,6 +16,7 @@ import {
   sanitizeForDisplay,
   summarizePlanMarkdown,
   todosToMarkdown,
+  type OrchestrationCompletionSummary,
   type PlanArtifact,
   type TimelineItem,
 } from "./appCore";
@@ -176,6 +177,95 @@ const SubthreadProposalCard = ({ proposal }: { proposal: SubthreadProposal }) =>
   </section>
 );
 
+const formatOrchestrationStatusLabel = (status: string) => status.replace(/_/g, " ");
+
+const formatOrchestrationStatusClassName = (status: string) => {
+  const normalized = status.trim().toLowerCase().replace(/\s+/g, "_");
+  if (normalized === "running") {
+    return "in_progress";
+  }
+  if (normalized === "stopped" || normalized === "canceled") {
+    return "failed";
+  }
+  return normalized || "completed";
+};
+
+const OrchestrationCompletionCard = ({ summary }: { summary: OrchestrationCompletionSummary }) => {
+  const completedCount = summary.outcomes.filter((outcome) => outcome.status.toLowerCase() === "completed").length;
+  return (
+    <section className="rounded-xl border border-border/70 bg-zinc-900/60 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-slate-400">Sub-thread Results</div>
+          <h3 className="mt-1 text-base font-semibold text-slate-100">{summary.goal}</h3>
+        </div>
+        <span className={`status-pill ${formatOrchestrationStatusClassName(summary.status)}`}>
+          {formatOrchestrationStatusLabel(summary.status)}
+        </span>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
+        <span className="rounded-full border border-border/70 bg-black/25 px-2.5 py-1">
+          {summary.outcomes.length} {summary.outcomes.length === 1 ? "outcome" : "outcomes"}
+        </span>
+        {completedCount > 0 ? (
+          <span className="rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-emerald-200">
+            {completedCount} completed
+          </span>
+        ) : null}
+        {summary.canSpawnFollowUp ? (
+          <span className="rounded-full border border-amber-500/35 bg-amber-500/10 px-2.5 py-1 text-amber-100">
+            follow-up orchestration available
+          </span>
+        ) : null}
+      </div>
+
+      {summary.outcomes.length > 0 ? (
+        <div className="mt-4 space-y-3">
+          {summary.outcomes.map((outcome, index) => (
+            <article key={`${outcome.childThreadId ?? outcome.title}-${index}`} className="rounded-lg border border-border/70 bg-black/25 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h4 className="text-sm font-medium text-slate-100">{outcome.title}</h4>
+                  {outcome.childThreadId ? (
+                    <p className="mt-1 font-mono text-[11px] text-slate-500">{outcome.childThreadId}</p>
+                  ) : null}
+                </div>
+                <span className={`status-pill ${formatOrchestrationStatusClassName(outcome.status)}`}>
+                  {formatOrchestrationStatusLabel(outcome.status)}
+                </span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{outcome.summary}</p>
+              {outcome.error ? (
+                <div className="mt-3 rounded-md border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                  {outcome.error}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-4 rounded-lg border border-sky-500/25 bg-sky-500/10 p-3">
+        <div className="text-[11px] uppercase tracking-[0.1em] text-sky-200">Next step</div>
+        <p className="mt-1 text-sm leading-6 text-slate-100">{summary.nextStep}</p>
+      </div>
+
+      <details className="mt-4 rounded-lg border border-border/70 bg-black/20 p-3">
+        <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.1em] text-slate-300">
+          Child feedback format
+        </summary>
+        <p className="mt-2 text-xs leading-5 text-slate-400">
+          Use `{summary.feedbackTag}` only for listed child threads. {summary.feedbackScopeNote}
+        </p>
+        <code className="mt-2 block overflow-x-auto rounded-md border border-zinc-700 bg-black/55 p-3 font-mono text-[12px] leading-5 text-slate-100">
+          {summary.feedbackTemplate}
+        </code>
+      </details>
+    </section>
+  );
+};
+
 const AssistantMarkdown = ({
   messageId,
   content,
@@ -202,6 +292,14 @@ const AssistantMarkdown = ({
       {segments.map((segment, index) => {
         if (segment.kind === "subthread_proposal" && segment.proposal) {
           return <SubthreadProposalCard key={`subthread-${messageId}-${index}`} proposal={segment.proposal} />;
+        }
+        if (segment.kind === "orchestration_completion" && segment.orchestrationCompletion) {
+          return (
+            <OrchestrationCompletionCard
+              key={`orchestration-${messageId}-${index}`}
+              summary={segment.orchestrationCompletion}
+            />
+          );
         }
         if (segment.kind === "markdown") {
           if (!segment.content.trim()) {

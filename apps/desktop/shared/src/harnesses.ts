@@ -1,8 +1,12 @@
 import type {
   CodexThreadOptions,
   HarnessCapability,
+  HarnessModelCatalogEntry,
   HarnessDescriptor,
   HarnessId,
+  HarnessModelProviderEntry,
+  HarnessModelProviderKey,
+  HarnessProviderModelMap,
   InstallDependencyKey,
   InstallDetail,
   Thread
@@ -44,6 +48,10 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
   {
     id: "codex",
     label: "Codex",
+    badge: {
+      iconOnLightPath: "/harness/codex-on-light.svg",
+      iconOnDarkPath: "/harness/codex-on-dark.svg"
+    },
     capabilities: [
       "streaming",
       "attachments",
@@ -94,6 +102,10 @@ export const HARNESS_DESCRIPTORS: HarnessRegistryEntry[] = [
   {
     id: "opencode",
     label: "OpenCode",
+    badge: {
+      iconOnLightPath: "/harness/opencode-on-light.svg",
+      iconOnDarkPath: "/harness/opencode-on-dark.svg"
+    },
     capabilities: [
       "streaming",
       "attachments",
@@ -199,6 +211,46 @@ export const DEFAULT_HARNESS_OPTIONS: Record<HarnessId, CodexThreadOptions | Rec
   opencode: DEFAULT_OPENCODE_OPTIONS
 };
 
+const toProviderKey = (harnessId: HarnessId, groupId: string): HarnessModelProviderKey =>
+  `${harnessId}:${groupId}` as HarnessModelProviderKey;
+
+const createModelCatalogEntry = <T extends HarnessId>(
+  harnessId: T,
+  providerId: HarnessModelProviderKey,
+  model: string,
+  defaultModel?: string
+): HarnessModelCatalogEntry<T> => ({
+  id: `${providerId}:${model}`,
+  harnessId,
+  providerId,
+  value: model,
+  label: model,
+  isDefault: model === defaultModel
+});
+
+const buildProviderModelMap = (descriptors: HarnessRegistryEntry[]): HarnessProviderModelMap =>
+  descriptors.reduce<HarnessProviderModelMap>((catalog, descriptor) => {
+    const providers = descriptor.modelGroups.reduce<Record<HarnessModelProviderKey, HarnessModelProviderEntry>>(
+      (groupCatalog, group) => {
+        const providerId = toProviderKey(descriptor.id, group.id);
+        groupCatalog[providerId] = {
+          id: providerId,
+          harnessId: descriptor.id,
+          groupId: group.id,
+          label: group.label,
+          defaultModel: group.defaultModel,
+          models: group.models.map((model) => createModelCatalogEntry(descriptor.id, providerId, model, group.defaultModel))
+        };
+        return groupCatalog;
+      },
+      {}
+    );
+    catalog[descriptor.id] = providers;
+    return catalog;
+  }, {});
+
+export const HARNESS_PROVIDER_MODEL_MAP = buildProviderModelMap(HARNESS_DESCRIPTORS);
+
 export const getHarnessDescriptor = (harnessId: HarnessId) =>
   HARNESS_DESCRIPTORS.find((harness) => harness.id === harnessId);
 
@@ -220,19 +272,28 @@ export const getHarnessDefaultOptions = (harnessId: HarnessId): CodexThreadOptio
 export const harnessSupportsCapability = (harnessId: HarnessId, capability: HarnessCapability): boolean =>
   Boolean(getHarnessDescriptor(harnessId)?.capabilities.includes(capability as never));
 
+export const getHarnessModelProviders = <T extends HarnessId>(harnessId: T): HarnessModelProviderEntry<T>[] =>
+  Object.values(HARNESS_PROVIDER_MODEL_MAP[harnessId] ?? {}) as HarnessModelProviderEntry<T>[];
+
+export const findHarnessModelProvider = <T extends HarnessId>(
+  harnessId: T,
+  model: string
+): HarnessModelProviderEntry<T> | undefined =>
+  getHarnessModelProviders(harnessId).find((provider) => provider.models.some((entry) => entry.value === model));
+
+export const getDefaultHarnessModel = (harnessId: HarnessId): string | undefined =>
+  getHarnessModelProviders(harnessId).find((provider) => provider.defaultModel)?.defaultModel;
+
 export const getHarnessModelSuggestions = (harnessId: HarnessId): string[] => {
-  const descriptor = getHarnessDescriptor(harnessId);
-  if (!descriptor) {
-    return [];
-  }
   const seen = new Set<string>();
   const models: string[] = [];
-  descriptor.modelGroups.forEach((group) => {
-    group.models.forEach((model) => {
-      if (!seen.has(model)) {
-        seen.add(model);
-        models.push(model);
+  getHarnessModelProviders(harnessId).forEach((provider) => {
+    provider.models.forEach((model) => {
+      if (seen.has(model.value)) {
+        return;
       }
+      seen.add(model.value);
+      models.push(model.value);
     });
   });
   return models;

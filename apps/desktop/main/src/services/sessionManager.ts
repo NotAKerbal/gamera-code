@@ -2106,11 +2106,13 @@ export class SessionManager {
       }
       case "turn.completed": {
         const usage = asRecord(event?.usage);
+        const status = asString(event?.status) ?? "completed";
         this.emitSessionEvent(threadId, "progress", "Turn completed", {
           provider: "codex",
           category: "turn",
           eventType,
-          phase: "completed",
+          phase: status === "interrupted" ? "interrupted" : "completed",
+          status,
           usage: usage ?? undefined
         });
         return;
@@ -2682,6 +2684,29 @@ export class SessionManager {
       { policy, taskCount: proposal.tasks.length, runId: run.id }
     );
     await this.scheduleRunSpawns(run.id);
+    await this.interruptParentTurnForSubthreadRun(parentThreadId, run.id);
+  }
+
+  private async interruptParentTurnForSubthreadRun(parentThreadId: string, runId: string): Promise<void> {
+    const running = this.sessions.get(parentThreadId);
+    if (!running || running.kind !== "codex_app_server") {
+      return;
+    }
+
+    try {
+      await running.appServer.interruptTurn();
+      this.emitOrchestrationMilestone(
+        runId,
+        "Paused parent turn until sub-threads complete",
+        "orchestration_parent_paused"
+      );
+    } catch (error) {
+      this.emitOrchestrationMilestone(
+        runId,
+        `Could not pause parent turn: ${error instanceof Error ? error.message : String(error)}`,
+        "orchestration_parent_pause_failed"
+      );
+    }
   }
 
   private async scheduleRunSpawns(runId: string): Promise<void> {

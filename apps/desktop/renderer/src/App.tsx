@@ -277,6 +277,8 @@ const normalizeSkillFrontmatterYaml = (content: string) => {
 import { SettingsModal } from "./appSettingsModal";
 import { SetupModal } from "./appSetupModal";
 import { ComposerDropdownPortal } from "./appComposerDropdown";
+import { HarnessBadge } from "./harnessBadge";
+import { findComposerModelRow } from "./harnessModelCatalog";
 import { BranchDropdownPortal } from "./appBranchDropdown";
 import { MainHeader } from "./appMainHeader";
 import { MonacoCodePanel } from "./MonacoCodePanel";
@@ -7840,6 +7842,20 @@ TODO: Describe what this skill does.
     opencode: installStatus ? installStatus.readyHarnessIds.includes("opencode") : true
   };
   const visibleHarnessCount = SUPPORTED_HARNESSES.filter((harness) => visibleHarnesses[harness.id] !== false).length;
+  const selectedComposerModelRow = useMemo(
+    () =>
+      findComposerModelRow({
+        composerOptions,
+        currentHarnessId: activeHarnessId,
+        visibleHarnesses,
+        canSwitchHarnesses: canSwitchActiveThreadHarness,
+        showUnavailableModels: !canSwitchActiveThreadHarness || visibleHarnessCount <= 1
+      }),
+    [composerOptions, activeHarnessId, visibleHarnesses, canSwitchActiveThreadHarness]
+  );
+  const showComposerHarnessSegmented =
+    canSwitchActiveThreadHarness && Boolean(selectedComposerModelRow && selectedComposerModelRow.harnesses.length > 1);
+  const showComposerLockedHarnessBadge = !canSwitchActiveThreadHarness && Boolean(activeThreadId);
   const visibleModelHarnesses = SUPPORTED_HARNESSES.map((harness) => {
     if (visibleHarnesses[harness.id] === false) {
       return null;
@@ -9984,6 +10000,42 @@ TODO: Describe what this skill does.
                           {isVoiceRecording ? <FaStop className="mx-auto text-[11px]" /> : <FaMicrophone className="mx-auto text-[11px]" />}
                         </button>
                       ) : null}
+                      {showComposerHarnessSegmented && selectedComposerModelRow ? (
+                        <div className="composer-harness-segmented" role="tablist" aria-label="Available harnesses">
+                          {selectedComposerModelRow.harnesses.map((harness) => (
+                            <button
+                              key={`${selectedComposerModelRow.id}:${harness.harnessId}`}
+                              className={
+                                harness.selected
+                                  ? "composer-harness-segment composer-harness-segment-current"
+                                  : "composer-harness-segment"
+                              }
+                              disabled={!activeThreadId || activeThreadSendPending || harness.disabled}
+                              data-composer-tooltip={composerTooltipText(
+                                harness.harnessLabel,
+                                `Use ${selectedComposerModelRow.displayName} with ${harness.harnessLabel}.`
+                              )}
+                              onClick={() => {
+                                selectHarnessModel(harness.harnessId, harness.model).catch((error) => {
+                                  setLogs((prev) => [...prev, `Model switch failed: ${String(error)}`]);
+                                });
+                              }}
+                            >
+                              <HarnessBadge
+                                harness={{ label: harness.harnessLabel, badge: harness.badge }}
+                                className="composer-harness-segment-badge"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {showComposerLockedHarnessBadge ? (
+                        <div className="composer-harness-segmented" aria-label="Current harness">
+                          <div className="composer-harness-segment composer-harness-segment-current" aria-current="true">
+                            <HarnessBadge harness={activeHarness} className="composer-harness-segment-badge" />
+                          </div>
+                        </div>
+                      ) : null}
                       <button
                         ref={composerModelTriggerRef}
                         className="composer-dropdown-trigger composer-tooltip-target"
@@ -9992,6 +10044,9 @@ TODO: Describe what this skill does.
                         onClick={() => openComposerDropdown("model", composerModelTriggerRef.current)}
                         disabled={!activeThreadId || activeThreadSendPending}
                       >
+                        {!showComposerHarnessSegmented && !showComposerLockedHarnessBadge ? (
+                          <HarnessBadge harness={activeHarness} showLabel={false} className="composer-inline-harness-badge" />
+                        ) : null}
                         <span>{formatModelDisplayName(modelLabel)}</span>
                         <FaChevronDown className="text-[10px] text-slate-500" />
                       </button>

@@ -204,4 +204,133 @@ describe("sessionManager active project session detection", () => {
       })
     );
   });
+
+  it("interrupts the parent turn after auto-spawning subthreads", async () => {
+    const emit = vi.fn();
+    let storedRun: { id: string; parentThreadId: string; proposal: { reason: string; parentGoal: string; tasks: unknown[] }; policy: "auto"; status: "queued" } | null =
+      null;
+    const repository = {
+      getThread: vi.fn(() => ({
+        id: "thread-parent",
+        provider: "codex",
+        projectId: "project-a"
+      })),
+      createOrchestrationRun: vi.fn((input: {
+        parentThreadId: string;
+        proposal: { reason: string; parentGoal: string; tasks: unknown[] };
+        policy: "auto";
+        status: "queued";
+      }) => {
+        storedRun = {
+          id: "run-1",
+          ...input
+        };
+        return storedRun;
+      }),
+      createOrchestrationChild: vi.fn(),
+      getOrchestrationRun: vi.fn(() => storedRun),
+      appendMessage: vi.fn()
+    } as unknown as ConstructorParameters<typeof SessionManager>[0]["repository"];
+
+    const permissionEngine = {
+      clearThreadApprovals: vi.fn()
+    } as unknown as ConstructorParameters<typeof SessionManager>[0]["permissionEngine"];
+
+    const manager = new SessionManager({
+      repository,
+      permissionEngine,
+      emit
+    });
+
+    const scheduleRunSpawns = vi
+      .spyOn(manager as unknown as { scheduleRunSpawns: (runId: string) => Promise<void> }, "scheduleRunSpawns")
+      .mockResolvedValue();
+
+    const interruptTurn = vi.fn().mockResolvedValue(undefined);
+    const sessions = (manager as unknown as { sessions: Map<string, unknown> }).sessions;
+    sessions.set("thread-parent", {
+      kind: "codex_app_server",
+      threadId: "thread-parent",
+      appServer: { interruptTurn }
+    });
+
+    const message = [
+      "<subthread_proposal_v1>",
+      JSON.stringify({
+        reason: "Split implementation and tests.",
+        parentGoal: "Pause parent synthesis until workers finish.",
+        tasks: [
+          { key: "impl", title: "Implementation", prompt: "Patch runtime behavior." },
+          { key: "tests", title: "Tests", prompt: "Add regression coverage." }
+        ]
+      }),
+      "</subthread_proposal_v1>"
+    ].join("");
+
+    await (
+      manager as unknown as {
+        maybeCreateSubthreadOrchestration: (threadId: string, assistantMessage: string) => Promise<void>;
+      }
+    ).maybeCreateSubthreadOrchestration("thread-parent", message);
+
+    expect(repository.createOrchestrationRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentThreadId: "thread-parent",
+        policy: "auto",
+        status: "queued"
+      })
+    );
+    expect(repository.createOrchestrationChild).toHaveBeenCalledTimes(2);
+    expect(scheduleRunSpawns).toHaveBeenCalledWith("run-1");
+    expect(interruptTurn).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-parent",
+        type: "progress",
+        payload: "Paused parent turn until sub-threads complete",
+        data: expect.objectContaining({
+          category: "orchestration_parent_paused",
+          runId: "run-1"
+        })
+      })
+    );
+  });
+
+  it("marks interrupted turns distinctly in progress events", async () => {
+    const emit = vi.fn();
+    const repository = {
+      getThread: vi.fn(() => null),
+      getSession: vi.fn(() => null),
+      appendMessage: vi.fn()
+    } as unknown as ConstructorParameters<typeof SessionManager>[0]["repository"];
+
+    const permissionEngine = {
+      clearThreadApprovals: vi.fn()
+    } as unknown as ConstructorParameters<typeof SessionManager>[0]["permissionEngine"];
+
+    const manager = new SessionManager({
+      repository,
+      permissionEngine,
+      emit
+    });
+
+    await (
+      manager as unknown as {
+        handleCodexStreamEvent: (threadId: string, rawEvent: unknown, agentDrafts: Map<string, string>) => Promise<void>;
+      }
+    ).handleCodexStreamEvent("thread-a", { type: "turn.completed", status: "interrupted" }, new Map());
+
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-a",
+        type: "progress",
+        payload: "Turn completed",
+        data: expect.objectContaining({
+          category: "turn",
+          phase: "interrupted",
+          status: "interrupted"
+        })
+      })
+    );
+  });
 });
