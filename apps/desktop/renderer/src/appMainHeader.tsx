@@ -283,16 +283,6 @@ const MainHeaderComponent = ({
       toggleProjectTerminal(terminal);
       return;
     }
-
-    const hasCompleted = !terminal.running && typeof terminal.lastExitCode === "number";
-    if (hasCompleted) {
-      const commandId = terminal.commandId.trim();
-      if (commandId) {
-        onAcknowledgeTerminalError(commandId);
-      }
-      openTerminalOutput(terminal);
-      return;
-    }
     toggleProjectTerminal(terminal);
   };
   const statusClassForAction = (terminal: HeaderTerminal) => {
@@ -684,11 +674,7 @@ const MainHeaderComponent = ({
             const isError = hasCompleted && terminal.lastExitCode !== 0;
             const actionTooltip = terminal.running
               ? tooltipText("Stop Action", "This action is running. Click to stop it.")
-              : isError
-                ? tooltipText("View Error Output", "The last run failed. Click to open the output and clear the error state.")
-                : isSuccess
-                  ? tooltipText("View Final Output", "The last run completed successfully. Click to view the final output.")
-                  : tooltipText("Start Action", "This action is idle. Click to start it.");
+              : tooltipText("Start Action", "This action is idle. Click to start it.");
             const statusClass = isSuccess
               ? "terminal-action-segment-success"
               : isError
@@ -716,21 +702,18 @@ const MainHeaderComponent = ({
                   {hasCompleted ? (
                     <button
                       type="button"
-                      className="terminal-action-dismiss-error app-tooltip-target"
-                      aria-label={`Dismiss result for ${terminal.name}`}
+                      className="terminal-action-output app-tooltip-target"
+                      aria-label={`View output for ${terminal.name}`}
                       data-app-tooltip={
                         isError
-                          ? tooltipText("Dismiss Error", "Clear this error state without opening the output modal.")
-                          : tooltipText("Dismiss Result", "Clear this completed state without opening the output modal.")
+                          ? tooltipText("View Error Output", "Open the latest failed run output.")
+                          : tooltipText("View Final Output", "Open the latest completed run output.")
                       }
                       onClick={() => {
-                        const commandId = actionId;
-                        if (commandId) {
-                          onAcknowledgeTerminalError(commandId);
-                        }
+                        openTerminalOutput(terminal);
                       }}
                     >
-                      <FaTimes className="text-[10px] text-slate-400" />
+                      <FaEye className="text-[10px] text-slate-400" />
                     </button>
                   ) : null}
                   <button

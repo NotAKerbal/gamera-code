@@ -23,11 +23,15 @@ let gitPopoutWindow: BrowserWindow | null = null;
 let codePanelWindow: BrowserWindow | null = null;
 let webLinkWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let previewPopoutCurrentUrl: string | null = null;
+let previewPopoutCurrentProjectId: string | null = null;
 let webLinkCurrentUrl: string | null = null;
 const PREVIEW_LOAD_MAX_ATTEMPTS = 6;
 const PREVIEW_LOAD_BASE_DELAY_MS = 350;
 const PREVIEW_WINDOW_TITLE_BASE = "Project Preview";
 const PREVIEW_AUTOMATION_KIND = "preview-browser";
+const PREVIEW_PARTITION_PREFIX = "persist:codeapp-preview-";
+const WEBLINK_PARTITION = "persist:codeapp-browser";
 const APP_ICON_FILENAME = "icon_rounded.png";
 const MAIN_WINDOW_SPLASH_QUERY_KEY = "bootSplash";
 const CODE_PANEL_PROJECT_ID_QUERY_KEY = "codeProjectId";
@@ -92,6 +96,13 @@ const isAllowedWebLinkUrl = (value: string): boolean => {
     return false;
   }
 };
+
+const sanitizePartitionSegment = (value?: string): string => {
+  const normalized = (value ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+  return normalized || "default";
+};
+
+const getPreviewPartition = (projectId?: string): string => `${PREVIEW_PARTITION_PREFIX}${sanitizePartitionSegment(projectId)}`;
 
 const isAllowedRendererNavigationUrl = (value: string): boolean => {
   if (value.startsWith("file://")) {
@@ -348,9 +359,10 @@ const loadPreviewUrlWithRetry = async (window: BrowserWindow, url: string) => {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 };
 
-const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
+const buildBrowserShellHtml = (initialUrl: string, partition: string, allowLocalOnly = false) => {
   const safeUrl = escapeHtml(initialUrl);
-  const safeIconSrc = escapeHtml(getAppIconFileUrl());
+  const safePartition = escapeHtml(partition);
+  const safeIconSrc = escapeHtml(getAppIconDataUrl(28));
   const isMac = process.platform === "darwin";
   return `<!doctype html>
 <html>
@@ -374,13 +386,15 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
       }
       .app-header {
         min-height: 48px;
-        display: flex;
+        display: grid;
+        grid-template-columns: auto auto 1fr auto auto;
         align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 8px 10px;
-        border-bottom: 1px solid #2f2f2f;
-        background: #0f1013;
+        gap: 8px;
+        padding: 0 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        background:
+          linear-gradient(180deg, rgba(8, 12, 18, 0.98) 0%, rgba(10, 15, 24, 0.98) 100%),
+          radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 34%);
         -webkit-app-region: drag;
       }
       .app-header.macos {
@@ -393,15 +407,23 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
         min-width: 0;
       }
       .app-icon {
-        width: 26px;
-        height: 26px;
-        border-radius: 8px;
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
       }
       .app-title {
         font-size: 13px;
         font-weight: 600;
         color: #e2e8f0;
         white-space: nowrap;
+        letter-spacing: 0.01em;
+      }
+      .nav-group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        -webkit-app-region: no-drag;
       }
       .window-controls {
         display: flex;
@@ -409,81 +431,112 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
         gap: 4px;
         -webkit-app-region: no-drag;
       }
+      .window-btn,
+      .btn,
+      .icon-btn {
+        height: 30px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 10px;
+        background: rgba(17, 24, 39, 0.78);
+        color: #e5e7eb;
+        padding: 0 10px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background 140ms ease,
+          border-color 140ms ease,
+          color 140ms ease,
+          transform 140ms ease;
+      }
       .window-btn {
         width: 34px;
         height: 28px;
         border: 0;
-        border-radius: 8px;
         background: transparent;
-        color: #cbd5e1;
-        font-size: 13px;
-        cursor: pointer;
+        padding: 0;
       }
-      .window-btn:hover {
-        background: #1f2937;
-        color: #fff;
+      .icon-btn {
+        width: 30px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .window-btn:hover,
+      .btn:hover,
+      .icon-btn:hover {
+        background: rgba(30, 41, 59, 0.95);
+        border-color: rgba(148, 163, 184, 0.32);
       }
       .window-btn.close:hover {
         background: rgba(239, 68, 68, 0.2);
         color: #fee2e2;
       }
-      .toolbar {
+      .btn[disabled],
+      .icon-btn[disabled] {
+        opacity: 0.45;
+        cursor: default;
+        transform: none;
+      }
+      .address-wrap {
+        min-width: 0;
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 10px;
-        border-bottom: 1px solid #2f2f2f;
-        background: #111;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.78);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        -webkit-app-region: no-drag;
+      }
+      .address-wrap:hover {
+        border-color: rgba(148, 163, 184, 0.3);
+      }
+      .address-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #34d399;
+        box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.14);
+        flex: 0 0 auto;
       }
       .url {
-        flex: 1;
+        width: 100%;
         min-width: 0;
-        height: 34px;
-        border: 1px solid #3a3a3a;
-        border-radius: 8px;
-        background: #161616;
+        height: 100%;
+        border: 0;
+        background: transparent;
         color: #e5e7eb;
-        padding: 0 10px;
-        font-size: 13px;
-      }
-      .btn {
-        height: 34px;
-        border: 1px solid #3a3a3a;
-        border-radius: 8px;
-        background: #191919;
-        color: #e5e7eb;
-        padding: 0 10px;
         font-size: 12px;
-        cursor: pointer;
+        outline: none;
       }
-      .btn:hover {
-        background: #222;
+      .url:focus {
+        color: #f8fafc;
+      }
+      .url::placeholder {
+        color: rgba(148, 163, 184, 0.72);
       }
       .layout {
         flex: 1;
         min-height: 0;
-        display: flex;
-        flex-direction: column;
       }
-      .viewport-wrap {
-        flex: 1;
-        min-height: 0;
-        display: flex;
-        justify-content: stretch;
-        align-items: stretch;
-        padding: 0;
-        overflow: auto;
-      }
-      iframe {
+      webview {
         width: 100%;
+        height: 100%;
         border: 0;
-        background: white;
-        flex: 1;
+        background: #fff;
       }
-      .status {
-        margin-left: 8px;
-        color: #9ca3af;
-        font-size: 11px;
+      .icon {
+        width: 16px;
+        height: 16px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.75;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
     </style>
   </head>
@@ -493,49 +546,57 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
         <img src="${safeIconSrc}" class="app-icon" alt="" />
         <div class="app-title">GameraCode - Browser</div>
       </div>
+      <div class="nav-group">
+        <button id="backBtn" class="icon-btn" title="Back" aria-label="Back">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 19.5L3 12l7.5-7.5"/><path d="M21 12H3"/></svg>
+        </button>
+        <button id="forwardBtn" class="icon-btn" title="Forward" aria-label="Forward">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 4.5L21 12l-7.5 7.5"/><path d="M3 12h18"/></svg>
+        </button>
+        <button id="refreshBtn" class="icon-btn" title="Reload" aria-label="Reload">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.023 9.348h4.992V4.356"/><path d="M2.985 19.644v-4.992h4.992"/><path d="M4.93 9.93a8.25 8.25 0 0113.635-3.03l2.45 2.448"/><path d="M19.07 14.07a8.25 8.25 0 01-13.635 3.03l-2.45-2.448"/></svg>
+        </button>
+      </div>
+      <label class="address-wrap" for="urlInput">
+        <span class="address-dot" aria-hidden="true"></span>
+        <input id="urlInput" data-testid="preview-url-input" class="url" value="${safeUrl}" />
+      </label>
+      <button id="openExternalBtn" class="btn" title="Open in default browser">Open Default</button>
       ${!isMac ? `<div class="window-controls">
         <button id="windowMinBtn" data-testid="preview-window-minimize" class="window-btn" title="Minimize">-</button>
         <button id="windowMaxBtn" data-testid="preview-window-maximize" class="window-btn" title="Maximize or restore">□</button>
         <button id="windowCloseBtn" data-testid="preview-window-close" class="window-btn close" title="Close">×</button>
       </div>` : ""}
     </div>
-    <div class="toolbar">
-      <input id="urlInput" data-testid="preview-url-input" class="url" value="${safeUrl}" />
-      <button id="goBtn" data-testid="preview-go" class="btn">Go</button>
-      <button id="refreshBtn" data-testid="preview-refresh" class="btn">Refresh</button>
-      <span id="status" data-testid="preview-status" class="status">Ready</span>
-    </div>
     <div class="layout">
-      <div class="viewport-wrap">
-        <iframe
-          id="previewFrame"
-          data-testid="preview-frame"
-          name="codeapp-preview-frame"
-          allow="clipboard-read; clipboard-write"
-        ></iframe>
-      </div>
+      <webview
+        id="browserView"
+        data-testid="preview-frame"
+        partition="${safePartition}"
+        allowpopups="false"
+        webpreferences="contextIsolation=yes,sandbox=yes"
+        src="${safeUrl}"
+      ></webview>
     </div>
     <script>
       window.name = "codeapp-preview-browser";
       const allowLocalOnly = ${allowLocalOnly ? "true" : "false"};
       const api = window.desktopAPI;
       const allowedHosts = new Set(["localhost", "127.0.0.1"]);
-      const statusEl = document.getElementById("status");
       const urlInput = document.getElementById("urlInput");
-      const frame = document.getElementById("previewFrame");
+      const view = document.getElementById("browserView");
+      const backBtn = document.getElementById("backBtn");
+      const forwardBtn = document.getElementById("forwardBtn");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const openExternalBtn = document.getElementById("openExternalBtn");
       const previewState = {
         kind: "${PREVIEW_AUTOMATION_KIND}",
         lastRequestedUrl: "",
-        lastLoadedUrl: "",
-        status: "Ready"
+        lastLoadedUrl: ""
       };
       const windowMinBtn = document.getElementById("windowMinBtn");
       const windowMaxBtn = document.getElementById("windowMaxBtn");
       const windowCloseBtn = document.getElementById("windowCloseBtn");
-      const setStatus = (text) => {
-        previewState.status = String(text || "");
-        if (statusEl) statusEl.textContent = previewState.status;
-      };
       const normalizeUrl = (value) => {
         try {
           const parsed = new URL(value);
@@ -546,16 +607,27 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
           return null;
         }
       };
-      const tryNavigate = (nextUrl, attempts = 0) => {
+      const syncButtons = () => {
+        if (!view) {
+          return;
+        }
+        if (backBtn) backBtn.disabled = !view.canGoBack();
+        if (forwardBtn) forwardBtn.disabled = !view.canGoForward();
+      };
+      const tryNavigate = (nextUrl) => {
         const normalized = normalizeUrl(nextUrl);
         if (!normalized) {
-          setStatus(allowLocalOnly ? "Invalid preview URL. Use localhost/127.0.0.1." : "Invalid URL.");
+          if (urlInput) {
+            urlInput.value = previewState.lastLoadedUrl || previewState.lastRequestedUrl || "${safeUrl}";
+          }
           return false;
         }
         previewState.lastRequestedUrl = normalized;
-        if (urlInput) urlInput.value = normalized;
-        frame.src = normalized;
-        setStatus(attempts > 0 ? "Retrying..." : "Loading...");
+        if (urlInput) {
+          urlInput.value = normalized;
+        }
+        view.loadURL(normalized);
+        syncButtons();
         return true;
       };
       window.__codeappPreviewBrowser = {
@@ -563,9 +635,7 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
         getState: () => ({ ...previewState }),
         navigate: (nextUrl) => tryNavigate(nextUrl)
       };
-      window.__codeappNavigate = (nextUrl) => {
-        return tryNavigate(nextUrl);
-      };
+      window.__codeappNavigate = (nextUrl) => tryNavigate(nextUrl);
       const syncWindowState = async () => {
         if (!api?.windowControls || !windowMaxBtn) {
           return;
@@ -601,41 +671,62 @@ const buildPreviewPopoutHtml = (initialUrl: string, allowLocalOnly = true) => {
           window.close();
         });
       }
-      frame.addEventListener("load", () => {
-        let href = "";
-        try {
-          href = frame.contentWindow ? String(frame.contentWindow.location.href || "") : "";
-        } catch {
-          // Cross-origin iframe access throws in data: origin; treat as successful load.
-          setStatus("Loaded");
-          return;
-        }
-
-        if (href.startsWith("chrome-error://")) {
-          setStatus("Server not ready, retrying...");
-          const target = urlInput ? urlInput.value : "";
-          setTimeout(() => {
-            frame.src = target;
-          }, 500);
-          return;
-        }
-        previewState.lastLoadedUrl = href || frame.src || "";
-        setStatus("Loaded");
-      });
-      document.getElementById("goBtn").addEventListener("click", () => {
-        tryNavigate(urlInput.value);
-      });
-      document.getElementById("refreshBtn").addEventListener("click", () => {
-        frame.src = frame.src;
-        setStatus("Refreshing...");
-      });
+      if (backBtn) {
+        backBtn.addEventListener("click", () => {
+          if (view.canGoBack()) {
+            view.goBack();
+          }
+        });
+      }
+      if (forwardBtn) {
+        forwardBtn.addEventListener("click", () => {
+          if (view.canGoForward()) {
+            view.goForward();
+          }
+        });
+      }
+      if (refreshBtn) {
+        refreshBtn.addEventListener("click", () => {
+          view.reload();
+        });
+      }
+      if (openExternalBtn) {
+        openExternalBtn.addEventListener("click", () => {
+          const target = previewState.lastLoadedUrl || previewState.lastRequestedUrl || urlInput.value;
+          api?.preview?.openExternal?.({ url: target }).catch(() => undefined);
+        });
+      }
       urlInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
           event.preventDefault();
           tryNavigate(urlInput.value);
         }
       });
+      view.addEventListener("did-start-loading", () => {
+        syncButtons();
+      });
+      view.addEventListener("did-stop-loading", () => {
+        syncButtons();
+      });
+      view.addEventListener("did-fail-load", () => {
+        syncButtons();
+      });
+      view.addEventListener("did-navigate", (event) => {
+        previewState.lastLoadedUrl = String(event.url || "");
+        if (urlInput) {
+          urlInput.value = previewState.lastLoadedUrl || urlInput.value;
+        }
+        syncButtons();
+      });
+      view.addEventListener("did-navigate-in-page", (event) => {
+        previewState.lastLoadedUrl = String(event.url || "");
+        if (urlInput) {
+          urlInput.value = previewState.lastLoadedUrl || urlInput.value;
+        }
+        syncButtons();
+      });
       tryNavigate("${safeUrl}");
+      syncButtons();
       syncWindowState().catch(() => undefined);
     </script>
   </body>
@@ -647,17 +738,18 @@ const formatPreviewWindowTitle = (projectName?: string) => {
   return name ? `${PREVIEW_WINDOW_TITLE_BASE} — ${name}` : PREVIEW_WINDOW_TITLE_BASE;
 };
 
-const ensurePreviewPopout = async (url: string, projectName?: string) => {
+const ensurePreviewPopout = async (url: string, projectId?: string, projectName?: string) => {
   const isMac = process.platform === "darwin";
   if (!isAllowedPreviewUrl(url)) {
     throw new Error("Preview URL must target localhost or 127.0.0.1 over http/https.");
   }
+  const partition = getPreviewPartition(projectId);
   if (!previewPopoutWindow || previewPopoutWindow.isDestroyed()) {
     previewPopoutWindow = new BrowserWindow({
-      width: 420,
-      height: 780,
-      minWidth: 320,
-      minHeight: 480,
+      width: 1200,
+      height: 900,
+      minWidth: 820,
+      minHeight: 620,
       title: formatPreviewWindowTitle(projectName),
       frame: isMac,
       titleBarStyle: isMac ? "hiddenInset" : "default",
@@ -669,11 +761,14 @@ const ensurePreviewPopout = async (url: string, projectName?: string) => {
         preload: join(__dirname, "preload.js"),
         contextIsolation: true,
         sandbox: false,
-        nodeIntegration: false
+        nodeIntegration: false,
+        webviewTag: true
       }
     });
     previewPopoutWindow.on("closed", () => {
       previewPopoutWindow = null;
+      previewPopoutCurrentUrl = null;
+      previewPopoutCurrentProjectId = null;
       BrowserWindow.getAllWindows().forEach((window) => {
         if (!window.isDestroyed()) {
           window.webContents.send(IPC_CHANNELS.previewEvent, { type: "popout_closed" });
@@ -682,25 +777,38 @@ const ensurePreviewPopout = async (url: string, projectName?: string) => {
     });
   }
   previewPopoutWindow.setTitle(formatPreviewWindowTitle(projectName));
-  await loadEmbeddedBrowserWindow(previewPopoutWindow, url, true);
+  await loadEmbeddedBrowserWindow(previewPopoutWindow, url, partition, false);
+  previewPopoutCurrentUrl = url;
+  previewPopoutCurrentProjectId = projectId ?? null;
   previewPopoutWindow.show();
   previewPopoutWindow.focus();
 };
 
-const navigatePreviewPopout = async (url: string, projectName?: string) => {
+const navigatePreviewPopout = async (url: string, projectId?: string, projectName?: string) => {
   if (!isAllowedPreviewUrl(url)) {
     throw new Error("Preview URL must target localhost or 127.0.0.1 over http/https.");
   }
+  const partition = getPreviewPartition(projectId);
   if (!previewPopoutWindow || previewPopoutWindow.isDestroyed()) {
-    await ensurePreviewPopout(url, projectName);
+    await ensurePreviewPopout(url, projectId, projectName);
     return;
   }
   previewPopoutWindow.setTitle(formatPreviewWindowTitle(projectName));
+  if (previewPopoutCurrentProjectId !== (projectId ?? null)) {
+    await loadEmbeddedBrowserWindow(previewPopoutWindow, url, partition, false);
+    previewPopoutCurrentUrl = url;
+    previewPopoutCurrentProjectId = projectId ?? null;
+    previewPopoutWindow.show();
+    previewPopoutWindow.focus();
+    return;
+  }
   try {
     await navigateEmbeddedBrowserWindow(previewPopoutWindow, url);
   } catch {
-    await loadEmbeddedBrowserWindow(previewPopoutWindow, url, true);
+    await loadEmbeddedBrowserWindow(previewPopoutWindow, url, partition, false);
   }
+  previewPopoutCurrentUrl = url;
+  previewPopoutCurrentProjectId = projectId ?? null;
   previewPopoutWindow.show();
   previewPopoutWindow.focus();
 };
@@ -1381,8 +1489,8 @@ const buildGitPopoutHtml = (projectId: string, projectName?: string) => {
 </html>`;
 };
 
-const loadEmbeddedBrowserWindow = async (window: BrowserWindow, url: string, allowLocalOnly: boolean) => {
-  const html = buildPreviewPopoutHtml(url, allowLocalOnly);
+const loadEmbeddedBrowserWindow = async (window: BrowserWindow, url: string, partition: string, allowLocalOnly: boolean) => {
+  const html = buildBrowserShellHtml(url, partition, allowLocalOnly);
   const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
   await window.loadURL(dataUrl);
 };
@@ -1450,7 +1558,7 @@ const ensureWebLinkWindow = async (url: string, name?: string, projectName?: str
   try {
     await navigateEmbeddedBrowserWindow(webLinkWindow, url);
   } catch {
-    await loadEmbeddedBrowserWindow(webLinkWindow, url, false);
+    await loadEmbeddedBrowserWindow(webLinkWindow, url, WEBLINK_PARTITION, false);
   }
   webLinkCurrentUrl = url;
   webLinkWindow.show();
@@ -1572,7 +1680,8 @@ const ensureCodePanelWindow = async (projectId?: string, projectName?: string) =
         preload: join(__dirname, "preload.js"),
         contextIsolation: true,
         sandbox: false,
-        nodeIntegration: false
+        nodeIntegration: false,
+        webviewTag: true
       }
     });
     codePanelWindow.on("closed", () => {
@@ -1649,8 +1758,11 @@ const bootstrap = async () => {
       webPreferences.nodeIntegration = false;
       webPreferences.contextIsolation = true;
       webPreferences.sandbox = true;
+      const ownerWindow = BrowserWindow.fromWebContents(contents);
       const src = typeof params.src === "string" ? params.src : "";
-      if (!isAllowedPreviewUrl(src)) {
+      const allowAnyHttpUrl = ownerWindow === previewPopoutWindow || ownerWindow === webLinkWindow;
+      const isAllowedSrc = allowAnyHttpUrl ? isAllowedWebLinkUrl(src) : isAllowedPreviewUrl(src);
+      if (!isAllowedSrc) {
         attachEvent.preventDefault();
       }
     });
@@ -1678,8 +1790,8 @@ const bootstrap = async () => {
     sessionManager,
     projectTerminalManager,
     preview: {
-      openPopout: async (url: string, projectName?: string) => {
-        await ensurePreviewPopout(url, projectName);
+      openPopout: async (url: string, projectId?: string, projectName?: string) => {
+        await ensurePreviewPopout(url, projectId, projectName);
         return { ok: true };
       },
       closePopout: async () => {
@@ -1687,10 +1799,19 @@ const bootstrap = async () => {
           previewPopoutWindow.close();
         }
         previewPopoutWindow = null;
+        previewPopoutCurrentUrl = null;
+        previewPopoutCurrentProjectId = null;
         return { ok: true };
       },
-      navigate: async (url: string, projectName?: string) => {
-        await navigatePreviewPopout(url, projectName);
+      navigate: async (url: string, projectId?: string, projectName?: string) => {
+        await navigatePreviewPopout(url, projectId, projectName);
+        return { ok: true };
+      },
+      openExternal: async (url: string) => {
+        if (!isAllowedWebLinkUrl(url)) {
+          return { ok: false };
+        }
+        await shell.openExternal(url);
         return { ok: true };
       },
       openDevTools: async () => {

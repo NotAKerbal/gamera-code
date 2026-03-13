@@ -14,6 +14,7 @@ import type {
   InstallStatus,
   OpenCodeAuthStatus,
   PermissionMode,
+  ProjectBrowserMode,
   ProjectTerminalSwitchBehavior,
   SystemTerminalOption,
   SkillRecord
@@ -394,6 +395,23 @@ export const SettingsModal = memo(({
 
               <section className="rounded-xl border border-border/80 bg-black/20 py-2">
                 <div className="mb-1 px-4 text-xs uppercase tracking-wide text-muted">Interface</div>
+                <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="text-sm text-muted">Browser mode</div>
+                  <CustomSelect
+                    value={settings.browserMode ?? "in_app"}
+                    options={[
+                      { value: "in_app", label: "In-App Browser" },
+                      { value: "default_browser", label: "Default Browser" }
+                    ]}
+                    onChange={(value) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        browserMode: value as ProjectBrowserMode
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mx-2 border-t border-border/70" />
                 <div className="mx-2 grid items-center gap-3 px-2 py-3 md:grid-cols-[220px_minmax(0,1fr)]">
                   <div className="text-sm text-muted">Use turtle spinners</div>
                   <ToggleButton

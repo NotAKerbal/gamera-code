@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
   binaryOverrides: {},
   envVars: {},
   defaultProjectDirectory: "",
+  browserMode: "in_app",
   autoRenameThreadTitles: true,
   showThreadSummaries: true,
   useTurtleSpinners: false,
@@ -151,6 +152,7 @@ interface ProjectSettingsRow {
   web_links_json: string;
   overflow_action_command_ids_json: string;
   browser_enabled: number;
+  browser_mode: string;
   stay_running_actions: number;
   default_dev_command_id: string | null;
   auto_start_dev_terminal: number;
@@ -742,6 +744,7 @@ export class Repository {
       web_links_json: JSON.stringify([]),
       overflow_action_command_ids_json: JSON.stringify([]),
       browser_enabled: 1,
+      browser_mode: "in_app",
       stay_running_actions: 0,
       default_dev_command_id: DEFAULT_DEV_COMMAND.id,
       auto_start_dev_terminal: 1,
@@ -760,6 +763,7 @@ export class Repository {
           web_links_json,
           overflow_action_command_ids_json,
           browser_enabled,
+          browser_mode,
           stay_running_actions,
           default_dev_command_id,
           auto_start_dev_terminal,
@@ -774,6 +778,7 @@ export class Repository {
           @web_links_json,
           @overflow_action_command_ids_json,
           @browser_enabled,
+          @browser_mode,
           @stay_running_actions,
           @default_dev_command_id,
           @auto_start_dev_terminal,

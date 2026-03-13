@@ -86,6 +86,7 @@ export const initializeDatabase = (dbPath: string) => {
       web_links_json TEXT NOT NULL DEFAULT '[]',
       overflow_action_command_ids_json TEXT NOT NULL DEFAULT '[]',
       browser_enabled INTEGER NOT NULL DEFAULT 1,
+      browser_mode TEXT NOT NULL DEFAULT 'in_app',
       stay_running_actions INTEGER NOT NULL DEFAULT 0,
       default_dev_command_id TEXT,
       auto_start_dev_terminal INTEGER NOT NULL DEFAULT 1,
@@ -174,6 +175,10 @@ export const initializeDatabase = (dbPath: string) => {
   const hasBrowserEnabledColumn = projectSettingsColumns.some((column) => column.name === "browser_enabled");
   if (!hasBrowserEnabledColumn) {
     db.exec("ALTER TABLE project_settings ADD COLUMN browser_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasBrowserModeColumn = projectSettingsColumns.some((column) => column.name === "browser_mode");
+  if (!hasBrowserModeColumn) {
+    db.exec("ALTER TABLE project_settings ADD COLUMN browser_mode TEXT NOT NULL DEFAULT 'in_app';");
   }
   const hasWebLinksColumn = projectSettingsColumns.some((column) => column.name === "web_links_json");
   if (!hasWebLinksColumn) {

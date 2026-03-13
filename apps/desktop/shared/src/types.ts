@@ -96,6 +96,7 @@ export interface PromptAttachment {
 }
 
 export type ProjectTemplateId = "nextjs" | "electron";
+export type ProjectBrowserMode = "in_app" | "default_browser";
 
 export interface Project {
   id: string;
@@ -403,6 +404,7 @@ export interface ThreadMetadataSuggestion {
 export interface AppSettings {
   permissionMode: PermissionMode;
   theme?: AppTheme;
+  browserMode?: ProjectBrowserMode;
   defaultHarnessId?: HarnessId;
   harnessSettings: HarnessSettings;
   binaryOverrides: Partial<Record<Provider, string>>;

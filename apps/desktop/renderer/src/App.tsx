@@ -1073,6 +1073,11 @@ export const App = () => {
     [activeProjectId, projectSettingsById]
   );
   const activeProjectBrowserEnabled = activeProjectSettings?.browserEnabled ?? true;
+  const activeProjectBrowserMode = settings.browserMode ?? "in_app";
+  const activeProjectPreviewPartition = useMemo(
+    () => (activeProjectId ? `persist:codeapp-preview-${activeProjectId.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-") || "default"}` : "persist:codeapp-preview-default"),
+    [activeProjectId]
+  );
   const activeProjectWebLinks = useMemo(
     () => activeProjectSettings?.webLinks ?? [],
     [activeProjectSettings?.webLinks]
@@ -3363,14 +3368,14 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
-    if (activeProjectBrowserEnabled || !isPreviewPoppedOut) {
+    if ((activeProjectBrowserEnabled && activeProjectBrowserMode === "in_app") || !isPreviewPoppedOut) {
       return;
     }
     api.preview.closePopout().catch((error) => {
       setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]);
     });
     setIsPreviewPoppedOut(false);
-  }, [activeProjectBrowserEnabled, isPreviewPoppedOut]);
+  }, [activeProjectBrowserEnabled, activeProjectBrowserMode, isPreviewPoppedOut]);
 
   useEffect(() => {
     if (!activeProjectBrowserEnabled && isPreviewOpen) {
@@ -3382,7 +3387,7 @@ export const App = () => {
     if (!isPreviewPoppedOut || !activeProjectPreviewUrl) {
       return;
     }
-    api.preview.navigate({ url: activeProjectPreviewUrl, projectName: activeProject?.name }).catch((error) => {
+    api.preview.navigate({ url: activeProjectPreviewUrl, projectId: activeProjectId ?? undefined, projectName: activeProject?.name }).catch((error) => {
       setLogs((prev) => [...prev, `Preview pop-out navigate failed: ${String(error)}`]);
     });
   }, [isPreviewPoppedOut, activeProjectPreviewUrl, activeProjectId, activeProject]);
@@ -5207,15 +5212,29 @@ export const App = () => {
   };
 
   const reloadPreviewPane = () => {
+    if (activeProjectBrowserMode === "default_browser") {
+      return;
+    }
     const webview = previewWebviewRef.current as { reload?: () => void } | null;
     webview?.reload?.();
+  };
+
+  const openPreviewInDefaultBrowser = async () => {
+    if (!activeProjectPreviewUrl) {
+      return;
+    }
+    await api.preview.openExternal({ url: activeProjectPreviewUrl });
   };
 
   const popoutPreview = async () => {
     if (!activeProjectPreviewUrl || !activeProjectBrowserEnabled) {
       return;
     }
-    await api.preview.openPopout({ url: activeProjectPreviewUrl, projectName: activeProject?.name });
+    if (activeProjectBrowserMode === "default_browser") {
+      await openPreviewInDefaultBrowser();
+      return;
+    }
+    await api.preview.openPopout({ url: activeProjectPreviewUrl, projectId: activeProjectId ?? undefined, projectName: activeProject?.name });
     setIsPreviewPoppedOut(true);
   };
 
@@ -5225,6 +5244,9 @@ export const App = () => {
   };
 
   const openPreviewDevTools = async () => {
+    if (activeProjectBrowserMode === "default_browser") {
+      return;
+    }
     if (isPreviewPoppedOut) {
       await api.preview.openDevTools();
       return;
@@ -10087,25 +10109,35 @@ TODO: Describe what this skill does.
                     <div className="flex items-center justify-between border-b border-border/80 px-3 py-2">
                       <div className="text-xs uppercase tracking-[0.16em] text-muted">Project Dev</div>
                       <div className="flex items-center gap-1">
-                        <button className="btn-ghost" onClick={reloadPreviewPane} disabled={!activeProjectPreviewUrl || isPreviewPoppedOut}>
-                          Reload
-                        </button>
                         <button
                           className="btn-ghost"
-                          onClick={() => openPreviewDevTools().catch((error) => setLogs((prev) => [...prev, `Preview DevTools failed: ${String(error)}`]))}
+                          onClick={() => openPreviewInDefaultBrowser().catch((error) => setLogs((prev) => [...prev, `Preview open default failed: ${String(error)}`]))}
+                          disabled={!activeProjectPreviewUrl}
                         >
-                          DevTools
+                          Open Default
                         </button>
-                        {activeProjectBrowserEnabled &&
-                          (!isPreviewPoppedOut ? (
-                            <button className="btn-ghost" onClick={() => popoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview pop-out failed: ${String(error)}`]))} disabled={!activeProjectPreviewUrl}>
-                              Pop Out
+                        {activeProjectBrowserEnabled && activeProjectBrowserMode === "in_app" && (
+                          <>
+                            <button className="btn-ghost" onClick={reloadPreviewPane} disabled={!activeProjectPreviewUrl || isPreviewPoppedOut}>
+                              Reload
                             </button>
-                          ) : (
-                            <button className="btn-ghost" onClick={() => closePopoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]))}>
-                              Close Pop-out
+                            <button
+                              className="btn-ghost"
+                              onClick={() => openPreviewDevTools().catch((error) => setLogs((prev) => [...prev, `Preview DevTools failed: ${String(error)}`]))}
+                            >
+                              DevTools
                             </button>
-                          ))}
+                            {!isPreviewPoppedOut ? (
+                              <button className="btn-ghost" onClick={() => popoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview pop-out failed: ${String(error)}`]))} disabled={!activeProjectPreviewUrl}>
+                                Pop Out
+                              </button>
+                            ) : (
+                              <button className="btn-ghost" onClick={() => closePopoutPreview().catch((error) => setLogs((prev) => [...prev, `Preview close failed: ${String(error)}`]))}>
+                                Close Pop-out
+                              </button>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -10115,12 +10147,24 @@ TODO: Describe what this skill does.
                           {activeProjectPreviewUrl || "Start dev command to detect browser URL."}
                         </div>
                         <div className="min-h-0 flex-1">
-                          {activeProjectBrowserEnabled && activeProjectPreviewUrl ? (
+                          {activeProjectBrowserEnabled && activeProjectBrowserMode === "in_app" && activeProjectPreviewUrl ? (
                             <webview
                               ref={previewWebviewRef}
                               src={activeProjectPreviewUrl}
+                              partition={activeProjectPreviewPartition}
                               className="h-full w-full"
                             />
+                          ) : activeProjectBrowserEnabled && activeProjectBrowserMode === "default_browser" ? (
+                            <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center text-sm text-muted">
+                              <div>Preview is configured to open in the user&apos;s default browser.</div>
+                              <button
+                                className="btn-secondary"
+                                onClick={() => openPreviewInDefaultBrowser().catch((error) => setLogs((prev) => [...prev, `Preview open default failed: ${String(error)}`]))}
+                                disabled={!activeProjectPreviewUrl}
+                              >
+                                Open Preview
+                              </button>
+                            </div>
                           ) : (
                             <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted">
                               {activeProjectBrowserEnabled ? "No browser URL detected yet." : "Browser is disabled for this project."}

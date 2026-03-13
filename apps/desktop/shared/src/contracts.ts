@@ -112,9 +112,10 @@ export interface DesktopApi {
     onEvent: (listener: (event: ProjectTerminalEvent) => void) => () => void;
   };
   preview: {
-    openPopout: (input: { url: string; projectName?: string }) => Promise<{ ok: boolean }>;
+    openPopout: (input: { url: string; projectId?: string; projectName?: string }) => Promise<{ ok: boolean }>;
     closePopout: () => Promise<{ ok: boolean }>;
-    navigate: (input: { url: string; projectName?: string }) => Promise<{ ok: boolean }>;
+    navigate: (input: { url: string; projectId?: string; projectName?: string }) => Promise<{ ok: boolean }>;
+    openExternal: (input: { url: string }) => Promise<{ ok: boolean }>;
     openDevTools: () => Promise<{ ok: boolean }>;
     onEvent: (listener: (event: PreviewEvent) => void) => () => void;
   };

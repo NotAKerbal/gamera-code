@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.6
+- Improved browser
+- Improved hotkeys
+
 ## 0.6.5
 - Improved terminals
 

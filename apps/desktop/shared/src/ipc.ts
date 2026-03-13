@@ -38,6 +38,7 @@ export const IPC_CHANNELS = {
   previewOpenPopout: "preview:openPopout",
   previewClosePopout: "preview:closePopout",
   previewNavigate: "preview:navigate",
+  previewOpenExternal: "preview:openExternal",
   previewOpenDevTools: "preview:openDevTools",
   previewEvent: "preview:event",
   codePanelOpenPopout: "codePanel:openPopout",

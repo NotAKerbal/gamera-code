@@ -242,6 +242,7 @@ const api: DesktopApiWithGitExtras = {
     openPopout: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewOpenPopout, input),
     closePopout: () => ipcRenderer.invoke(IPC_CHANNELS.previewClosePopout),
     navigate: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewNavigate, input),
+    openExternal: (input) => ipcRenderer.invoke(IPC_CHANNELS.previewOpenExternal, input),
     openDevTools: () => ipcRenderer.invoke(IPC_CHANNELS.previewOpenDevTools),
     onEvent: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, payload: PreviewEvent) => listener(payload);
