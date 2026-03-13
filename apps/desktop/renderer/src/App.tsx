@@ -5424,7 +5424,7 @@ export const App = () => {
 
   useEffect(() => {
     const syncCtrlSwitchHintVisibility = (event: KeyboardEvent) => {
-      setIsCtrlSwitchHintVisible(event.ctrlKey);
+      setIsCtrlSwitchHintVisible(event.altKey);
     };
 
     const hideCtrlSwitchHintVisibility = () => {
@@ -5444,7 +5444,7 @@ export const App = () => {
 
   useEffect(() => {
     const syncAltThreadSwitchHintVisibility = (event: KeyboardEvent) => {
-      setIsAltThreadSwitchHintVisible(event.altKey);
+      setIsAltThreadSwitchHintVisible(event.ctrlKey);
     };
 
     const hideAltThreadSwitchHintVisibility = () => {
@@ -5467,7 +5467,14 @@ export const App = () => {
       if (event.isComposing || event.repeat) {
         return;
       }
-      if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+        const alphaKey = event.key.toLowerCase();
+        if (alphaKey === "a") {
+          if (toggleArchivedThreadsForActiveProject()) {
+            event.preventDefault();
+          }
+          return;
+        }
         const digitKey = /^[1-9]$/.test(event.key)
           ? event.key
           : event.code.startsWith("Digit") && /^[1-9]$/.test(event.code.slice(5))
@@ -5480,9 +5487,9 @@ export const App = () => {
           return;
         }
       }
-      const usesProjectSwitchModifier = event.ctrlKey;
+      const usesProjectSwitchModifier = event.altKey;
       const usesPlatformModifier = isMacOS ? event.metaKey : event.ctrlKey;
-      if (usesProjectSwitchModifier && !event.shiftKey && !event.altKey) {
+      if (usesProjectSwitchModifier && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
         const key = event.key.toLowerCase();
         if (/^[1-9]$/.test(key)) {
           if (focusProjectByShortcutIndex(Number(key) - 1)) {
@@ -5539,7 +5546,8 @@ export const App = () => {
     focusThreadByShortcutIndex,
     runShortcutByKey,
     startActiveProjectTerminal,
-    stopActiveProjectTerminal
+    stopActiveProjectTerminal,
+    toggleArchivedThreadsForActiveProject
   ]);
 
   useEffect(() => {
@@ -5631,6 +5639,21 @@ export const App = () => {
       return false;
     }
     activateThreadFromSidebar(activeProjectId, targetRow.thread.id);
+    return true;
+  }
+
+  function toggleArchivedThreadsForActiveProject() {
+    if (!activeProjectId) {
+      return false;
+    }
+    const threadRows = threadRowsByProjectId[activeProjectId];
+    if (!threadRows || threadRows.archived.length === 0) {
+      return false;
+    }
+    setShowArchivedByProjectId((prev) => ({
+      ...prev,
+      [activeProjectId]: !(prev[activeProjectId] ?? false)
+    }));
     return true;
   }
 
@@ -8906,9 +8929,21 @@ TODO: Describe what this skill does.
                               title="View archived threads"
                             >
                               {showArchived ? (
-                                "Hide archived"
+                                <>
+                                  {isAltThreadSwitchHintVisible && (
+                                    <span className="thread-shortcut-badge" aria-hidden="true">
+                                      A
+                                    </span>
+                                  )}
+                                  <span>Hide archived</span>
+                                </>
                               ) : (
                                 <>
+                                  {isAltThreadSwitchHintVisible && (
+                                    <span className="thread-shortcut-badge" aria-hidden="true">
+                                      A
+                                    </span>
+                                  )}
                                   <span>View archived</span>
                                   <span className="thread-archived-count-chip" aria-label={`${archivedRows.length} archived threads`}>
                                     {archivedRows.length}

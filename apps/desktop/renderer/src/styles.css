@@ -1548,7 +1548,7 @@ webview {
 }
 
 .thread-archived-toggle {
-  @apply mt-1 flex flex-1 items-center justify-between rounded-md bg-panel/35 px-2 py-1 text-left text-[11px] text-muted transition hover:bg-panel/75 hover:text-accent;
+  @apply mt-1 flex flex-1 items-center justify-between gap-2 rounded-md bg-panel/35 px-2 py-1 text-left text-[11px] text-muted transition hover:bg-panel/75 hover:text-accent;
 }
 
 .thread-archived-controls {
