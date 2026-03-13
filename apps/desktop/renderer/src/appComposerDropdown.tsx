@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { memo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { memo, useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CodexSandboxMode, CodexThreadOptions, HarnessId } from "@code-app/shared";
 import {
   APPROVAL_OPTIONS,
@@ -55,6 +55,29 @@ const ComposerDropdownPortalComponent = ({
     canSwitchHarnesses,
     showUnavailableModels: !canSwitchHarnesses || visibleHarnessCount <= 1
   });
+  const [activeProviderId, setActiveProviderId] = useState<string>(providerModelGroups[0]?.id ?? "");
+
+  useEffect(() => {
+    if (providerModelGroups.length === 0) {
+      if (activeProviderId) {
+        setActiveProviderId("");
+      }
+      return;
+    }
+
+    const selectedGroup = providerModelGroups.find((group) => group.rows.some((row) => row.selected));
+    if (!activeProviderId && selectedGroup) {
+      setActiveProviderId(selectedGroup.id);
+      return;
+    }
+
+    if (!providerModelGroups.some((group) => group.id === activeProviderId)) {
+      setActiveProviderId(selectedGroup?.id ?? providerModelGroups[0]!.id);
+    }
+  }, [activeProviderId, providerModelGroups]);
+
+  const activeProviderGroup =
+    providerModelGroups.find((group) => group.id === activeProviderId) ?? providerModelGroups[0] ?? null;
 
   if (!composerDropdown && !pendingDangerSandboxMode) {
     return null;
@@ -84,64 +107,108 @@ const ComposerDropdownPortalComponent = ({
         >
           <div className={composerDropdown.kind === "model" ? "composer-model-dropdown-list" : "branch-dropdown-list"}>
             {composerDropdown.kind === "model" && (
-              <div className={visibleHarnessCount <= 1 ? "composer-model-groups composer-model-groups-single" : "composer-model-groups"}>
-                {providerModelGroups.map((group) => (
-                  <section key={group.id} className="composer-model-group">
-                    <div className="composer-model-group-header">
-                      <div className="composer-model-group-title">{group.label}</div>
-                      <div className="composer-model-group-meta">
-                        {group.rows.length} model{group.rows.length === 1 ? "" : "s"}
-                      </div>
-                    </div>
-                    <div className="composer-model-group-items">
-                      {group.rows.map((row) => (
-                        <div
-                          key={row.id}
-                          className={row.selected ? "composer-model-row composer-model-row-current" : "composer-model-row"}
-                        >
-                          <button
-                            className="composer-model-row-main"
-                            disabled={row.preferredHarness.disabled}
-                            data-app-tooltip={row.tooltip}
-                            title={row.tooltip}
-                            onClick={() => {
-                              onSelectHarnessModel(row.preferredHarness.harnessId, row.preferredHarness.model);
-                              setComposerDropdown(null);
-                            }}
-                          >
-                            <span className="composer-model-option-name">{row.displayName}</span>
-                          </button>
-                          <div className="composer-model-row-badges">
-                            {row.harnesses.map((harness) => (
-                              <button
-                                key={`${row.id}:${harness.harnessId}`}
-                                className={
-                                  harness.selected
-                                    ? "composer-model-harness-badge composer-model-harness-badge-current"
-                                    : "composer-model-harness-badge"
-                                }
-                                disabled={harness.disabled}
-                                data-app-tooltip={harness.tooltip}
-                                title={harness.tooltip}
-                                aria-label={harness.tooltip}
-                                onClick={() => {
-                                  onSelectHarnessModel(harness.harnessId, harness.model);
-                                  setComposerDropdown(null);
-                                }}
-                              >
-                                <HarnessBadge
-                                  harness={{ label: harness.harnessLabel, badge: harness.badge }}
-                                  showLabel={false}
-                                  className="composer-model-harness-badge-visual"
-                                />
-                              </button>
-                            ))}
-                          </div>
+              <div className="composer-model-tiered">
+                <div className="composer-model-provider-list" role="tablist" aria-label="Providers">
+                  {providerModelGroups.map((group) => {
+                    const isActive = activeProviderGroup?.id === group.id;
+                    const providerUnavailable = group.rows.every((row) => row.harnesses.every((harness) => harness.disabled));
+                    return (
+                      <button
+                        key={group.id}
+                        className={
+                          providerUnavailable
+                            ? "composer-model-provider composer-model-provider-disabled"
+                            : isActive
+                            ? "composer-model-provider composer-model-provider-active"
+                              : "composer-model-provider"
+                        }
+                        role="tab"
+                        aria-selected={isActive}
+                        disabled={providerUnavailable}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          if (!providerUnavailable) {
+                            setActiveProviderId(group.id);
+                          }
+                        }}
+                        onFocus={() => {
+                          if (!providerUnavailable) {
+                            setActiveProviderId(group.id);
+                          }
+                        }}
+                        onClick={() => {
+                          if (!providerUnavailable) {
+                            setActiveProviderId(group.id);
+                          }
+                        }}
+                      >
+                        <span className="composer-model-provider-label">{group.label}</span>
+                        <span className="composer-model-provider-meta">
+                          {group.rows.length} model{group.rows.length === 1 ? "" : "s"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="composer-model-provider-panel">
+                  {activeProviderGroup ? (
+                    <>
+                      <div className="composer-model-group-header">
+                        <div className="composer-model-group-title">{activeProviderGroup.label}</div>
+                        <div className="composer-model-group-meta">
+                          {activeProviderGroup.rows.length} model{activeProviderGroup.rows.length === 1 ? "" : "s"}
                         </div>
-                      ))}
-                    </div>
-                  </section>
-                ))}
+                      </div>
+                      <div className="composer-model-group-items">
+                        {activeProviderGroup.rows.map((row) => (
+                          <div
+                            key={row.id}
+                            className={row.selected ? "composer-model-row composer-model-row-current" : "composer-model-row"}
+                          >
+                            <button
+                              className="composer-model-row-main"
+                              disabled={row.preferredHarness.disabled}
+                              data-app-tooltip={row.tooltip}
+                              title={row.tooltip}
+                              onClick={() => {
+                                onSelectHarnessModel(row.preferredHarness.harnessId, row.preferredHarness.model);
+                                setComposerDropdown(null);
+                              }}
+                            >
+                              <span className="composer-model-option-name">{row.displayName}</span>
+                            </button>
+                            <div className="composer-model-row-badges">
+                              {row.harnesses.map((harness) => (
+                                <button
+                                  key={`${row.id}:${harness.harnessId}`}
+                                  className={
+                                    harness.selected
+                                      ? "composer-model-harness-badge composer-model-harness-badge-current"
+                                      : "composer-model-harness-badge"
+                                  }
+                                  disabled={harness.disabled}
+                                  data-app-tooltip={harness.tooltip}
+                                  title={harness.tooltip}
+                                  aria-label={harness.tooltip}
+                                  onClick={() => {
+                                    onSelectHarnessModel(harness.harnessId, harness.model);
+                                    setComposerDropdown(null);
+                                  }}
+                                >
+                                  <HarnessBadge
+                                    harness={{ label: harness.harnessLabel, badge: harness.badge }}
+                                    showLabel={false}
+                                    className="composer-model-harness-badge-visual"
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
               </div>
             )}
             {composerDropdown.kind === "effort" &&

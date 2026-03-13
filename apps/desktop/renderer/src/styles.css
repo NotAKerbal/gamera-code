@@ -873,17 +873,77 @@ webview {
   padding: 0.55rem;
 }
 
-.composer-model-groups {
+.composer-model-tiered {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  grid-template-columns: minmax(10rem, 12rem) minmax(15rem, 1fr);
   gap: 0.55rem;
+  min-height: 18rem;
 }
 
-.composer-model-groups-single {
-  grid-template-columns: minmax(0, 1fr);
+.composer-model-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  padding: 0.25rem;
+  border: 1px solid rgb(var(--theme-border) / 0.55);
+  border-radius: 0.7rem;
+  background:
+    linear-gradient(180deg, rgb(var(--theme-surface) / 0.52), rgb(var(--theme-panel) / 0.38)),
+    rgb(2 6 23 / 0.16);
 }
 
-.composer-model-group {
+.composer-model-provider {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.08rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  background: transparent;
+  text-align: left;
+  color: rgb(var(--theme-accent));
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.composer-model-provider:hover {
+  background: rgb(var(--theme-panel) / 0.52);
+  color: white;
+}
+
+.composer-model-provider:disabled,
+.composer-model-provider-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.composer-model-provider-active {
+  border-color: rgb(var(--theme-border) / 0.52);
+  background: rgb(var(--theme-panel) / 0.7);
+  color: white;
+}
+
+.composer-model-provider-selected {
+  border-color: rgba(16, 185, 129, 0.32);
+}
+
+.composer-model-provider-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.composer-model-provider-meta {
+  font-size: 0.62rem;
+  color: rgb(var(--theme-muted));
+}
+
+.composer-model-provider-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1033,8 +1093,9 @@ webview {
 }
 
 @media (max-width: 900px) {
-  .composer-model-groups {
+  .composer-model-tiered {
     grid-template-columns: 1fr;
+    min-height: 0;
   }
 }
 
