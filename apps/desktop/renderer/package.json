@@ -1,6 +1,6 @@
 {
   "name": "@code-app/renderer",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -12,7 +12,7 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@code-app/shared": "0.6.6",
+    "@code-app/shared": "0.6.7",
     "@lobehub/icons": "^5.0.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",

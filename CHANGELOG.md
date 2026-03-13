@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.7
+- Improved model picker
+
 ## 0.6.6
 - Improved browser
 - Improved hotkeys
