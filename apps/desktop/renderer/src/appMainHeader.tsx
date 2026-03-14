@@ -226,6 +226,7 @@ const MainHeaderComponent = ({
   const inlineActionMenuRef = useRef<HTMLDivElement | null>(null);
   const overflowActionSubmenuRef = useRef<HTMLDivElement | null>(null);
   const workspaceMenuRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
   const [isTerminalActionsMenuOpen, setIsTerminalActionsMenuOpen] = useState(false);
   const [openInlineActionMenuId, setOpenInlineActionMenuId] = useState<string | null>(null);
   const [openOverflowActionMenuId, setOpenOverflowActionMenuId] = useState<string | null>(null);
@@ -235,6 +236,7 @@ const MainHeaderComponent = ({
   const [workspaceContextMenu, setWorkspaceContextMenu] = useState<{ workspaceId: string; x: number; y: number } | null>(null);
   const [runningTerminalActionId, setRunningTerminalActionId] = useState<string | null>(null);
   const [launchingSystemTerminalId, setLaunchingSystemTerminalId] = useState<string | null>(null);
+  const [headerWidth, setHeaderWidth] = useState(0);
   const platformShortcutModifier = isMacOS ? "Cmd" : "Ctrl";
   const tooltipText = (label: string, detail: string, shortcut?: string) =>
     [label, detail, shortcut ? `Shortcut: ${shortcut}` : null].filter(Boolean).join("\n");
@@ -323,6 +325,12 @@ const MainHeaderComponent = ({
     () => activeProjectTerminals.filter((terminal) => overflowActionIdSet.has(actionKey(terminal))),
     [activeProjectTerminals, overflowActionIdSet]
   );
+  const compactUtilitiesThreshold = 1260 + activeProjectWebLinks.length * 88 + (showUpdatePrompt ? 128 : 0);
+  const collapseActionBarThreshold = 1140 + activeProjectWebLinks.length * 88 + (showUpdatePrompt ? 128 : 0);
+  const shouldCompactUtilityButtons = headerWidth > 0 && headerWidth <= compactUtilitiesThreshold;
+  const shouldCollapseActionBar = headerWidth > 0 && headerWidth <= collapseActionBarThreshold;
+  const visibleActionBarTerminals = shouldCollapseActionBar ? [] : actionBarTerminals;
+  const visibleDropdownTerminals = shouldCollapseActionBar ? activeProjectTerminals : dropdownTerminals;
   const updateOverflowActionIds = async (nextOverflowActionIds: string[]) => {
     const next = Array.from(new Set(nextOverflowActionIds.filter(Boolean)));
     if (!activeProjectId) {
@@ -351,6 +359,29 @@ const MainHeaderComponent = ({
     const actionId = actionKey(terminal);
     void updateOverflowActionIds(Array.from(overflowActionIdSet).filter((id) => id !== actionId));
   };
+
+  useEffect(() => {
+    const headerElement = headerRef.current;
+    if (!headerElement) {
+      return;
+    }
+    const updateWidth = () => {
+      setHeaderWidth(Math.round(headerElement.getBoundingClientRect().width));
+    };
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        window.removeEventListener("resize", updateWidth);
+      };
+    }
+    const observer = new ResizeObserver(() => updateWidth());
+    observer.observe(headerElement);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTerminalActionsMenuOpen) {
@@ -483,11 +514,12 @@ const MainHeaderComponent = ({
 
   return (
     <header
+    ref={headerRef}
     className={`drag-region window-header flex h-12 items-center justify-between border-b border-border/90 px-3 ${
       isMacOS ? "window-header-macos" : useWindowsStyleHeader ? "window-header-windows" : ""
     }`}
   >
-    <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-100">
+    <div className="header-leading flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight text-slate-100">
       <img src={appIconSrc} alt="GameraCode icon" className="h-8 w-8 rounded-xl object-cover" />
       <span>GameraCode</span>
       <div className="relative no-drag" ref={changelogRef}>
@@ -643,49 +675,50 @@ const MainHeaderComponent = ({
         </div>
       ) : null}
     </div>
-    <div className="no-drag flex items-center gap-2">
-      {updateMessage && <span className="hidden text-xs text-slate-400 md:inline">{updateMessage}</span>}
-      {showUpdatePrompt ? (
-        <>
+    <div className="header-trailing no-drag flex min-w-0 items-center gap-2">
+      <div className="header-trailing-main flex min-w-0 items-center gap-2">
+        {updateMessage && <span className="hidden truncate text-xs text-slate-400 md:inline">{updateMessage}</span>}
+        {showUpdatePrompt ? (
+          <>
+            <button
+              className="btn-ghost app-tooltip-target"
+              data-app-tooltip={tooltipText("Install Update", "Download and install the available update.")}
+              aria-label="Install available update"
+              onClick={onApplyUpdate}
+              disabled={updateInstallPending}
+            >
+              {updateInstallPending ? "Installing..." : "Install now"}
+            </button>
+            <button
+              className="btn-ghost app-tooltip-target"
+              data-app-tooltip={tooltipText("Later", "Dismiss this update prompt until next launch.")}
+              aria-label="Remind me later about update"
+              onClick={onDismissUpdate}
+              disabled={updateInstallPending}
+            >
+              Later
+            </button>
+          </>
+        ) : null}
+        {activeProjectWebLinks.map((link) => (
           <button
+            key={link.id}
             className="btn-ghost app-tooltip-target"
-            data-app-tooltip={tooltipText("Install Update", "Download and install the available update.")}
-            aria-label="Install available update"
-            onClick={onApplyUpdate}
-            disabled={updateInstallPending}
+            data-app-tooltip={tooltipText(link.name || "Open Link", `Open: ${link.url}`)}
+            aria-label={link.name || link.url}
+            onClick={() =>
+              onOpenProjectWebLink(link).catch((error) => appendLog(`Open web link failed: ${String(error)}`))
+            }
           >
-            {updateInstallPending ? "Installing..." : "Install now"}
+            <span className="inline-flex items-center gap-1">
+              <FaExternalLinkAlt className="text-[10px]" />
+              {link.name || "Link"}
+            </span>
           </button>
-          <button
-            className="btn-ghost app-tooltip-target"
-            data-app-tooltip={tooltipText("Later", "Dismiss this update prompt until next launch.")}
-            aria-label="Remind me later about update"
-            onClick={onDismissUpdate}
-            disabled={updateInstallPending}
-          >
-            Later
-          </button>
-        </>
-      ) : null}
-      {activeProjectWebLinks.map((link) => (
-        <button
-          key={link.id}
-          className="btn-ghost app-tooltip-target"
-          data-app-tooltip={tooltipText(link.name || "Open Link", `Open: ${link.url}`)}
-          aria-label={link.name || link.url}
-          onClick={() =>
-            onOpenProjectWebLink(link).catch((error) => appendLog(`Open web link failed: ${String(error)}`))
-          }
-        >
-          <span className="inline-flex items-center gap-1">
-            <FaExternalLinkAlt className="text-[10px]" />
-            {link.name || "Link"}
-          </span>
-        </button>
-      ))}
-      <div className="terminal-header-controls">
+        ))}
+        <div className="terminal-header-controls">
         <div className="workspace-segmented-control terminal-actions-group no-drag relative">
-          {actionBarTerminals.map((terminal) => {
+          {visibleActionBarTerminals.map((terminal) => {
             const actionId = actionKey(terminal);
             const isMenuOpen = openInlineActionMenuId === actionId;
             const busyToggleId = `${actionId}:${terminal.running ? "stop" : "start"}`;
@@ -796,7 +829,7 @@ const MainHeaderComponent = ({
             type="button"
             data-app-tooltip={
               activeProjectTerminals.length > 0
-                ? dropdownTerminals.length > 0
+                ? visibleDropdownTerminals.length > 0
                   ? tooltipText("More Actions", "Open the overflow action list and action settings.")
                   : tooltipText("Action Settings", "No actions are in the dropdown. Open action settings.")
                 : tooltipText("Add Action", "Open action settings to add your first action.")
@@ -806,18 +839,18 @@ const MainHeaderComponent = ({
                 onOpenProjectSettings().catch((error) => appendLog(`Open action settings failed: ${String(error)}`));
                 return;
               }
-              if (dropdownTerminals.length === 0) {
+              if (visibleDropdownTerminals.length === 0) {
                 onOpenProjectSettings().catch((error) => appendLog(`Open action settings failed: ${String(error)}`));
                 return;
               }
               setIsTerminalActionsMenuOpen((current) => !current);
             }}
-            aria-label={activeProjectTerminals.length > 0 ? (dropdownTerminals.length > 0 ? "Open action dropdown" : "Open action settings") : "Add action"}
-            aria-expanded={activeProjectTerminals.length > 0 && dropdownTerminals.length > 0 ? isTerminalActionsMenuOpen : undefined}
+            aria-label={activeProjectTerminals.length > 0 ? (visibleDropdownTerminals.length > 0 ? "Open action dropdown" : "Open action settings") : "Add action"}
+            aria-expanded={activeProjectTerminals.length > 0 && visibleDropdownTerminals.length > 0 ? isTerminalActionsMenuOpen : undefined}
             disabled={!activeProjectId}
           >
             <span className="inline-flex items-center gap-1">
-              {activeProjectTerminals.length > 0 && dropdownTerminals.length > 0 ? (
+              {activeProjectTerminals.length > 0 && visibleDropdownTerminals.length > 0 ? (
                 <FaChevronDown className={`text-[10px] transition ${isTerminalActionsMenuOpen ? "rotate-180" : "rotate-0"}`} />
               ) : (
                 <FaCog className="text-[10px]" />
@@ -826,8 +859,8 @@ const MainHeaderComponent = ({
           </button>
           {isTerminalActionsMenuOpen ? (
             <div className="project-action-pop terminal-action-pop" ref={overflowActionMenuRef}>
-              {dropdownTerminals.length > 0
-                ? dropdownTerminals.map((terminal) => {
+              {visibleDropdownTerminals.length > 0
+                ? visibleDropdownTerminals.map((terminal) => {
                     const actionId = actionKey(terminal);
                     const isMenuOpen = openOverflowActionMenuId === actionId;
                     const hasCompleted = !terminal.running && typeof terminal.lastExitCode === "number";
@@ -916,16 +949,18 @@ const MainHeaderComponent = ({
                                 Dismiss
                               </button>
                             ) : null}
-                            <button
-                              className="project-action-item"
-                              onClick={() => {
-                                moveActionToActionBar(terminal);
-                                setIsTerminalActionsMenuOpen(false);
-                                setOpenOverflowActionMenuId(null);
-                              }}
-                            >
-                              Move to action bar
-                            </button>
+                            {!shouldCollapseActionBar ? (
+                              <button
+                                className="project-action-item"
+                                onClick={() => {
+                                  moveActionToActionBar(terminal);
+                                  setIsTerminalActionsMenuOpen(false);
+                                  setOpenOverflowActionMenuId(null);
+                                }}
+                              >
+                                Move to action bar
+                              </button>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -1016,7 +1051,7 @@ const MainHeaderComponent = ({
           ) : null}
         </div>
         <button
-          className={`btn-ghost app-tooltip-target inline-flex items-center gap-1 ${launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? "terminal-launching" : ""}`}
+          className={`btn-ghost header-compact-btn app-tooltip-target inline-flex items-center gap-1 ${shouldCompactUtilityButtons ? "is-icon-only" : ""} ${launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? "terminal-launching" : ""}`}
           data-app-tooltip={tooltipText("Open Terminal", "Open your default system terminal for this project.", `${platformShortcutModifier}+T`)}
           aria-label="Open default terminal"
           onClick={() => launchSystemTerminal()}
@@ -1024,7 +1059,7 @@ const MainHeaderComponent = ({
         >
           <span className="inline-flex items-center gap-1">
             <TerminalGlyph terminalId={defaultSystemTerminal?.id ?? "auto"} />
-            Terminal
+            {!shouldCompactUtilityButtons ? "Terminal" : null}
             {launchingSystemTerminalId === (defaultSystemTerminal?.id ?? "default-terminal") ? (
               <span className="loading-ring" aria-hidden="true" />
             ) : null}
@@ -1032,13 +1067,13 @@ const MainHeaderComponent = ({
         </button>
       </div>
       <button
-        className="btn-ghost app-tooltip-target"
+        className={`btn-ghost header-compact-btn app-tooltip-target ${shouldCompactUtilityButtons ? "is-icon-only" : ""}`}
         data-app-tooltip={tooltipText("Project Files", "Open the active project folder in your file explorer.")}
         aria-label="Open project files"
         onClick={() => onOpenProjectFiles().catch((error) => appendLog(`Open files failed: ${String(error)}`))}
         disabled={!activeProjectId}
       >
-        <span className="inline-flex items-center gap-1"><FaFolderOpen className="text-[10px]" />Files</span>
+        <span className="inline-flex items-center gap-1"><FaFolderOpen className="text-[10px]" />{!shouldCompactUtilityButtons ? "Files" : null}</span>
       </button>
       {activeProjectBrowserEnabled && (
         <button
@@ -1055,7 +1090,7 @@ const MainHeaderComponent = ({
         </button>
       )}
       <button
-        className="btn-ghost app-tooltip-target"
+        className={`btn-ghost header-compact-btn app-tooltip-target ${shouldCompactUtilityButtons ? "is-icon-only" : ""}`}
         data-app-tooltip={
           isCodePanelOpen
             ? tooltipText("Code Panel", "Code panel is already active.")
@@ -1064,7 +1099,7 @@ const MainHeaderComponent = ({
         aria-label={isCodePanelOpen ? "Code panel active" : "Show code panel"}
         onClick={onToggleCodePanel}
       >
-        <span className="inline-flex items-center gap-1"><FaCode className="text-[10px]" />Code</span>
+        <span className="inline-flex items-center gap-1"><FaCode className="text-[10px]" />{!shouldCompactUtilityButtons ? "Code" : null}</span>
       </button>
       <div className="git-header-segmented-control no-drag">
         <button
@@ -1126,6 +1161,7 @@ const MainHeaderComponent = ({
       >
         <FaCog className="text-[11px]" />
       </button>
+      </div>
       {useWindowsStyleHeader ? (
         <div className="window-controls ml-1">
           <button

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.1
+- Better header compaction
+
 ## 0.7.0
 - Gemini CLI support
 

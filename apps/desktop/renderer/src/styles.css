@@ -380,6 +380,21 @@ webview {
   min-height: max(3rem, env(titlebar-area-height, 3rem));
 }
 
+.header-leading {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.header-trailing {
+  flex: 0 1 auto;
+}
+
+.header-trailing-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
 .window-header-windows {
   padding-right: 0.75rem;
 }
@@ -390,6 +405,7 @@ webview {
 
 .window-controls {
   @apply flex items-center gap-1;
+  flex: 0 0 auto;
 }
 
 .window-control-btn {
@@ -440,7 +456,7 @@ webview {
 }
 
 .terminal-header-controls {
-  @apply flex items-center gap-2;
+  @apply flex min-w-0 items-center gap-2;
 }
 
 .terminal-actions-group {
@@ -1467,6 +1483,10 @@ webview {
   @apply rounded-lg border border-transparent bg-transparent px-2.5 py-2 text-sm text-muted transition hover:bg-panel/85 hover:text-accent;
 }
 
+.header-compact-btn.is-icon-only {
+  @apply inline-flex h-8 w-8 items-center justify-center px-0;
+}
+
 .header-pill {
   @apply rounded border border-border/80 bg-panel/70 text-muted transition hover:bg-panel hover:text-accent;
 }
@@ -1500,6 +1520,7 @@ webview {
 
 .workspace-segmented-control {
   @apply ml-2 inline-flex items-center gap-1 rounded-xl border border-border/80 bg-black/25 p-1;
+  max-width: 100%;
 }
 
 .workspace-segment {
